@@ -17,11 +17,19 @@
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "POSTHOG_PROJECT_TOKEN": "phc_wLZvqpCAco2WwSiqjo5TFVEUzbLzKTLGtaA8EdxKmPmn",
+        "POSTHOG_HOST": "https://us.i.posthog.com"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "POSTHOG_PROJECT_TOKEN": "phc_wLZvqpCAco2WwSiqjo5TFVEUzbLzKTLGtaA8EdxKmPmn",
+        "POSTHOG_HOST": "https://us.i.posthog.com"
+      }
     }
   },
   "submit": {
