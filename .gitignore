@@ -64,3 +64,6 @@ Thumbs.db
 
 # Superpowers subagent-driven-development scratch (task briefs, ledger)
 .superpowers/
+
+# One-time Neon -> Supabase data dump (Task 8 of the DB migration plan)
+*.dump
