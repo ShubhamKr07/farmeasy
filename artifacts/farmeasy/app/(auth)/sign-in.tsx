@@ -3,6 +3,7 @@ import * as Linking from "expo-linking";
 import { type Href, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useMemo } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Image,
@@ -71,6 +72,7 @@ export default function SignInPage() {
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
+        posthog.capture("user_signed_in_google", { method: "google_oauth" });
         router.push("/" as Href);
       }
     } catch (err: any) {
@@ -89,6 +91,7 @@ export default function SignInPage() {
       }
 
       if (signIn.status === "complete") {
+        posthog.capture("user_signed_in", { method: "email_password" });
         await finalizeAndGoHome();
       } else if (signIn.status === "needs_client_trust") {
         const emailCodeFactor = signIn.supportedSecondFactors.find(

@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Alert,
@@ -168,6 +169,15 @@ export default function SeedingWizard() {
       });
       queryClient.invalidateQueries({ queryKey: getListCyclesQueryKey({ status: "ongoing" }) });
       queryClient.invalidateQueries({ queryKey: getGetDashboardQueryKey() });
+      posthog.capture("cycle_seeded", {
+        seed_name: cycle.seedName,
+        full_trays: parseInt(form.fullTrays) || 0,
+        half_trays: parseInt(form.halfTrays) || 0,
+        growth_profile_id: form.growthProfileId,
+        growth_profile_name: selectedProfile?.name ?? null,
+        seed_lot_count: form.seedLotQrCodes.length,
+        seeding_date: form.seedingDate,
+      });
       Alert.alert(
         "Cycle Started!",
         `${cycle.seedName} cycle #${cycle.shortId} is now in Germination.`,

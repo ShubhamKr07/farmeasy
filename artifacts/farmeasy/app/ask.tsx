@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Linking,
@@ -41,6 +42,9 @@ export default function AskScreen() {
     const trimmed = question.trim();
     if (!trimmed) return;
     setSubmittedQuestion(trimmed);
+    posthog.capture("ai_question_asked", {
+      question_length: trimmed.length,
+    });
     recommend.mutate({ data: { question: trimmed } });
   };
 

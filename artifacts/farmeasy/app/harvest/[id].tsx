@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Alert,
@@ -106,6 +107,16 @@ export default function HarvestWizard() {
       queryClient.invalidateQueries({ queryKey: getListCyclesQueryKey({ status: "history" }) });
       queryClient.invalidateQueries({ queryKey: getGetDashboardQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetCycleQueryKey(cycleId) });
+      posthog.capture("cycle_harvested", {
+        cycle_id: cycleId,
+        cycle_short_id: cycle?.shortId ?? null,
+        seed_name: cycle?.seedName ?? null,
+        harvested_qty_grams: parseFloat(harvestedQty) || 0,
+        full_trays: parseInt(fullTrays) || 0,
+        half_trays: parseInt(halfTrays) || 0,
+        has_bad_trays: isBadTrays,
+        issue_type: isBadTrays && selectedIssue ? issueLabel : null,
+      });
       Alert.alert(
         "Harvest Complete!",
         `${cycle?.seedName} cycle #${cycle?.shortId} has been harvested. Yield: ${harvestedQty} g`,

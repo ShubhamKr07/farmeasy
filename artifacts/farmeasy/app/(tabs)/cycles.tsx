@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   FlatList,
@@ -285,7 +286,10 @@ export default function CyclesScreen() {
               ) : activeTab === "ongoing" ? (
                 <Pressable
                   style={s.emptyBtn}
-                  onPress={() => router.push("/seeding" as any)}
+                  onPress={() => {
+                    posthog.capture("seeding_wizard_started", { source: "empty_state" });
+                    router.push("/seeding" as any);
+                  }}
                 >
                   <Text style={s.emptyBtnText}>Start a new cycle</Text>
                 </Pressable>
