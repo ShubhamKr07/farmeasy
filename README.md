@@ -6,7 +6,7 @@
 [![Expo](https://img.shields.io/badge/Expo-React%20Native-000020?logo=expo&logoColor=white)](https://expo.dev/)
 [![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Express](https://img.shields.io/badge/Express-API-000000?logo=express&logoColor=white)](https://expressjs.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white)](https://neon.tech/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
 [![pnpm](https://img.shields.io/badge/pnpm-workspace-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -72,7 +72,7 @@ The API contract lives in `lib/api-spec/openapi.yaml`; both the mobile app and t
 | Web dashboard| React, Vite, TypeScript, Clerk (`@clerk/clerk-react`)   |
 | Backend API  | Express (Node.js), TypeScript, Drizzle ORM              |
 | Recommender  | Python, FastAPI, Gemini (embeddings + synthesis), Tavily|
-| Database     | PostgreSQL (Neon)                                       |
+| Database     | PostgreSQL (Supabase)                                   |
 | Tooling      | pnpm workspaces, TypeScript project references, orval codegen |
 | Mobile builds| EAS Build (cloud) + EAS Update (OTA)                    |
 | Deployment   | Render — see `render.yaml` for the 3-service topology   |
@@ -85,7 +85,7 @@ The API contract lives in `lib/api-spec/openapi.yaml`; both the mobile app and t
 
 - **Node.js** (LTS recommended) and **Python 3** (for the recommender service)
 - **pnpm** — this repo enforces pnpm and will refuse `npm install` / `yarn` by design
-- **PostgreSQL** — a Neon instance (or any Postgres) for `DATABASE_URL`
+- **PostgreSQL** — a Supabase instance (or any Postgres) for `DATABASE_URL`
 - An **Expo/EAS account** if building the mobile app, and a **Clerk** application (dev instance is fine)
 
 ### Installation

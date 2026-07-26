@@ -5,7 +5,8 @@
 #   1. farmsmart-api          — Express API (Web Service, $7/mo starter)
 #   2. farmsmart-dashboard    — admin SPA (Web Service, vite preview)
 #   3. farmsmart-recommender  — Python/FastAPI recommender (Web Service, $7/mo starter)
-# Postgres is external (Neon) — set NEON_DATABASE_URL. Auth is Clerk.
+# Postgres is external (Supabase) — set DATABASE_URL (transaction pooler).
+# Auth is Clerk.
 #
 # FIRST-DEPLOY ORDER:
 #   1. Deploy the API service; note its URL (Render assigns <name>.onrender.com,
@@ -29,10 +30,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: NEON_DATABASE_URL
-        sync: false # Neon connection string (postgresql://...?sslmode=require)
       - key: DATABASE_URL
-        sync: false # same Neon URL (fallback)
+        sync: false # Supabase transaction-pooler connection string (port 6543) — see ADR-003
       - key: CLERK_SECRET_KEY
         sync: false # sk_test_... (dev) or sk_live_... (prod)
       - key: CLERK_PUBLISHABLE_KEY
@@ -85,7 +84,7 @@ services:
         sync: false # pk_test_... (dev) or pk_live_... (prod)
 
   # ── Recommender (Python/FastAPI, dlt ingestion + pgvector search) ─────────
-  # Talks to the same Neon Postgres as farmsmart-api (DATABASE_URL). Only
+  # Talks to the same Supabase Postgres as farmsmart-api (DATABASE_URL). Only
   # farmsmart-api calls this service directly (INTERNAL_API_KEY-gated) — it
   # is not exposed to the dashboard or the public internet.
   - type: web
@@ -99,7 +98,9 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false # same Neon connection string as farmsmart-api
+        sync: false # same Supabase transaction-pooler string as farmsmart-api (port 6543)
+      - key: DATABASE_URL_DIRECT
+        sync: false # Supabase session-pooler string (port 5432) — dlt/psycopg2 ingestion only, see ADR-003
       - key: GEMINI_API_KEY
         sync: false # aistudio.google.com — used for gemini-embedding-001 (embeddings)
                      # and gemini-2.5-flash (answer synthesis) — one provider, one key
