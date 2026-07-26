@@ -1,6 +1,7 @@
 import { useSignUp } from "@clerk/expo";
 import { type Href, useRouter } from "expo-router";
 import React, { useMemo } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -66,6 +67,7 @@ export default function SignUpPage() {
         return;
       }
       if (signUp.status === "complete") {
+        posthog.capture("user_signed_up", { method: "email_password" });
         await signUp.finalize({
           navigate: ({ decorateUrl }) => {
             const url = decorateUrl("/");

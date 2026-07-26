@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Alert,
@@ -101,6 +102,14 @@ export default function FertigationWizard() {
       queryClient.invalidateQueries({ queryKey: getListCyclesQueryKey({ status: "ongoing" }) });
       queryClient.invalidateQueries({ queryKey: getGetDashboardQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetCycleQueryKey(cycleId) });
+      posthog.capture("cycle_moved_to_fertigation", {
+        cycle_id: cycleId,
+        cycle_short_id: cycle?.shortId ?? null,
+        seed_name: cycle?.seedName ?? null,
+        days_in_germination: daysSinceGermination,
+        germination_progress_pct: germinationProgress,
+        fertigation_days: cycle?.fertigationDays ?? null,
+      });
       Alert.alert(
         "Moved to Fertigation!",
         `${cycle?.seedName} cycle #${cycle?.shortId} has started its ${cycle?.fertigationDays}-day fertigation period.`,

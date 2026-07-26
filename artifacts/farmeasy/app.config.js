@@ -1,0 +1,102 @@
+export default {
+  expo: {
+    name: "FarmSmart",
+    slug: "farmsmart",
+    version: "1.0.0",
+    orientation: "portrait",
+    icon: "./assets/images/icon.png",
+    scheme: "farmsmart",
+    userInterfaceStyle: "automatic",
+    newArchEnabled: true,
+    splash: {
+      image: "./assets/images/splash-icon.png",
+      resizeMode: "contain",
+      backgroundColor: "#F5F7F4",
+    },
+    ios: {
+      supportsTablet: false,
+      bundleIdentifier: "com.farmsmart.app",
+      infoPlist: {
+        NSCameraUsageDescription:
+          "FarmSmart uses the camera to scan QR codes on trays and seed bags.",
+        NSPhotoLibraryUsageDescription:
+          "FarmSmart uses the photo library for manual check photos.",
+      },
+    },
+    android: {
+      package: "com.farmsmart.app",
+      adaptiveIcon: {
+        foregroundImage: "./assets/images/adaptive-icon-foreground.png",
+        backgroundColor: "#F5F7F4",
+      },
+      permissions: [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+      ],
+    },
+    web: {
+      favicon: "./assets/images/favicon.png",
+    },
+    plugins: [
+      "expo-dev-client",
+      [
+        "expo-router",
+        {
+          origin: "https://replit.com/",
+        },
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          cameraPermission:
+            "FarmSmart needs camera access to scan QR codes on trays and seed bags.",
+        },
+      ],
+      [
+        "expo-image-picker",
+        {
+          cameraPermission:
+            "FarmSmart needs camera access to take photos during manual checks.",
+          photosPermission:
+            "FarmSmart needs photo library access for manual check photos.",
+        },
+      ],
+      [
+        "expo-build-properties",
+        {
+          android: {
+            packagingOptions: {
+              exclude: ["META-INF/versions/9/OSGI-INF/MANIFEST.MF"],
+            },
+          },
+        },
+      ],
+      "@react-native-community/datetimepicker",
+    ],
+    experiments: {
+      typedRoutes: true,
+      reactCompiler: true,
+    },
+    runtimeVersion: {
+      policy: "appVersion",
+    },
+    updates: {
+      url: "https://u.expo.dev/901f29e8-413e-4f62-b232-9a1d5b89c12c",
+    },
+    extra: {
+      router: {
+        origin: "https://replit.com/",
+      },
+      eas: {
+        projectId: "901f29e8-413e-4f62-b232-9a1d5b89c12c",
+      },
+      posthogProjectToken: process.env.POSTHOG_PROJECT_TOKEN,
+      posthogHost: process.env.POSTHOG_HOST || "https://us.i.posthog.com",
+    },
+    owner: "shubham_224",
+  },
+};

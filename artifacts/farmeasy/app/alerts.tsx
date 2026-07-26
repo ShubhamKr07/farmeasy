@@ -1,10 +1,11 @@
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useListAlerts, getListAlertsQueryKey, type Alert } from "@workspace/api-client-react";
 import { useColors } from "@/hooks/useColors";
+import { posthog } from "@/src/config/posthog";
 
 const SEVERITY_ICON: Record<string, string> = {
   critical: "alert-octagon",
@@ -26,6 +27,10 @@ export default function AlertsScreen() {
     { status: "current", limit: 50 },
     { query: { queryKey: getListAlertsQueryKey({ status: "current", limit: 50 }) } },
   );
+
+  useEffect(() => {
+    posthog.capture("alerts_viewed");
+  }, []);
 
   const severityColor = (severity: string) =>
     severity === "critical" ? colors.destructive : severity === "warning" ? colors.statusWarn : colors.mutedForeground;

@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useMemo, useState, useCallback } from "react";
+import { posthog } from "@/src/config/posthog";
 import {
   ActivityIndicator,
   Pressable,
@@ -49,6 +50,15 @@ export default function ScanScreen() {
     if (isLoading) return;
     if (resolved && scanState.status === "resolving") {
       setScanState({ status: "done", qr: scanState.qr, data: resolved });
+      posthog.capture("channel_qr_scanned", {
+        room: scanState.qr.room,
+        channel: scanState.qr.channel,
+        rack: scanState.qr.rack ?? null,
+        total_trays: resolved.totalTrays,
+        active_cycles: resolved.activeCycles,
+        available_trays: resolved.availableTrays,
+        is_full: resolved.isFull,
+      });
     } else if (isError && scanState.status === "resolving") {
       setScanState({
         status: "error",
