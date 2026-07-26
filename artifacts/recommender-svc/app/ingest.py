@@ -5,15 +5,25 @@ from app.config import settings
 DATASET_NAME = "recommender_staging"
 
 
-def _unpooled_database_url() -> str:
+def _unpooled_database_url(settings=settings) -> str:
     """
     dlt's postgres destination (psycopg2) sets search_path via a connection
-    startup parameter, which Neon's pooled endpoint (PgBouncer, host
-    contains "-pooler") rejects outright ("unsupported startup parameter in
-    options: search_path"). asyncpg (cache_repo.py, embed_upsert.py) doesn't
-    hit this, so only dlt's connection needs the direct/unpooled host.
+    startup parameter, which Supabase's transaction pooler rejects outright
+    ("unsupported startup parameter in options: search_path"), same failure
+    mode Neon's pooled endpoint had. asyncpg (cache_repo.py, embed_upsert.py)
+    doesn't hit this, so only dlt's connection needs the session-pooler URL.
+
+    Unlike Neon, Supabase's pooled and direct/session hostnames are not
+    related by substring — this must be an explicit separate connection
+    string (ADR-003), not derived from the pooled one.
     """
-    return settings.database_url.replace("-pooler.", ".")
+    if not settings.database_url_direct:
+        raise ValueError(
+            "DATABASE_URL_DIRECT must be set (Supabase session-pooler "
+            "connection string) — dlt's ingestion pipeline cannot use the "
+            "transaction-pooler DATABASE_URL."
+        )
+    return settings.database_url_direct
 
 
 def _fetch_tavily_rows(query: str, max_results: int) -> list[dict]:

@@ -11,8 +11,8 @@ async def get_pool() -> asyncpg.Pool:
             settings.database_url,
             min_size=1,
             max_size=5,
-            # Neon requires SSL; asyncpg respects sslmode in the DSN itself,
-            # but Neon's pooled connection strings sometimes omit it — force it.
+            # Supabase requires SSL on all connection endpoints; force it
+            # explicitly rather than relying on the DSN including it.
             ssl="require",
         )
     return _pool
