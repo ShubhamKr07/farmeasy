@@ -1,4 +1,3 @@
-import { useSignUp } from "@clerk/expo";
 import { type Href, useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
@@ -13,65 +12,98 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import LogoMark from "@/components/LogoMark";
 
 export default function SignUpPage() {
   const colors = useColors();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { signUp, fetchStatus } = useSignUp();
   const router = useRouter();
 
   const [emailAddress, setEmailAddress] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [code, setCode] = React.useState("");
   const [pendingVerification, setPendingVerification] = React.useState(false);
+  const [submitLoading, setSubmitLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const isLoading = fetchStatus === "fetching";
+  const isLoading = submitLoading;
 
   const handleCreateAccount = async () => {
+    setSubmitLoading(true);
     setError(null);
     try {
-      const { error: createError } = await signUp.password({ emailAddress, password });
+      const { data, error: createError } = await supabase.auth.signUp({
+        email: emailAddress,
+        password,
+        options: { data: { role: "technician" } },
+      });
       if (createError) {
         setError(createError.message ?? "Couldn't create account.");
         return;
       }
-
-      if (signUp.status === "complete") {
-        await signUp.finalize({
-          navigate: ({ decorateUrl }) => {
-            const url = decorateUrl("/");
-            router.push(url as Href);
-          },
-        });
-      } else if (signUp.unverifiedFields.includes("email_address")) {
-        await signUp.verifications.sendEmailCode();
-        setPendingVerification(true);
-      } else {
-        console.error("[SignUp] unexpected status:", signUp.status);
+      if (!data.user) {
+        setError("Couldn't create account.");
+        return;
       }
+      // Supabase creates the auth.users row above but does NOT create the
+      // matching public.users row — insert it here, mirroring Task 3's
+      // export-script users.insert() (new sign-ups don't go through that
+      // script). The id PK (== auth.users.id) makes this idempotent: a retry
+      // on the same email yields a 23505 unique_violation we swallow below, so
+      // the profile row only ever "takes" once per real sign-up rather than on
+      // every app launch / every button press.
+      const { error: profileError } = await supabase
+        .from("users")
+        .insert({ id: data.user.id, email: emailAddress, role: "technician" });
+      if (profileError && profileError.code !== "23505") {
+        console.error("[SignUp] users insert error:", profileError.message);
+        setError(profileError.message);
+        return;
+      }
+      // Email confirmation step. Task 8 will configure the project's Auth
+      // email template (OTP vs magic-link); assuming OTP here because it's the
+      // closer structural match to the existing code-input screen. See
+      // .superpowers/sdd/task-7-signup-report.md for the assumption.
+      setPendingVerification(true);
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong.");
+    } finally {
+      setSubmitLoading(false);
     }
   };
 
   const handleVerify = async () => {
+    setSubmitLoading(true);
     setError(null);
     try {
-      const { error: verifyError } = await signUp.verifications.verifyEmailCode({ code });
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: emailAddress,
+        token: code,
+        type: "signup",
+      });
       if (verifyError) {
         setError(verifyError.message ?? "Invalid code.");
         return;
       }
-      if (signUp.status === "complete") {
-        await signUp.finalize({
-          navigate: ({ decorateUrl }) => {
-            const url = decorateUrl("/");
-            router.push(url as Href);
-          },
-        });
+      router.push("/" as Href);
+    } catch (err: any) {
+      setError(err?.message ?? "Something went wrong.");
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setError(null);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        email: emailAddress,
+        type: "signup",
+      });
+      if (resendError) {
+        setError(resendError.message ?? "Couldn't resend code.");
       }
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong.");
@@ -113,7 +145,7 @@ export default function SignUpPage() {
               <Text style={s.errorBannerText}>{error}</Text>
             </View>
           )}
-          <Pressable style={s.linkBtn} onPress={() => signUp.verifications.sendEmailCode()}>
+          <Pressable style={s.linkBtn} onPress={handleResend}>
             <Text style={s.linkText}>Resend code</Text>
           </Pressable>
         </View>
