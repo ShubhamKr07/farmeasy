@@ -1,8 +1,7 @@
-import { useSSO, useSignIn } from "@clerk/expo";
 import * as Linking from "expo-linking";
 import { type Href, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -16,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import LogoMark from "@/components/LogoMark";
 
@@ -34,133 +34,57 @@ export default function SignInPage() {
   useWarmUpBrowser();
   const colors = useColors();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { signIn, errors, fetchStatus } = useSignIn();
-  const { startSSOFlow } = useSSO();
   const router = useRouter();
 
-  const [emailAddress, setEmailAddress] = React.useState("");
-  const [password, setPassword] = React.useState("");
-  const [verifyCode, setVerifyCode] = React.useState("");
-  const [oauthLoading, setOauthLoading] = React.useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [password, setPassword] = useState("");
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const isLoading = fetchStatus === "fetching";
-
-  const finalizeAndGoHome = useCallback(async () => {
-    await signIn.finalize({
-      navigate: ({ session, decorateUrl }) => {
-        if (session?.currentTask) {
-          console.log("[SignIn] pending task:", session.currentTask);
-          return;
-        }
-        const url = decorateUrl("/");
-        if (url.startsWith("http")) {
-          (window as any).location.href = url;
-        } else {
-          router.push(url as Href);
-        }
-      },
-    });
-  }, [signIn, router]);
+  const isLoading = submitLoading;
 
   const handleGoogleSignIn = async () => {
     setOauthLoading(true);
+    setErrorMessage(null);
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({
-        strategy: "oauth_google",
-        redirectUrl: Linking.createURL("/"),
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: Linking.createURL("/") },
       });
-      if (createdSessionId && setActive) {
-        await setActive({ session: createdSessionId });
-        router.push("/" as Href);
+      if (error) {
+        console.error("[SignIn] Google OAuth error:", error.message);
+        setErrorMessage(error.message);
       }
     } catch (err: any) {
-      console.error("[SignIn] Google OAuth error:", err?.message ?? err);
+      console.error("[SignIn] Google OAuth exception:", err?.message ?? err);
+      setErrorMessage(err?.message ?? "Unable to sign in with Google.");
     } finally {
       setOauthLoading(false);
     }
   };
 
   const handleSubmit = async () => {
+    setSubmitLoading(true);
+    setErrorMessage(null);
     try {
-      const { error } = await signIn.password({ emailAddress, password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email: emailAddress,
+        password,
+      });
       if (error) {
         console.error("[SignIn] password error:", JSON.stringify(error, null, 2));
+        setErrorMessage(error.message);
         return;
       }
-
-      if (signIn.status === "complete") {
-        await finalizeAndGoHome();
-      } else if (signIn.status === "needs_client_trust") {
-        const emailCodeFactor = signIn.supportedSecondFactors.find(
-          (f) => f.strategy === "email_code"
-        );
-        if (emailCodeFactor) {
-          await signIn.mfa.sendEmailCode();
-        }
-      } else {
-        console.error("[SignIn] unexpected status:", signIn.status);
-      }
+      router.push("/" as Href);
     } catch (err: any) {
       console.error("[SignIn] exception:", err?.message ?? err);
+      setErrorMessage(err?.message ?? "Invalid email or password.");
+    } finally {
+      setSubmitLoading(false);
     }
   };
-
-  const handleVerify = async () => {
-    try {
-      await signIn.mfa.verifyEmailCode({ code: verifyCode });
-      if (signIn.status === "complete") {
-        await finalizeAndGoHome();
-      } else {
-        console.error("[SignIn] verify: unexpected status:", signIn.status);
-      }
-    } catch (err: any) {
-      console.error("[SignIn] verify exception:", err?.message ?? err);
-    }
-  };
-
-  if (signIn.status === "needs_client_trust") {
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.container}>
-          <View style={s.logoRow}>
-            <LogoMark size={32} />
-            <Text style={s.logoText}>FarmSmart</Text>
-          </View>
-          <Text style={s.title}>Verify your identity</Text>
-          <Text style={s.subtitle}>Enter the code sent to your email</Text>
-          <TextInput
-            style={s.input}
-            value={verifyCode}
-            placeholder="6-digit code"
-            placeholderTextColor={colors.mutedForeground}
-            onChangeText={setVerifyCode}
-            keyboardType="numeric"
-            autoComplete="one-time-code"
-          />
-          {errors.fields.code && (
-            <Text style={s.errorText}>{errors.fields.code.message}</Text>
-          )}
-          <Pressable
-            style={[s.btn, isLoading && s.btnDisabled]}
-            onPress={handleVerify}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={s.btnText}>Verify</Text>
-            )}
-          </Pressable>
-          <Pressable style={s.linkBtn} onPress={() => signIn.mfa.sendEmailCode()}>
-            <Text style={s.linkText}>Resend code</Text>
-          </Pressable>
-          <Pressable style={s.linkBtn} onPress={() => signIn.reset()}>
-            <Text style={s.linkText}>Start over</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={s.safe}>
@@ -216,9 +140,6 @@ export default function SignInPage() {
               autoCorrect={false}
               autoComplete="email"
             />
-            {errors.fields.identifier && (
-              <Text style={s.errorText}>{errors.fields.identifier.message}</Text>
-            )}
 
             <Text style={s.label}>Password</Text>
             <TextInput
@@ -230,9 +151,6 @@ export default function SignInPage() {
               onChangeText={setPassword}
               autoComplete="current-password"
             />
-            {errors.fields.password && (
-              <Text style={s.errorText}>{errors.fields.password.message}</Text>
-            )}
 
             <Pressable style={s.linkBtnRight} onPress={() => router.push("/(auth)/forgot-password" as Href)}>
               <Text style={s.linkText}>Forgot password?</Text>
@@ -260,14 +178,9 @@ export default function SignInPage() {
               </Pressable>
             </View>
 
-            {(errors.global?.length || errors.fields.identifier || errors.fields.password) && (
+            {errorMessage && (
               <View style={s.errorBanner}>
-                <Text style={s.errorBannerText}>
-                  {errors.global?.[0]?.message
-                    ?? errors.fields.identifier?.message
-                    ?? errors.fields.password?.message
-                    ?? "Invalid email or password."}
-                </Text>
+                <Text style={s.errorBannerText}>{errorMessage}</Text>
               </View>
             )}
           </View>
