@@ -1,10 +1,14 @@
-import { useEffect } from "react";
-import { useAuth, SignIn } from "@clerk/clerk-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { supabase } from "./lib/supabase";
 import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import NotFound from "@/pages/not-found";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -41,22 +45,32 @@ function Router() {
 }
 
 /**
- * Wires the Clerk session token into the shared API client so every request
- * carries `Authorization: Bearer <token>`. The server's `clerkMiddleware`
- * validates it. Re-registers the getter when the auth state changes.
+ * Wires the Supabase Auth session token into the shared API client so every
+ * request carries `Authorization: Bearer <token>`. The server validates it.
  */
-function ClerkAuthBridge() {
-  const { getToken } = useAuth();
+function SupabaseAuthBridge() {
   useEffect(() => {
-    setAuthTokenGetter(async () => (await getToken()) ?? null);
-  }, [getToken]);
+    setAuthTokenGetter(async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session?.access_token ?? null;
+    });
+  }, []);
   return null;
 }
 
-/** Shows Clerk's sign-in screen until the user is authenticated. */
+/**
+ * Shows a Supabase-backed sign-in screen until the user is authenticated.
+ * Mirrors the previous Clerk gate structure, swapping `<SignIn />` for an
+ * email/password form plus a Google OAuth button.
+ */
 function AuthGate() {
-  const { isLoaded, isSignedIn } = useAuth();
-  if (!isLoaded) {
+  const { session, loading } = useSupabaseSession();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (loading) {
     return (
       <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
         <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
@@ -64,14 +78,67 @@ function AuthGate() {
       </div>
     );
   }
-  if (!isSignedIn) {
+
+  if (!session) {
+    const signIn = async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setError(null);
+      setBusy(true);
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      setBusy(false);
+      if (signInError) setError(signInError.message);
+    };
+
     return (
-      <div className="h-[100dvh] flex flex-col items-center justify-center gap-8 bg-background">
+      <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background">
         <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
-        <SignIn />
+        <form onSubmit={signIn} className="w-full max-w-sm space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="submit" className="w-full" disabled={busy}>
+            Sign in
+          </Button>
+        </form>
+        <div className="flex items-center gap-3 w-full max-w-sm">
+          <div className="h-px bg-border flex-1" />
+          <span className="text-xs text-muted-foreground">or</span>
+          <div className="h-px bg-border flex-1" />
+        </div>
+        <Button
+          variant="outline"
+          className="w-full max-w-sm"
+          onClick={() => supabase.auth.signInWithOAuth({ provider: "google" })}
+        >
+          Continue with Google
+        </Button>
       </div>
     );
   }
+
   return <Router />;
 }
 
@@ -80,7 +147,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <ClerkAuthBridge />
+          <SupabaseAuthBridge />
           <AuthGate />
         </WouterRouter>
         <Toaster />

@@ -1,5 +1,5 @@
 import React from "react";
-import { useClerk } from "@clerk/clerk-react";
+import { supabase } from "@/lib/supabase";
 import { useHealthCheck, getHealthCheckQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,6 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
 export function Settings() {
   const health = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30_000 } });
-  const { signOut } = useClerk();
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -92,7 +91,7 @@ export function Settings() {
           <LogOut className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <Button variant="outline" className="gap-2" onClick={() => signOut()}>
+          <Button variant="outline" className="gap-2" onClick={() => supabase.auth.signOut()}>
             <LogOut className="h-4 w-4" />
             Sign out
           </Button>

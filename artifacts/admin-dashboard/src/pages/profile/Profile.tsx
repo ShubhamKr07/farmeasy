@@ -1,16 +1,18 @@
 import React from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { User } from "lucide-react";
 
 export function Profile() {
-  const { user, isLoaded } = useUser();
-  const name = user?.fullName ?? user?.firstName ?? "Operator";
-  const email = user?.primaryEmailAddress?.emailAddress ?? "—";
-  const initials =
-    ((user?.firstName?.[0] ?? "") + (user?.lastName?.[0] ?? "")).toUpperCase() ||
-    "O";
+  const { session, loading } = useSupabaseSession();
+  const user = session?.user;
+  const meta = (user?.user_metadata ?? {}) as Record<string, string | undefined>;
+  const name = meta.full_name ?? meta.name ?? "Operator";
+  const email = user?.email ?? "—";
+  const initials = (
+    (meta.full_name?.[0] ?? meta.name?.[0] ?? (user?.email?.[0] ?? ""))
+  ).toUpperCase() || "O";
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -30,7 +32,7 @@ export function Profile() {
         </CardHeader>
         <CardContent className="flex items-center gap-4">
           <Avatar className="h-14 w-14">
-            {isLoaded && user?.imageUrl ? <AvatarImage src={user.imageUrl} alt={name} /> : null}
+            {!loading && (meta.avatar_url ?? meta.picture) ? <AvatarImage src={meta.avatar_url ?? meta.picture} alt={name} /> : null}
             <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
               {initials}
             </AvatarFallback>

@@ -1,6 +1,7 @@
 import React from "react";
 import { useLocation } from "wouter";
-import { useUser, useClerk } from "@clerk/clerk-react";
+import { useSupabaseSession } from "@/hooks/use-supabase-session";
+import { supabase } from "@/lib/supabase";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,18 +14,19 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { User, Settings as SettingsIcon, LogOut } from "lucide-react";
 
 /**
- * TopBar user menu. Backed by Clerk — shows the signed-in user's avatar/name
- * and a working sign-out. Profile/Settings navigate via wouter.
+ * TopBar user menu. Backed by Supabase Auth — shows the signed-in user's
+ * avatar/name and a working sign-out. Profile/Settings navigate via wouter.
  */
 export function UserMenu() {
   const [, navigate] = useLocation();
-  const { user, isLoaded } = useUser();
-  const { signOut } = useClerk();
+  const { session, loading } = useSupabaseSession();
 
-  const name = user?.fullName ?? user?.firstName ?? "Operator";
-  const email = user?.primaryEmailAddress?.emailAddress ?? undefined;
+  const user = session?.user;
+  const meta = (user?.user_metadata ?? {}) as Record<string, string | undefined>;
+  const name = meta.full_name ?? meta.name ?? "Operator";
+  const email = user?.email ?? undefined;
   const initials = (
-    (user?.firstName?.[0] ?? "") + (user?.lastName?.[0] ?? "")
+    (meta.full_name?.[0] ?? meta.name?.[0] ?? (user?.email?.[0] ?? ""))
   ).toUpperCase() || "O";
 
   return (
@@ -37,8 +39,8 @@ export function UserMenu() {
           data-testid="button-user-menu"
         >
           <Avatar className="h-8 w-8">
-            {isLoaded && user?.imageUrl ? (
-              <AvatarImage src={user.imageUrl} alt={name} />
+            {!loading && (meta.avatar_url ?? meta.picture) ? (
+              <AvatarImage src={meta.avatar_url ?? meta.picture} alt={name} />
             ) : null}
             <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
               {initials}
@@ -65,7 +67,7 @@ export function UserMenu() {
           Settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => signOut()}>
+        <DropdownMenuItem onClick={() => supabase.auth.signOut()}>
           <LogOut className="mr-2 h-4 w-4" />
           Sign out
         </DropdownMenuItem>

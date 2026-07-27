@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import { useGetUserSettings, usePutUserSetting, getGetUserSettingsQueryKey } from "@workspace/api-client-react";
 import {
   type MetricDef,
@@ -16,8 +16,8 @@ import {
  * request fails.
  */
 export function useMetricSelection(tab: MetricTab) {
-  const { user, isLoaded } = useUser();
-  const uid = user?.id ?? "anon";
+  const { session, loading } = useSupabaseSession();
+  const uid = session?.user.id ?? "anon";
   const storageKey = `farmsmart.metrics.${tab}.${uid}`;
   const settingsKey = `farmsmart.metrics.${tab}`;
 
@@ -38,7 +38,7 @@ export function useMetricSelection(tab: MetricTab) {
   const hydratedRef = useRef(false);
 
   const { data: remote, isSuccess: remoteLoaded } = useGetUserSettings({
-    query: { enabled: isLoaded && !!user, queryKey: getGetUserSettingsQueryKey() },
+    query: { enabled: !loading && !!session, queryKey: getGetUserSettingsQueryKey() },
   });
   const putSetting = usePutUserSetting();
 
@@ -55,10 +55,10 @@ export function useMetricSelection(tab: MetricTab) {
   // Hydrate: prefer the server value once loaded; fall back to localStorage
   // (covers signed-out/offline and the brief window before the server responds).
   useEffect(() => {
-    if (!isLoaded) return;
+    if (loading) return;
     if (hydratedRef.current) return;
 
-    if (user && remoteLoaded) {
+    if (session && remoteLoaded) {
       const serverValue = remote?.settings?.[settingsKey];
       if (serverValue !== undefined) {
         setSelected(validIds(serverValue));
@@ -77,9 +77,9 @@ export function useMetricSelection(tab: MetricTab) {
     } catch {
       setSelected(defaultKeysForTab(tab));
     }
-    if (!user || remoteLoaded) hydratedRef.current = true;
+    if (!session || remoteLoaded) hydratedRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, user, remoteLoaded, remote, storageKey, settingsKey, tab, validIds]);
+  }, [loading, session, remoteLoaded, remote, storageKey, settingsKey, tab, validIds]);
 
   const persist = useCallback(
     (next: string[]) => {
@@ -89,11 +89,11 @@ export function useMetricSelection(tab: MetricTab) {
       } catch {
         /* ignore quota / private-mode errors */
       }
-      if (user) {
+      if (session) {
         putSetting.mutate({ key: settingsKey, data: { value: next } });
       }
     },
-    [storageKey, settingsKey, user, putSetting],
+    [storageKey, settingsKey, session, putSetting],
   );
 
   const toggle = useCallback(
@@ -107,13 +107,13 @@ export function useMetricSelection(tab: MetricTab) {
         } catch {
           /* ignore */
         }
-        if (user) {
+        if (session) {
           putSetting.mutate({ key: settingsKey, data: { value: next } });
         }
         return next;
       });
     },
-    [storageKey, settingsKey, user, putSetting],
+    [storageKey, settingsKey, session, putSetting],
   );
 
   const reorder = useCallback(
