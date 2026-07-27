@@ -1,8 +1,8 @@
-import { useUser } from "@clerk/expo";
+import type { Session } from "@supabase/supabase-js";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Svg, { Polyline, Path, Line, Text as SvgText } from "react-native-svg";
 import {
   ActivityIndicator,
@@ -21,6 +21,7 @@ import {
 } from "@workspace/api-client-react";
 import { useColors } from "@/hooks/useColors";
 import { elevation } from "@/constants/elevation";
+import { supabase } from "@/lib/supabase";
 import AppHeader from "@/components/AppHeader";
 
 type ActionFilter = "all" | "fertigation" | "harvest";
@@ -29,15 +30,24 @@ type YieldPeriod = "week" | "month";
 export default function HomeScreen() {
   const colors = useColors();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { user } = useUser();
   const router = useRouter();
   const queryClient = useQueryClient();
+
+  const [session, setSession] = useState<Session | null>(null);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, sess) => setSession(sess));
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   const [yieldPeriod, setYieldPeriod] = useState<YieldPeriod>("week");
   const [actionFilter, setActionFilter] = useState<ActionFilter>("all");
 
-  const displayName =
-    user?.firstName ?? user?.emailAddresses[0]?.emailAddress?.split("@")[0] ?? "Technician";
+  const email = session?.user?.email;
+  const fullName =
+    (session?.user?.user_metadata?.full_name as string | undefined) ??
+    (session?.user?.user_metadata?.name as string | undefined);
+  const displayName = fullName ?? email?.split("@")[0] ?? "Technician";
 
   const { data: stats, isLoading, refetch, isRefetching } = useGetDashboard();
 

@@ -1,10 +1,22 @@
-import { useAuth } from "@clerk/expo";
+import type { Session } from "@supabase/supabase-js";
 import { Redirect, Stack } from "expo-router";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function AuthLayout() {
-  const { isSignedIn } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-  if (isSignedIn) {
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoaded(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (loaded && session) {
     return <Redirect href="/(tabs)" />;
   }
 

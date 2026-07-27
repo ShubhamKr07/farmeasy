@@ -1,14 +1,15 @@
-import { useAuth, useUser } from "@clerk/expo";
+import type { Session } from "@supabase/supabase-js";
 import { BlurView } from "expo-blur";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Redirect, Tabs } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { setAuthTokenGetter } from "@workspace/api-client-react";
 
+import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useSignOutAndClear } from "@/hooks/useSignOutAndClear";
@@ -114,16 +115,24 @@ function ClassicTabBar() {
 }
 
 function AppShellHamburger() {
-  const { user } = useUser();
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
   const { label: roleLabel } = useUserRole();
   const signOut = useSignOutAndClear();
   const { menuOpen, closeMenu } = useAppShell();
 
-  const displayName =
-    user?.firstName ?? user?.emailAddresses[0]?.emailAddress?.split("@")[0] ?? "Technician";
-  const userInitial = (
-    user?.firstName?.[0] ?? user?.emailAddresses[0]?.emailAddress?.[0] ?? "T"
-  ).toUpperCase();
+  const email = session?.user?.email;
+  const fullName =
+    (session?.user?.user_metadata?.full_name as string | undefined) ??
+    (session?.user?.user_metadata?.name as string | undefined);
+  const displayName = fullName ?? email?.split("@")[0] ?? "Technician";
+  const userInitial = (fullName?.[0] ?? email?.[0] ?? "T").toUpperCase();
 
   return (
     <HamburgerMenu
@@ -151,13 +160,26 @@ function TabShell() {
 }
 
 export default function TabLayout() {
-  const { isSignedIn, getToken } = useAuth();
+  const [session, setSession] = useState<Session | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    setAuthTokenGetter(() => getToken());
-  }, [getToken]);
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoaded(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
-  if (!isSignedIn) {
+  useEffect(() => {
+    setAuthTokenGetter(() =>
+      supabase.auth.getSession().then(({ data }) => data.session?.access_token ?? null),
+    );
+  }, []);
+
+  if (!loaded) return null;
+  if (!session) {
     return <Redirect href="/sign-in" />;
   }
 

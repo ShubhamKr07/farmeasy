@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@clerk/expo": "^3.4.1",
     "@expo-google-fonts/inter": "^0.4.0",
     "@expo/cli": "54.0.23",
     "@expo/ngrok": "^4.1.0",
@@ -68,10 +67,12 @@
   },
   "dependencies": {
     "@react-native-community/datetimepicker": "8.4.4",
+    "@supabase/supabase-js": "^2.110.8",
     "expo": "~54.0.35",
     "expo-build-properties": "~1.0.10",
     "expo-updates": "~29.0.18",
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "react-native-url-polyfill": "^4.0.0"
   }
 }
