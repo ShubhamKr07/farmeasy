@@ -12,8 +12,10 @@
     "test:metrics": "node --import tsx/esm --test src/tests/metrics/*.test.ts"
   },
   "dependencies": {
+    "@clerk/backend": "^3.13.1",
     "@clerk/express": "^2.1.25",
     "@clerk/shared": "^4.17.0",
+    "@supabase/supabase-js": "^2.110.8",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/metrics": "workspace:*",

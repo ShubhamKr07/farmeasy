@@ -67,3 +67,6 @@ Thumbs.db
 
 # One-time Neon -> Supabase data dump (Task 8 of the DB migration plan)
 *.dump
+
+# One-time Clerk user migration mapping file (Task 3 of the Auth migration plan)
+clerk-user-mapping.json
