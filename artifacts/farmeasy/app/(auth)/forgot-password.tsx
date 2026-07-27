@@ -1,5 +1,6 @@
-import { useSignIn } from "@clerk/expo";
-import { type Href, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
+import { supabase } from "@/lib/supabase";
 import React, { useMemo } from "react";
 import {
   ActivityIndicator,
@@ -21,7 +22,6 @@ type Step = "email" | "reset";
 export default function ForgotPasswordPage() {
   const colors = useColors();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { signIn, fetchStatus } = useSignIn();
   const router = useRouter();
 
   const [step, setStep] = React.useState<Step>("email");
@@ -29,53 +29,50 @@ export default function ForgotPasswordPage() {
   const [code, setCode] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
-
-  const isLoading = fetchStatus === "fetching";
+  const [isLoading, setIsLoading] = React.useState(false);
 
   const handleSendCode = async () => {
     setError(null);
+    setIsLoading(true);
     try {
-      const { error: createError } = await signIn.create({ identifier: emailAddress });
-      if (createError) {
-        setError(createError.message ?? "Couldn't find that account.");
-        return;
-      }
-      const { error: sendError } = await signIn.resetPasswordEmailCode.sendCode();
-      if (sendError) {
-        setError(sendError.message ?? "Couldn't send reset code.");
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(emailAddress, {
+        redirectTo: Linking.createURL("/reset-password"),
+      });
+      if (resetError) {
+        setError(resetError.message ?? "Couldn't send reset code.");
         return;
       }
       setStep("reset");
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleResetPassword = async () => {
     setError(null);
+    setIsLoading(true);
     try {
-      const { error: verifyError } = await signIn.resetPasswordEmailCode.verifyCode({ code });
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: emailAddress,
+        token: code,
+        type: "recovery",
+      });
       if (verifyError) {
         setError(verifyError.message ?? "Invalid code.");
         return;
       }
-      const { error: submitError } = await signIn.resetPasswordEmailCode.submitPassword({
-        password: newPassword,
-      });
-      if (submitError) {
-        setError(submitError.message ?? "Couldn't reset password.");
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) {
+        setError(updateError.message ?? "Couldn't reset password.");
         return;
       }
-      if (signIn.status === "complete") {
-        await signIn.finalize({
-          navigate: ({ decorateUrl }) => {
-            const url = decorateUrl("/");
-            router.push(url as Href);
-          },
-        });
-      }
+      router.push("/");
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
