@@ -78,6 +78,13 @@
       "when": 1785143780614,
       "tag": "0010_even_network",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785145249538,
+      "tag": "0011_silent_gargoyle",
+      "breakpoints": true
     }
   ]
 }

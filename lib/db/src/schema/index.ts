@@ -168,7 +168,7 @@ export const cyclesTable = pgTable(
     harvestedQty: numeric("harvested_qty"),
     closedAt: timestamp("closed_at"),
     trayId: integer("tray_id").references(() => traysTable.id, { onDelete: "set null" }),
-    createdBy: text("created_by"),
+    userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
     deletedAt: timestamp("deleted_at"),
@@ -195,7 +195,7 @@ export const manualChecksTable = pgTable(
     issue: text("issue"),
     notes: text("notes"),
     photoUrls: text("photo_urls").array().notNull(),
-    createdBy: text("created_by"),
+    userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -400,7 +400,7 @@ export const tasksTable = pgTable(
     assignee: text("assignee"),
     dueAt: timestamp("due_at"),
     completedAt: timestamp("completed_at"),
-    createdBy: text("created_by"),
+    userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -426,7 +426,7 @@ export const badTrayEntriesTable = pgTable(
     halfTrays: integer("half_trays").notNull().default(0),
     photoUrls: text("photo_urls").array().notNull().default([]),
     lossEstimate: numeric("loss_estimate"),
-    createdBy: text("created_by"),
+    userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -447,7 +447,7 @@ export const stockMovementsTable = pgTable(
     }),
     delta: numeric("delta").notNull(),
     reason: stockMovementReasonEnum("reason").notNull().default("adjust"),
-    createdBy: text("created_by"),
+    userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
@@ -462,13 +462,13 @@ export const userSettingsTable = pgTable(
   "user_settings",
   {
     id: serial("id").primaryKey(),
-    clerkUserId: text("clerk_user_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => usersTable.id),
     key: text("key").notNull(),
     value: jsonb("value").notNull(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("user_settings_user_key_uniq").on(table.clerkUserId, table.key),
+    uniqueIndex("user_settings_user_key_uniq").on(table.userId, table.key),
   ],
 );
 
@@ -482,7 +482,7 @@ export const accountingConnectionsTable = pgTable(
   "accounting_connections",
   {
     id: serial("id").primaryKey(),
-    clerkUserId: text("clerk_user_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => usersTable.id),
     provider: accountingProviderEnum("provider").notNull().default("quickbooks"),
     realmId: text("realm_id").notNull(),
     companyName: text("company_name"),
@@ -496,7 +496,7 @@ export const accountingConnectionsTable = pgTable(
   },
   (table) => [
     uniqueIndex("accounting_connections_user_provider_uniq").on(
-      table.clerkUserId,
+      table.userId,
       table.provider,
     ),
   ],
@@ -532,7 +532,7 @@ export const recommenderQueriesTable = pgTable(
   "recommender_queries",
   {
     id: serial("id").primaryKey(),
-    clerkUserId: text("clerk_user_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => usersTable.id),
     question: text("question").notNull(),
     answer: text("answer").notNull(),
     sources: jsonb("sources"), // [{title, url}]
@@ -540,7 +540,7 @@ export const recommenderQueriesTable = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [
-    index("recommender_queries_user_idx").on(table.clerkUserId),
+    index("recommender_queries_user_idx").on(table.userId),
     index("recommender_queries_created_at_idx").on(table.createdAt),
   ],
 );
@@ -564,7 +564,7 @@ export const facilityLogsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     logType: facilityLogTypeEnum("log_type").notNull(),
-    clerkUserId: text("clerk_user_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => usersTable.id),
     data: jsonb("data").notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
