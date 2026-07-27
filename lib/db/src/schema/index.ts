@@ -87,8 +87,9 @@ export const cropCategoryEnum = pgEnum("crop_category", [
 
 export const userRoleEnum = pgEnum("user_role", [
   "technician",
-  "lead",
   "supervisor",
+  "quality_lead",
+  "facility_lead",
 ]);
 
 export const usersTable = pgTable("users", {

@@ -85,6 +85,13 @@
       "when": 1785145249538,
       "tag": "0011_silent_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785200000000,
+      "tag": "0012_fix_user_role_enum",
+      "breakpoints": true
     }
   ]
 }

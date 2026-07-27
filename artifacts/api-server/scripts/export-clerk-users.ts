@@ -41,11 +41,15 @@ async function main() {
         continue;
       }
 
-      await supabase.from("users").insert({
+      const { error: insertError } = await supabase.from("users").insert({
         id: data.user.id,
         email,
         role,
       });
+      if (insertError) {
+        console.error(`Failed to insert public.users row for ${email} (role="${role}"):`, insertError.message);
+        continue;
+      }
 
       mapping.push({
         clerkUserId: clerkUser.id,
