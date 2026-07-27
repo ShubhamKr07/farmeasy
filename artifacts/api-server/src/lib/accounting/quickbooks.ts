@@ -4,7 +4,7 @@ import { db, accountingConnectionsTable } from "@workspace/db";
 import { encryptToken, decryptToken } from "./crypto";
 
 /**
- * QuickBooks Online OAuth + API helpers. One connection per (clerk_user_id,
+ * QuickBooks Online OAuth + API helpers. One connection per (user_id,
  * provider) — enforced by accounting_connections' unique index.
  *
  * Env required: QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_REDIRECT_URI,
@@ -48,13 +48,13 @@ interface StoredConnection {
   expiresAt: Date;
 }
 
-async function getConnectionRow(clerkUserId: string) {
+async function getConnectionRow(userId: string) {
   const [row] = await db
     .select()
     .from(accountingConnectionsTable)
     .where(
       and(
-        eq(accountingConnectionsTable.clerkUserId, clerkUserId),
+        eq(accountingConnectionsTable.userId, userId),
         eq(accountingConnectionsTable.provider, "quickbooks"),
       ),
     )
@@ -63,7 +63,7 @@ async function getConnectionRow(clerkUserId: string) {
 }
 
 export async function saveConnectionFromCallback(
-  clerkUserId: string,
+  userId: string,
   callbackUrl: string,
 ): Promise<{ realmId: string }> {
   const client = createOAuthClient();
@@ -79,7 +79,7 @@ export async function saveConnectionFromCallback(
   await db
     .insert(accountingConnectionsTable)
     .values({
-      clerkUserId,
+      userId,
       provider: "quickbooks",
       realmId: token.realmId,
       accessTokenEnc: encryptToken(token.access_token),
@@ -88,7 +88,7 @@ export async function saveConnectionFromCallback(
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [accountingConnectionsTable.clerkUserId, accountingConnectionsTable.provider],
+      target: [accountingConnectionsTable.userId, accountingConnectionsTable.provider],
       set: {
         realmId: token.realmId,
         accessTokenEnc: encryptToken(token.access_token),
@@ -101,8 +101,8 @@ export async function saveConnectionFromCallback(
   return { realmId: token.realmId };
 }
 
-export async function getConnectionStatus(clerkUserId: string) {
-  const row = await getConnectionRow(clerkUserId);
+export async function getConnectionStatus(userId: string) {
+  const row = await getConnectionRow(userId);
   if (!row) return { connected: false as const };
   return {
     connected: true as const,
@@ -112,8 +112,8 @@ export async function getConnectionStatus(clerkUserId: string) {
   };
 }
 
-export async function disconnect(clerkUserId: string): Promise<boolean> {
-  const row = await getConnectionRow(clerkUserId);
+export async function disconnect(userId: string): Promise<boolean> {
+  const row = await getConnectionRow(userId);
   if (!row) return false;
 
   try {
@@ -133,9 +133,9 @@ export async function disconnect(clerkUserId: string): Promise<boolean> {
  * expired) plus the realmId, for a given user. Throws if not connected.
  */
 export async function getAuthenticatedClient(
-  clerkUserId: string,
+  userId: string,
 ): Promise<{ client: OAuthClient; realmId: string }> {
-  const row = await getConnectionRow(clerkUserId);
+  const row = await getConnectionRow(userId);
   if (!row) throw new Error("QuickBooks is not connected for this user");
 
   const client = createOAuthClient();
@@ -167,7 +167,7 @@ export async function getAuthenticatedClient(
 }
 
 /** Cheap connectivity check for /api/metrics/availability — no token refresh. */
-export async function isConnected(clerkUserId: string): Promise<boolean> {
-  const row = await getConnectionRow(clerkUserId);
+export async function isConnected(userId: string): Promise<boolean> {
+  const row = await getConnectionRow(userId);
   return !!row;
 }

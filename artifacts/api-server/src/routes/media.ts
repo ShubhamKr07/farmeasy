@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";

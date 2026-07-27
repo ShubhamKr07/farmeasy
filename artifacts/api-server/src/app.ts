@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import path from "node:path";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import { clerkMiddleware, getAuth } from "@clerk/express";
+import { supabaseAuthMiddleware, getAuth } from "./middlewares/supabaseAuth";
 import router from "./routes";
 import healthRouter from "./routes/health";
 import dashboardRouter from "./routes/dashboard";
@@ -22,15 +22,9 @@ import { accountingRouter, accountingPublicRouter } from "./routes/accounting";
 import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import { logger } from "./lib/logger";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-} from "./middlewares/clerkProxyMiddleware";
 import { UPLOADS_DIR } from "./routes/media";
 
 const app: Express = express();
-
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(
   pinoHttp({
@@ -56,7 +50,7 @@ app.use(cors({ origin: process.env.CORS_ORIGIN ?? true }));
 app.use("/uploads", express.static(path.resolve(UPLOADS_DIR)));
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(clerkMiddleware());
+app.use(supabaseAuthMiddleware);
 
 function requireSignedIn(req: Request, res: Response, next: NextFunction) {
   const { userId } = getAuth(req);

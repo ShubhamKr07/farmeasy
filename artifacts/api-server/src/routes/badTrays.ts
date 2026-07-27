@@ -127,7 +127,7 @@ router.post("/bad-trays/manual-checks", async (req: Request, res: Response) => {
       issue: check.issue ?? null,
       notes: check.notes ?? null,
       photoUrls: check.photoUrls ?? [],
-      createdBy: check.createdBy ?? null,
+      createdBy: check.userId ?? null,
       createdAt: check.createdAt.toISOString(),
     });
   } catch (err) {

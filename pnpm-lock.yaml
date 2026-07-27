@@ -381,12 +381,6 @@ importers:
       '@clerk/backend':
         specifier: ^3.13.1
         version: 3.13.1
-      '@clerk/express':
-        specifier: ^2.1.25
-        version: 2.1.25(express@5.2.1)
-      '@clerk/shared':
-        specifier: ^4.17.0
-        version: 4.17.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@supabase/supabase-js':
         specifier: ^2.110.8
         version: 2.110.8
@@ -420,6 +414,9 @@ importers:
       intuit-oauth:
         specifier: ^4.2.3
         version: 4.2.3
+      jose:
+        specifier: ^6.2.4
+        version: 6.2.4
       multer:
         specifier: ^2.2.0
         version: 2.2.0
@@ -1471,10 +1468,6 @@ packages:
     resolution: {integrity: sha512-iFsPemW1862vnciPC8qpherSG4M4/vnwCNGzZ9waZtco+h5UIDP8qXBruAbo/JYA3Z3DpSaFjhoakelONWku7Q==}
     engines: {node: '>=20.9.0'}
 
-  '@clerk/backend@3.6.1':
-    resolution: {integrity: sha512-LkfekzF/0UMXacX+17xy3ExRraO0mm+thXejC8Q32gWHd1wLdxK3YXDsLDF00E1r1InWBKIt2ZOxs6hTwZPJjA==}
-    engines: {node: '>=20.9.0'}
-
   '@clerk/clerk-js@6.16.0':
     resolution: {integrity: sha512-8xv/XDsxhOZd1n4DNIRJ2EehIRUg6UiqKAnfd0L88R2t1g6sVnLi1FInJ5i8Qyx5oY/creXx6X1AZ1V5PobRkA==}
     engines: {node: '>=20.9.0'}
@@ -1522,12 +1515,6 @@ packages:
         optional: true
       react-dom:
         optional: true
-
-  '@clerk/express@2.1.25':
-    resolution: {integrity: sha512-Az54fKWtW2WthoAxpWKryq6DtGGgEGoSVbtqeWiCL9kOA4Y5/v4hyWjk8NGEL3Zb8Qi5+awqO6J+GrTCPfpJTA==}
-    engines: {node: '>=20.9.0'}
-    peerDependencies:
-      express: ^4.17.0 || ^5.0.0
 
   '@clerk/react@6.9.0':
     resolution: {integrity: sha512-M0QGyGS732tYBXeG+28UgElXM2TfoSZ+4mWGisC8yxJX8NjH4hEPJTAQuZmYRLNaCyGQCuzjYVQiQRC+GbDtmA==}
@@ -8116,15 +8103,6 @@ snapshots:
       - react
       - react-dom
 
-  '@clerk/backend@3.6.1':
-    dependencies:
-      '@clerk/shared': 4.17.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      standardwebhooks: 1.0.0
-      tslib: 2.8.1
-    transitivePeerDependencies:
-      - react
-      - react-dom
-
   '@clerk/clerk-js@6.16.0(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)(use-sync-external-store@1.6.0(react@19.1.0))(zod@3.25.76)':
     dependencies:
       '@base-org/account': 2.0.1(@types/react@19.1.17)(react@19.1.0)(typescript@5.9.3)(use-sync-external-store@1.6.0(react@19.1.0))(zod@3.25.76)
@@ -8195,16 +8173,6 @@ snapshots:
       - use-sync-external-store
       - utf-8-validate
       - zod
-
-  '@clerk/express@2.1.25(express@5.2.1)':
-    dependencies:
-      '@clerk/backend': 3.6.1
-      '@clerk/shared': 4.17.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      express: 5.2.1
-      tslib: 2.8.1
-    transitivePeerDependencies:
-      - react
-      - react-dom
 
   '@clerk/react@6.9.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
     dependencies:

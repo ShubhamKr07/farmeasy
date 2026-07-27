@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { randomBytes } from "node:crypto";
 import {
   getAuthorizeUri,
@@ -19,7 +19,7 @@ import {
  * maps back to the Clerk user id, so the callback can attribute the
  * connection without itself being an authenticated request.
  */
-const pendingStates = new Map<string, { clerkUserId: string; expiresAt: number }>();
+const pendingStates = new Map<string, { userId: string; expiresAt: number }>();
 
 function cleanupExpiredStates() {
   const now = Date.now();
@@ -38,7 +38,7 @@ accountingRouter.get("/accounting/connect", (req: Request, res: Response) => {
 
   cleanupExpiredStates();
   const state = randomBytes(16).toString("hex");
-  pendingStates.set(state, { clerkUserId: userId, expiresAt: Date.now() + 10 * 60 * 1000 });
+  pendingStates.set(state, { userId: userId, expiresAt: Date.now() + 10 * 60 * 1000 });
 
   const uri = getAuthorizeUri(state);
   return res.json({ authorizeUri: uri });
@@ -85,7 +85,7 @@ accountingPublicRouter.get("/accounting/callback", async (req: Request, res: Res
     // intuit-oauth's createToken expects the full callback URL (it parses
     // code/realmId/state off it internally).
     const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
-    await saveConnectionFromCallback(entry.clerkUserId, fullUrl);
+    await saveConnectionFromCallback(entry.userId, fullUrl);
     return redirectWithStatus("connected");
   } catch (err) {
     req.log.error(err);

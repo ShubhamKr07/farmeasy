@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, and } from "drizzle-orm";
 import { db, userSettingsTable } from "@workspace/db";
 
@@ -19,7 +19,7 @@ router.get("/users/me/settings", async (req: Request, res: Response) => {
   const rows = await db
     .select({ key: userSettingsTable.key, value: userSettingsTable.value })
     .from(userSettingsTable)
-    .where(eq(userSettingsTable.clerkUserId, userId));
+    .where(eq(userSettingsTable.userId, userId));
 
   const settings: Record<string, unknown> = {};
   for (const r of rows) settings[r.key] = r.value;
@@ -38,9 +38,9 @@ router.put("/users/me/settings/:key", async (req: Request, res: Response) => {
 
   await db
     .insert(userSettingsTable)
-    .values({ clerkUserId: userId, key, value: value as object, updatedAt: new Date() })
+    .values({ userId: userId, key, value: value as object, updatedAt: new Date() })
     .onConflictDoUpdate({
-      target: [userSettingsTable.clerkUserId, userSettingsTable.key],
+      target: [userSettingsTable.userId, userSettingsTable.key],
       set: { value: value as object, updatedAt: new Date() },
     });
 

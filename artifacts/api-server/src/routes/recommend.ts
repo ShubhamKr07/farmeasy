@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { computeDashboardSnapshot } from "./dashboard";
 
 const router = Router();

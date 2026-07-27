@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { facilityLogsTable } from "@workspace/db";
@@ -109,7 +109,7 @@ router.post("/facility-logs", async (req: Request, res: Response) => {
       .insert(facilityLogsTable)
       .values({
         logType,
-        clerkUserId: userId,
+        userId: userId,
         data: parsedData.data,
         notes: notes ?? null,
       })

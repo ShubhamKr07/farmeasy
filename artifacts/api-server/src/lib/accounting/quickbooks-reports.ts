@@ -39,11 +39,11 @@ interface QboReport {
 }
 
 async function fetchReport(
-  clerkUserId: string,
+  userId: string,
   reportName: "ProfitAndLoss" | "BalanceSheet",
   params: Record<string, string> = {},
 ): Promise<QboReport> {
-  const { client, realmId } = await getAuthenticatedClient(clerkUserId);
+  const { client, realmId } = await getAuthenticatedClient(userId);
   const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/reports/${reportName}`;
   const res = await client.makeApiCall({
     url,
@@ -53,8 +53,8 @@ async function fetchReport(
   return res.json as QboReport;
 }
 
-async function queryQbo(clerkUserId: string, query: string): Promise<any> {
-  const { client, realmId } = await getAuthenticatedClient(clerkUserId);
+async function queryQbo(userId: string, query: string): Promise<any> {
+  const { client, realmId } = await getAuthenticatedClient(userId);
   const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/query`;
   const res = await client.makeApiCall({
     url,
@@ -116,10 +116,10 @@ function last30DaysParams(): Record<string, string> {
 }
 
 /** Monthly P&L summarized-by-month report -> {label:"YYYY-MM", value}[] for a given group. */
-async function monthlyGroupSeries(clerkUserId: string, group: string): Promise<{ label: string; value: number }[]> {
+async function monthlyGroupSeries(userId: string, group: string): Promise<{ label: string; value: number }[]> {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", {
+  const report = await fetchReport(userId, "ProfitAndLoss", {
     start_date: start.toISOString().slice(0, 10),
     end_date: now.toISOString().slice(0, 10),
     summarize_column_by: "Month",
@@ -139,69 +139,69 @@ async function monthlyGroupSeries(clerkUserId: string, group: string): Promise<{
   return out;
 }
 
-async function acctRevenueTotal(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", last30DaysParams());
+async function acctRevenueTotal(userId: string) {
+  const report = await fetchReport(userId, "ProfitAndLoss", last30DaysParams());
   return { value: findGroupTotal(report.Rows?.Row, "Income") };
 }
 
-async function acctExpensesTotal(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", last30DaysParams());
+async function acctExpensesTotal(userId: string) {
+  const report = await fetchReport(userId, "ProfitAndLoss", last30DaysParams());
   return { value: findGroupTotal(report.Rows?.Row, "Expenses") };
 }
 
-async function acctNetIncome(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", last30DaysParams());
+async function acctNetIncome(userId: string) {
+  const report = await fetchReport(userId, "ProfitAndLoss", last30DaysParams());
   const income = findGroupTotal(report.Rows?.Row, "Income");
   const expenses = findGroupTotal(report.Rows?.Row, "Expenses");
   return { value: income - expenses };
 }
 
-async function acctGrossProfitMargin(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", last30DaysParams());
+async function acctGrossProfitMargin(userId: string) {
+  const report = await fetchReport(userId, "ProfitAndLoss", last30DaysParams());
   const income = findGroupTotal(report.Rows?.Row, "Income");
   const cogs = findGroupTotal(report.Rows?.Row, "COGS");
   return { value: income > 0 ? (income - cogs) / income : 0 };
 }
 
-async function acctRevenueByMonth(clerkUserId: string) {
-  return monthlyGroupSeries(clerkUserId, "Income");
+async function acctRevenueByMonth(userId: string) {
+  return monthlyGroupSeries(userId, "Income");
 }
 
-async function acctExpensesByMonth(clerkUserId: string) {
-  return monthlyGroupSeries(clerkUserId, "Expenses");
+async function acctExpensesByMonth(userId: string) {
+  return monthlyGroupSeries(userId, "Expenses");
 }
 
-async function acctExpensesByCategory(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "ProfitAndLoss", last30DaysParams());
+async function acctExpensesByCategory(userId: string) {
+  const report = await fetchReport(userId, "ProfitAndLoss", last30DaysParams());
   return flattenLeafRows(report.Rows?.Row, "Expenses");
 }
 
-async function acctCashBalance(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "BalanceSheet");
+async function acctCashBalance(userId: string) {
+  const report = await fetchReport(userId, "BalanceSheet");
   return { value: findGroupTotal(report.Rows?.Row, "BankAccounts") };
 }
 
-async function acctAccountsReceivable(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "BalanceSheet");
+async function acctAccountsReceivable(userId: string) {
+  const report = await fetchReport(userId, "BalanceSheet");
   return { value: findGroupTotal(report.Rows?.Row, "AR") };
 }
 
-async function acctAccountsPayable(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "BalanceSheet");
+async function acctAccountsPayable(userId: string) {
+  const report = await fetchReport(userId, "BalanceSheet");
   return { value: findGroupTotal(report.Rows?.Row, "AP") };
 }
 
-async function acctCurrentRatio(clerkUserId: string) {
-  const report = await fetchReport(clerkUserId, "BalanceSheet");
+async function acctCurrentRatio(userId: string) {
+  const report = await fetchReport(userId, "BalanceSheet");
   const currentAssets = findGroupTotal(report.Rows?.Row, "TotalCurrentAssets");
   const currentLiabilities = findGroupTotal(report.Rows?.Row, "TotalCurrentLiabilities");
   return { value: currentLiabilities > 0 ? currentAssets / currentLiabilities : 0 };
 }
 
-async function acctInvoicesOverdue(clerkUserId: string) {
+async function acctInvoicesOverdue(userId: string) {
   const today = new Date().toISOString().slice(0, 10);
   const result = await queryQbo(
-    clerkUserId,
+    userId,
     `SELECT Id, DocNumber, CustomerRef, DueDate, Balance, TotalAmt FROM Invoice WHERE Balance > '0' AND DueDate < '${today}' ORDERBY DueDate ASC MAXRESULTS 50`,
   );
   const invoices = result?.QueryResponse?.Invoice ?? [];
@@ -214,9 +214,9 @@ async function acctInvoicesOverdue(clerkUserId: string) {
   }));
 }
 
-async function acctInvoicesByStatus(clerkUserId: string) {
+async function acctInvoicesByStatus(userId: string) {
   const today = new Date().toISOString().slice(0, 10);
-  const result = await queryQbo(clerkUserId, "SELECT Id, Balance, DueDate FROM Invoice MAXRESULTS 1000");
+  const result = await queryQbo(userId, "SELECT Id, Balance, DueDate FROM Invoice MAXRESULTS 1000");
   const invoices = result?.QueryResponse?.Invoice ?? [];
   let paid = 0, overdue = 0, pending = 0;
   for (const inv of invoices) {
@@ -232,8 +232,8 @@ async function acctInvoicesByStatus(clerkUserId: string) {
   ];
 }
 
-async function acctInvoicesAgingBuckets(clerkUserId: string) {
-  const result = await queryQbo(clerkUserId, "SELECT Id, Balance, DueDate FROM Invoice WHERE Balance > '0' MAXRESULTS 1000");
+async function acctInvoicesAgingBuckets(userId: string) {
+  const result = await queryQbo(userId, "SELECT Id, Balance, DueDate FROM Invoice WHERE Balance > '0' MAXRESULTS 1000");
   const invoices = result?.QueryResponse?.Invoice ?? [];
   const now = Date.now();
   const buckets = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
@@ -249,8 +249,8 @@ async function acctInvoicesAgingBuckets(clerkUserId: string) {
   return Object.entries(buckets).map(([label, value]) => ({ label, value }));
 }
 
-async function acctExpensesTopVendors(clerkUserId: string) {
-  const result = await queryQbo(clerkUserId, "SELECT Id, VendorRef, TotalAmt FROM Bill MAXRESULTS 1000");
+async function acctExpensesTopVendors(userId: string) {
+  const result = await queryQbo(userId, "SELECT Id, VendorRef, TotalAmt FROM Bill MAXRESULTS 1000");
   const bills = result?.QueryResponse?.Bill ?? [];
   const byVendor = new Map<string, number>();
   for (const bill of bills) {
@@ -263,7 +263,7 @@ async function acctExpensesTopVendors(clerkUserId: string) {
     .slice(0, 10);
 }
 
-const RAW_QUERIES: Record<string, (clerkUserId: string) => Promise<unknown>> = {
+const RAW_QUERIES: Record<string, (userId: string) => Promise<unknown>> = {
   "acct.revenue.total": acctRevenueTotal,
   "acct.expenses.total": acctExpensesTotal,
   "acct.netIncome": acctNetIncome,
@@ -289,22 +289,22 @@ const RAW_QUERIES: Record<string, (clerkUserId: string) => Promise<unknown>> = {
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 const cache = new Map<string, { data: unknown; expiresAt: number }>();
 
-export async function runQuickbooksQuery(key: string, clerkUserId: string): Promise<unknown> {
+export async function runQuickbooksQuery(key: string, userId: string): Promise<unknown> {
   const fn = RAW_QUERIES[key];
   if (!fn) throw new Error(`no QuickBooks query registered for key: ${key}`);
 
-  const cacheKey = `${clerkUserId}:${key}`;
+  const cacheKey = `${userId}:${key}`;
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
 
-  const data = await fn(clerkUserId);
+  const data = await fn(userId);
   cache.set(cacheKey, { data, expiresAt: Date.now() + CACHE_TTL_MS });
   return data;
 }
 
 /** Invalidate cached results for a user (e.g. after disconnect/reconnect). */
-export function invalidateQuickbooksCache(clerkUserId: string): void {
+export function invalidateQuickbooksCache(userId: string): void {
   for (const key of cache.keys()) {
-    if (key.startsWith(`${clerkUserId}:`)) cache.delete(key);
+    if (key.startsWith(`${userId}:`)) cache.delete(key);
   }
 }

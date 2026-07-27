@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { sql } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { db } from "@workspace/db";
 import { METRICS_BY_ID, metricsForTab, type MetricTab, type TemplateName } from "@workspace/metrics";
 import { TEMPLATES } from "../lib/metrics/templates";

@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, ne, count, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {

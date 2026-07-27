@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, ne, desc, and } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
@@ -86,9 +86,8 @@ function enforceAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 function extractRole(req: Request): UserRole {
-  const { sessionClaims } = getAuth(req);
-  const meta = sessionClaims?.publicMetadata as { role?: UserRole } | undefined;
-  return meta?.role ?? "technician";
+  const { userRole } = getAuth(req);
+  return (userRole as UserRole | null) ?? "technician";
 }
 
 function isSupervisorOrLead(role: UserRole): boolean {
@@ -140,7 +139,7 @@ function formatCycle(cycle: Cycle, profile: Profile) {
     harvestStartedAt: cycle.harvestStartedAt?.toISOString() ?? null,
     harvestedQty: cycle.harvestedQty ? Number(cycle.harvestedQty) : null,
     closedAt: cycle.closedAt?.toISOString() ?? null,
-    createdBy: cycle.createdBy ?? null,
+    createdBy: cycle.userId ?? null,
     createdAt: cycle.createdAt.toISOString(),
     daysOverdueFertigation:
       cycle.status === "germination"
@@ -163,7 +162,7 @@ function formatCheck(c: typeof manualChecksTable.$inferSelect) {
     issue: c.issue ?? null,
     notes: c.notes ?? null,
     photoUrls: c.photoUrls ?? [],
-    createdBy: c.createdBy ?? null,
+    createdBy: c.userId ?? null,
     createdAt: c.createdAt.toISOString(),
   };
 }
@@ -238,7 +237,7 @@ router.post("/cycles", enforceAuth, async (req, res) => {
           status: "germination",
           trayPosition: body.trayPosition,
           germinationStartedAt: new Date(),
-          createdBy: auth?.userId ?? null,
+          userId: auth?.userId ?? null,
         })
         .onConflictDoNothing({ target: [cyclesTable.shortId] })
         .returning();
@@ -508,7 +507,7 @@ router.post("/cycles/:id/complete-harvest", enforceAuth, async (req, res) => {
           issue: body.issue ?? null,
           notes: "Flagged at harvest",
           photoUrls: [],
-          createdBy: auth?.userId ?? null,
+          userId: auth?.userId ?? null,
         });
 
         const affectedTrays = (body.fullTrays ?? cycle.fullTrays) + (body.halfTrays ?? cycle.halfTrays) * 0.5;
@@ -524,7 +523,7 @@ router.post("/cycles/:id/complete-harvest", enforceAuth, async (req, res) => {
           halfTrays: body.halfTrays ?? cycle.halfTrays,
           photoUrls: [],
           lossEstimate: String(lossEstimate),
-          createdBy: auth?.userId ?? null,
+          userId: auth?.userId ?? null,
         });
       }
       return row;
@@ -594,7 +593,7 @@ router.post("/cycles/:id/manual-checks", enforceAuth, async (req, res) => {
         issue: body.issue ?? null,
         notes: body.notes ?? null,
         photoUrls: body.photoUrls ?? [],
-        createdBy: auth?.userId ?? null,
+        userId: auth?.userId ?? null,
       })
       .returning();
 
@@ -630,7 +629,7 @@ router.post("/cycles/:id/manual-checks", enforceAuth, async (req, res) => {
         halfTrays: body.halfTrays,
         photoUrls: body.photoUrls ?? [],
         lossEstimate: String(lossEstimate),
-        createdBy: auth?.userId ?? null,
+        userId: auth?.userId ?? null,
       });
     }
 

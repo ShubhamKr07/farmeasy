@@ -14,7 +14,7 @@ function formatTask(t: typeof tasksTable.$inferSelect) {
     assignee: t.assignee ?? null,
     dueAt: t.dueAt?.toISOString() ?? null,
     completedAt: t.completedAt?.toISOString() ?? null,
-    createdBy: t.createdBy ?? null,
+    createdBy: t.userId ?? null,
     createdAt: t.createdAt.toISOString(),
   };
 }
