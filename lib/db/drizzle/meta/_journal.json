@@ -92,6 +92,13 @@
       "when": 1785200000000,
       "tag": "0012_fix_user_role_enum",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785200100000,
+      "tag": "0013_cast_user_id_columns_to_uuid",
+      "breakpoints": true
     }
   ]
 }
