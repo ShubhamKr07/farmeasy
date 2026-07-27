@@ -71,6 +71,13 @@
       "when": 1783292870268,
       "tag": "0009_absurd_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785143780614,
+      "tag": "0010_even_network",
+      "breakpoints": true
     }
   ]
 }

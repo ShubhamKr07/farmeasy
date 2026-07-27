@@ -15,6 +15,7 @@ import {
   primaryKey,
   jsonb,
   vector,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -83,6 +84,19 @@ export const cropCategoryEnum = pgEnum("crop_category", [
   "cereal",
   "other",
 ]);
+
+export const userRoleEnum = pgEnum("user_role", [
+  "technician",
+  "lead",
+  "supervisor",
+]);
+
+export const usersTable = pgTable("users", {
+  id: uuid("id").primaryKey(), // matches auth.users.id — not generated here, Supabase owns it
+  email: text("email").notNull(),
+  role: userRoleEnum("role").notNull().default("technician"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const cropsTable = pgTable("crops", {
   id: serial("id").primaryKey(),
