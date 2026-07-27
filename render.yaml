@@ -6,14 +6,14 @@
 #   2. farmsmart-dashboard    — admin SPA (Web Service, vite preview)
 #   3. farmsmart-recommender  — Python/FastAPI recommender (Web Service, $7/mo starter)
 # Postgres is external (Supabase) — set DATABASE_URL (transaction pooler).
-# Auth is Clerk.
+# Auth is Supabase Auth.
 #
 # FIRST-DEPLOY ORDER:
 #   1. Deploy the API service; note its URL (Render assigns <name>.onrender.com,
 #      suffixed if the bare name is taken, e.g. https://farmsmart-api-j3qt.onrender.com).
 #   2. Set the dashboard's VITE_API_BASE_URL env var to that API URL.
 #   3. Set the API's CORS_ORIGIN env var to the dashboard URL.
-#   4. Add both URLs to Clerk's allowed origins.
+#   4. Add both URLs to Supabase Auth's allowed redirect URLs (if needed).
 #   5. Deploy the dashboard service.
 
 services:
@@ -32,10 +32,10 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false # Supabase transaction-pooler connection string (port 6543) — see ADR-003
-      - key: CLERK_SECRET_KEY
-        sync: false # sk_test_... (dev) or sk_live_... (prod)
-      - key: CLERK_PUBLISHABLE_KEY
-        sync: false
+      - key: SUPABASE_URL
+        value: https://meorgbbtxlpzxyfxmnyu.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # Project Settings -> API -> service_role key (server-side only, never exposed to clients)
       - key: CORS_ORIGIN
         sync: false # dashboard URL, e.g. https://farmsmart-dashboard.onrender.com
       - key: FACILITY_TIMEZONE
@@ -80,8 +80,10 @@ services:
         value: / # SPA served at root
       - key: VITE_API_BASE_URL
         sync: false # API URL, e.g. https://farmsmart-api-j3qt.onrender.com
-      - key: VITE_PUBLIC_CLERK_PUBLISHABLE_KEY
-        sync: false # pk_test_... (dev) or pk_live_... (prod)
+      - key: VITE_SUPABASE_URL
+        value: https://meorgbbtxlpzxyfxmnyu.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false # Project Settings -> API -> anon/public key
 
   # ── Recommender (Python/FastAPI, dlt ingestion + pgvector search) ─────────
   # Talks to the same Supabase Postgres as farmsmart-api (DATABASE_URL). Only

@@ -32,7 +32,7 @@ Indoor vertical farms pack dozens of grow cycles into a small footprint, and the
 - 💵 **Accounting** — QuickBooks Online integration (P&L, balance sheet, invoices, expenses) alongside the operational data, in one dashboard.
 - 📊 **Selectable metrics dashboard** — per-tab metric picker across Overview/Shipments/Inventory/Accounting, backed by a shared query-template registry so a KPI and its chart always come from the same computed number.
 - 🤖 **AI recommender** — a chat assistant grounded in the farm's own live data (yield, cycles, alerts) plus general agronomy knowledge, not a generic chatbot.
-- 🔐 **Clerk authentication** — email/password, Google OAuth, sign-up, and forgot-password, on both the web dashboard and the mobile app.
+- 🔐 **Supabase Auth authentication** — email/password, Google OAuth, sign-up, and forgot-password, on both the web dashboard and the mobile app.
 - 📱 **Mobile-first, OTA-updatable** — Expo/React Native for iOS and Android from one codebase, with EAS Update so JS changes ship to installed apps without a new build.
 
 ---
@@ -68,8 +68,8 @@ The API contract lives in `lib/api-spec/openapi.yaml`; both the mobile app and t
 
 | Layer        | Technology                                             |
 | ------------ | ------------------------------------------------------- |
-| Mobile       | Expo, React Native, TypeScript, Clerk (`@clerk/expo`)   |
-| Web dashboard| React, Vite, TypeScript, Clerk (`@clerk/clerk-react`)   |
+| Mobile       | Expo, React Native, TypeScript, Supabase Auth (`@supabase/supabase-js`)   |
+| Web dashboard| React, Vite, TypeScript, Supabase Auth (`@supabase/supabase-js`)   |
 | Backend API  | Express (Node.js), TypeScript, Drizzle ORM              |
 | Recommender  | Python, FastAPI, Gemini (embeddings + synthesis), Tavily|
 | Database     | PostgreSQL (Supabase)                                   |
@@ -86,7 +86,7 @@ The API contract lives in `lib/api-spec/openapi.yaml`; both the mobile app and t
 - **Node.js** (LTS recommended) and **Python 3** (for the recommender service)
 - **pnpm** — this repo enforces pnpm and will refuse `npm install` / `yarn` by design
 - **PostgreSQL** — a Supabase instance (or any Postgres) for `DATABASE_URL`
-- An **Expo/EAS account** if building the mobile app, and a **Clerk** application (dev instance is fine)
+- An **Expo/EAS account** if building the mobile app, and a **Supabase** project (dev instance is fine)
 
 ### Installation
 
@@ -103,17 +103,19 @@ Each service reads its own env vars (see `render.yaml` for the authoritative lis
 ```bash
 # api-server (artifacts/api-server)
 DATABASE_URL=postgresql://user:password@host/db?sslmode=require
-CLERK_SECRET_KEY=sk_test_...
-CLERK_PUBLISHABLE_KEY=pk_test_...
+SUPABASE_URL=https://meorgbbtxlpzxyfxmnyu.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...
 CORS_ORIGIN=http://localhost:5173
 FACILITY_TIMEZONE=America/New_York
 
 # admin-dashboard (artifacts/admin-dashboard)
 VITE_API_BASE_URL=http://localhost:3000
-VITE_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+VITE_SUPABASE_URL=https://meorgbbtxlpzxyfxmnyu.supabase.co
+VITE_SUPABASE_ANON_KEY=...
 
 # farmeasy mobile app (artifacts/farmeasy)
-EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+EXPO_PUBLIC_SUPABASE_URL=https://meorgbbtxlpzxyfxmnyu.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=...
 EXPO_PUBLIC_DOMAIN=localhost:3000   # api-server host, no protocol
 ```
 
