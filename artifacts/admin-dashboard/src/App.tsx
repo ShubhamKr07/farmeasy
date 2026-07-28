@@ -142,12 +142,41 @@ function AuthGate() {
   return <Router />;
 }
 
+/**
+ * Completes the Supabase PKCE OAuth flow. After Google redirects back with a
+ * `?code=...` query param, exchange it for a session explicitly (the client is
+ * configured with `detectSessionInUrl: false`). Strips the code from the URL
+ * afterward so a reload doesn't attempt a second (already-consumed) exchange.
+ */
+function OAuthCallbackHandler() {
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    if (!code) return;
+    void (async () => {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      try {
+        window.localStorage.setItem(
+          "__oauth_result",
+          JSON.stringify({ ok: !error, error: error?.message ?? null, at: Date.now() }),
+        );
+      } catch {
+        /* ignore */
+      }
+      url.searchParams.delete("code");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    })();
+  }, []);
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <SupabaseAuthBridge />
+          <OAuthCallbackHandler />
           <AuthGate />
         </WouterRouter>
         <Toaster />
