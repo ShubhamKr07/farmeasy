@@ -155,13 +155,8 @@ function OAuthCallbackHandler() {
     if (!code) return;
     void (async () => {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
-      try {
-        window.localStorage.setItem(
-          "__oauth_result",
-          JSON.stringify({ ok: !error, error: error?.message ?? null, at: Date.now() }),
-        );
-      } catch {
-        /* ignore */
+      if (error) {
+        console.error("[OAuth] code exchange failed:", error.message);
       }
       url.searchParams.delete("code");
       window.history.replaceState({}, "", url.pathname + url.search + url.hash);
