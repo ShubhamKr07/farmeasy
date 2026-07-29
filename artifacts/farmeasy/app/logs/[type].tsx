@@ -65,6 +65,7 @@ export default function LogEntryScreen() {
   const [pickerField, setPickerField] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(false);
   const postLog = usePostFacilityLog();
   const fieldRefs = useRef<Record<string, TextInput | null>>({});
 
@@ -135,7 +136,15 @@ export default function LogEntryScreen() {
       return;
     }
     setUploading(true);
-    const data = await buildData();
+    setUploadError(false);
+    let data: Record<string, unknown>;
+    try {
+      data = await buildData();
+    } catch {
+      setUploading(false);
+      setUploadError(true);
+      return;
+    }
     setUploading(false);
     postLog.mutate(
       {
@@ -380,7 +389,9 @@ export default function LogEntryScreen() {
             />
           </View>
 
-          {postLog.isError && <Text style={s.errorText}>Something went wrong. Try again.</Text>}
+          {(postLog.isError || uploadError) && (
+            <Text style={s.errorText}>Something went wrong. Try again.</Text>
+          )}
 
           <Pressable
             style={[s.saveBtn, (postLog.isPending || uploading) && s.saveBtnDisabled]}
