@@ -1,5 +1,4 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
-import path from "node:path";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { supabaseAuthMiddleware, getAuth } from "./middlewares/supabaseAuth";
@@ -22,7 +21,6 @@ import { accountingRouter, accountingPublicRouter } from "./routes/accounting";
 import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import { logger } from "./lib/logger";
-import { UPLOADS_DIR } from "./routes/media";
 
 const app: Express = express();
 
@@ -47,7 +45,6 @@ app.use(
 );
 // CORS: in production set CORS_ORIGIN to the dashboard URL; unset = allow all (dev).
 app.use(cors({ origin: process.env.CORS_ORIGIN ?? true }));
-app.use("/uploads", express.static(path.resolve(UPLOADS_DIR)));
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(supabaseAuthMiddleware);
