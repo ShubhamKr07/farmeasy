@@ -42,6 +42,7 @@ router.post("/media/upload", enforceAuth, upload.single("file"), async (req, res
     .upload(filename, req.file.buffer, { contentType: req.file.mimetype });
 
   if (error) {
+    req.log.error({ err: error }, "supabase storage upload failed");
     return res.status(502).json({ error: "Upload failed" });
   }
 
