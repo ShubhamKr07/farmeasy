@@ -6,6 +6,7 @@
     "codegen": "orval --config ./orval.config.ts && pnpm -w run typecheck:libs"
   },
   "devDependencies": {
+    "@tanstack/react-query": "catalog:",
     "orval": "^8.9.1"
   }
 }
