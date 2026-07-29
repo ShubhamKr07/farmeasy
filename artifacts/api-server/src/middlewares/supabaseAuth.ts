@@ -2,14 +2,20 @@ import type { Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
+// Strip whitespace: Render env vars pasted line-wrapped embed a literal
+// newline mid-value (see the same fix in admin-dashboard's supabase.ts). A
+// newline in the `apikey`/`Authorization` header breaks every Supabase
+// request; neither a URL nor a JWT legitimately contains whitespace.
+const SUPABASE_URL = process.env.SUPABASE_URL!.replace(/\s/g, "");
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!.replace(/\s/g, "");
+
 const JWKS = createRemoteJWKSet(
   new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`),
 );
 
 export const supabaseAdmin = createClient(
   SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  SUPABASE_SERVICE_ROLE_KEY,
 );
 
 declare global {
