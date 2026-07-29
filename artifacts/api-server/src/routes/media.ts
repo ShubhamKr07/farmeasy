@@ -1,23 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { getAuth } from "../middlewares/supabaseAuth";
+import { getAuth, supabaseAdmin } from "../middlewares/supabaseAuth";
 import multer from "multer";
 import path from "node:path";
-import fs from "node:fs";
 import { randomBytes } from "node:crypto";
 
-export const UPLOADS_DIR = process.env.UPLOADS_DIR ?? "./uploads";
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".jpg";
-    cb(null, `${randomBytes(8).toString("hex")}${ext}`);
-  },
-});
+const MEDIA_BUCKET = "media";
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
@@ -39,13 +29,24 @@ function enforceAuth(req: Request, res: Response, next: NextFunction) {
 
 const router = Router();
 
-router.post("/media/upload", enforceAuth, upload.single("file"), (req, res) => {
+router.post("/media/upload", enforceAuth, upload.single("file"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file provided" });
   }
-  const publicUrl = (process.env.PUBLIC_URL ?? "").replace(/\/+$/, "");
-  const url = `${publicUrl}/uploads/${req.file.filename}`;
-  return res.json({ url });
+
+  const ext = path.extname(req.file.originalname) || ".jpg";
+  const filename = `${randomBytes(8).toString("hex")}${ext}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from(MEDIA_BUCKET)
+    .upload(filename, req.file.buffer, { contentType: req.file.mimetype });
+
+  if (error) {
+    return res.status(502).json({ error: "Upload failed" });
+  }
+
+  const { data } = supabaseAdmin.storage.from(MEDIA_BUCKET).getPublicUrl(filename);
+  return res.json({ url: data.publicUrl });
 });
 
 export default router;
