@@ -48,14 +48,65 @@ export default function SignInPage() {
     setOauthLoading(true);
     setErrorMessage(null);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const redirectTo = Linking.createURL("/");
+
+      if (Platform.OS === "web") {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: { redirectTo },
+        });
+        if (error) {
+          console.error("[SignIn] Google OAuth error:", error.message);
+          setErrorMessage(error.message);
+        }
+        return;
+      }
+
+      // Native: signInWithOAuth doesn't auto-navigate. Get the provider URL,
+      // open it in an in-app browser session, then exchange the returned
+      // auth code for a session once the OS routes the redirect back in.
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: Linking.createURL("/") },
+        options: { redirectTo, skipBrowserRedirect: true },
       });
       if (error) {
         console.error("[SignIn] Google OAuth error:", error.message);
         setErrorMessage(error.message);
+        return;
       }
+      if (!data?.url) {
+        setErrorMessage("Unable to sign in with Google.");
+        return;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+      if (result.type !== "success" || !result.url) {
+        return;
+      }
+
+      // Client uses the (default) implicit flow, so Supabase returns tokens
+      // in the redirect URL's fragment, not a `?code=` query param.
+      const hash = result.url.split("#")[1] ?? "";
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
+      if (!accessToken || !refreshToken) {
+        setErrorMessage("Unable to sign in with Google.");
+        return;
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (sessionError) {
+        console.error("[SignIn] Google OAuth session error:", sessionError.message);
+        setErrorMessage(sessionError.message);
+        return;
+      }
+
+      router.push("/" as Href);
     } catch (err: any) {
       console.error("[SignIn] Google OAuth exception:", err?.message ?? err);
       setErrorMessage(err?.message ?? "Unable to sign in with Google.");
