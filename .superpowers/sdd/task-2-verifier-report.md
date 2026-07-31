@@ -28,8 +28,9 @@ pipeline landed correctly by:
    mismatched.
 5. **Confirming the `media` storage bucket exists and is public**
    (`storage.listBuckets()`).
-6. **Confirming ≥3 migrations** are recorded in
-   `supabase_migrations.schema_migrations`.
+6. **Confirming migration 00002's RLS policies are live**: an unauthenticated
+   anon client attempting to read the test user's `public.users` row must get
+   zero rows back.
 7. **Cleaning up** in a `finally` block: deletes the `public.users` row, then
    deletes the Auth user (`auth.admin.deleteUser()`), logging each step.
 
@@ -113,3 +114,34 @@ pnpm for the `artifacts/*` packages and hoisted to the workspace store).
   and the Auth user regardless of pass/fail/abort, so no test artifacts linger.
 - **Verified syntax-only** via `node --check scripts/ci/verify-staging-supabase.mjs`
   (per instructions, the script was not run against any real Supabase project).
+
+## Live run against staging (post-write, by orchestrator)
+
+Ran against the real `farmsmart-staging` project (ref `jkxlbndnatkxmhpumvhh`).
+Two real bugs found and fixed before it passed:
+
+1. **`.from("supabase_migrations.schema_migrations")` always fails** — that
+   schema isn't exposed via PostgREST (`config.toml api.schemas` is
+   intentionally `["public", "graphql_public"]` only; migration bookkeeping
+   has no business being publicly queryable). Replaced with an effect-based
+   check: an anonymous client must get 0 rows reading another user's
+   `public.users` row, which directly confirms migration `00002`'s RLS
+   policies are live. Migrations `00001`/`00003` were already confirmed
+   indirectly by the hook and bucket checks.
+2. **`supabase config push` silently no-ops on auth hooks.** Pushing a
+   `[auth.hook.custom_access_token]` block from a local `config.toml` reported
+   `auth: updated` / `up_to_date` on every run, but a direct Management API
+   read (`GET /v1/projects/{ref}/config/auth`) showed
+   `hook_custom_access_token_enabled: false` the whole time — the CLI's own
+   diff output never even printed a line for that section, which was the
+   tell. Worked around by calling the Management API directly:
+   `PATCH /v1/projects/{ref}/config/auth` with
+   `{"hook_custom_access_token_enabled": true, "hook_custom_access_token_uri": "pg-functions://postgres/public/custom_access_token_hook"}`.
+   This is a CLI limitation, not a repo bug — worth a note in the runbook for
+   whoever configures the production project's hook the same way (or for
+   Release 3/4 when staging config gets touched again): **verify auth hooks
+   via the Management API GET, not by trusting `config push`'s reported
+   status.**
+
+Final run: all 3 checks passed (`JWT user_role claim`, `media bucket`, `RLS
+enforcement`); cleanup deleted the test profile row and Auth user.

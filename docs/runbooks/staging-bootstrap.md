@@ -19,14 +19,11 @@ distinct project from production — **do not** copy, clone, or branch productio
 data into it. Seed staging with synthetic/test fixtures only.
 
 > **Status (2026-07-31):** Project created — `farmsmart-staging`
-> (ref `jkxlbndnatkxmhpumvhh`, region `us-west-1`, Postgres 17). URL and anon
-> key collected. **Open TODOs, not yet blocking Tasks 3/5/6:**
-> - **DB direct connection string.** Supabase only shows the database
->   password once at project creation (or on manual reset); it is not
->   retrievable via API/CLI after the fact. Reset it from *Project Settings →
->   Database → Reset database password* and use it to build
->   `STAGING_DATABASE_URL_DIRECT` before running Step 3 of Foundation Task 2
->   (schema apply) or Foundation Task 4 (disposable-replay history check).
+> (ref `jkxlbndnatkxmhpumvhh`, region `us-west-1`, Postgres 17). URL, anon key,
+> and DB password collected. Drizzle + Supabase migrations applied. Custom
+> access-token hook registered and verified live (`scripts/ci/verify-staging-supabase.mjs`
+> passes: JWT claim, bucket, RLS checks all green). **Open TODOs, not blocking
+> any Foundation task:**
 > - **SMTP test inbox** (`STAGING_MAILBOX_API_TOKEN`) — no Mailtrap/Mailosaur-
 >   style account exists yet. Needed only for `verify-staging-supabase.mjs`'s
 >   OTP-retrieval step and Release 1 Task 2's automated signup script; not
@@ -35,6 +32,16 @@ data into it. Seed staging with synthetic/test fixtures only.
 >   (either a new OAuth client or an added redirect on the existing
 >   production one). Needed only for staging Google sign-in testing, not for
 >   the rest of Foundation.
+>
+> **CLI gotcha for whoever touches Auth config next (Release 3/4, or the
+> production hook if it's ever re-registered):** `supabase config push` for a
+> `[auth.hook.*]` block reports `auth: updated` / `up_to_date` even when it
+> silently did nothing — verified via a direct Management API read
+> (`GET /v1/projects/{ref}/config/auth`) that `hook_custom_access_token_enabled`
+> stayed `false` after two "successful" pushes. Worked around with a direct
+> `PATCH /v1/projects/{ref}/config/auth` call. **Always verify auth hook state
+> via the Management API GET after any config push that touches `[auth.hook.*]`
+> — do not trust the CLI's reported status for that section.**
 
 From the new staging project's *Project Settings → Database → Connection
 string* and *Project Settings → API*, collect:

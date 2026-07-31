@@ -512,6 +512,9 @@ importers:
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.9(react@19.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.2
       '@types/react':
         specifier: ~19.1.10
         version: 19.1.17
@@ -866,6 +869,9 @@ importers:
 
   scripts:
     dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.110.8
+        version: 2.110.8
       '@workspace/db':
         specifier: workspace:*
         version: link:../lib/db

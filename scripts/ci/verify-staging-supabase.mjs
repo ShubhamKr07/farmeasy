@@ -243,34 +243,46 @@ try {
     }
   }
 
-  // 6. Confirm 3 migrations are recorded.
-  console.log("▶ checking applied migrations");
-  const { data: migrations, error: migrationsError } = await supabaseAdmin
-    .from("supabase_migrations.schema_migrations")
-    .select("version")
-    .order("version", { ascending: true });
+  // 6. Confirm migration 00002's RLS policies are live.
+  //
+  //    supabase_migrations.schema_migrations isn't exposed via PostgREST
+  //    (config.toml api.schemas is ["public", "graphql_public"] only, and
+  //    should stay that way — migration bookkeeping has no business being
+  //    publicly queryable), so a row-count check on it always 404s
+  //    regardless of migration state. Check the migration's actual EFFECT
+  //    instead: an anonymous, unauthenticated client must not be able to
+  //    read another user's public.users row. Migrations 00001 and 00003's
+  //    effects are already confirmed above (hook fired with the right
+  //    claim; bucket exists and is public), so this covers 00002.
+  console.log("▶ checking RLS enforcement on public.users (migration 00002)");
+  const supabaseAnonUnauthenticated = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+  });
+  const { data: rlsProbeRows, error: rlsProbeError } = await supabaseAnonUnauthenticated
+    .from("users")
+    .select("id")
+    .eq("id", userId);
 
-  if (migrationsError) {
+  if (rlsProbeError) {
     checks.push({
-      name: "3 migrations recorded",
+      name: "RLS blocks anonymous reads of public.users",
       ok: false,
-      detail: `query failed: ${migrationsError.message}`,
+      detail: `probe query itself failed: ${rlsProbeError.message}`,
     });
-    console.error(`✗ migrations query failed: ${migrationsError.message}`);
+    console.error(`✗ RLS probe query failed: ${rlsProbeError.message}`);
   } else {
-    const count = migrations?.length ?? 0;
-    const migOk = count >= 3;
+    const rlsOk = (rlsProbeRows?.length ?? 0) === 0;
     checks.push({
-      name: "3 migrations recorded",
-      ok: migOk,
-      detail: `found ${count}: ${(migrations || [])
-        .map((m) => m.version)
-        .join(", ")}`,
+      name: "RLS blocks anonymous reads of public.users",
+      ok: rlsOk,
+      detail: rlsOk
+        ? "anonymous client got 0 rows, as expected"
+        : `anonymous client read ${rlsProbeRows.length} row(s) — RLS is not enforcing`,
     });
-    if (migOk) {
-      console.log(`✓ ${count} migrations recorded (>= 3)`);
+    if (rlsOk) {
+      console.log("✓ RLS blocks anonymous reads of public.users");
     } else {
-      console.error(`✗ expected >=3 migrations, found ${count}`);
+      console.error(`✗ RLS NOT enforcing: anon read ${rlsProbeRows.length} row(s)`);
     }
   }
 
