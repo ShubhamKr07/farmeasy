@@ -158,7 +158,12 @@ jobs:
       - name: npm audit (non-blocking)
         run: pnpm audit --prod --json > npm-audit.json || true
       - name: Export Python requirements
-        run: uv export --directory artifacts/recommender-svc --locked --no-dev --format requirements.txt --output-file recommender-requirements.txt
+        # --output-file is resolved relative to --directory, not the invocation
+        # CWD (repo root) -- without ../.., this silently lands at
+        # artifacts/recommender-svc/recommender-requirements.txt and the next
+        # step's `pip-audit -r recommender-requirements.txt` (run from repo
+        # root) can't find it.
+        run: uv export --directory artifacts/recommender-svc --locked --no-dev --format requirements.txt --output-file ../../recommender-requirements.txt
       - name: pip-audit (non-blocking)
         run: uvx --from pip-audit pip-audit -r recommender-requirements.txt -f json -o python-audit.json || true
       - name: Run audit validation gate
@@ -179,6 +184,11 @@ jobs:
   blueprint:
     name: Render blueprint validation
     runs-on: ubuntu-24.04
+    # Read-only validation, not a deploy — the `staging` environment has no
+    # approval gate, so this never blocks CI on a manual review. Needed
+    # because RENDER_WORKSPACE_ID/RENDER_API_KEY are environment-scoped, not
+    # repository-level.
+    environment: staging
     env:
       RENDER_VERSION: "2.22.0"
       RENDER_SHA256: "6cdcd11897b7bd7e673317e6f4aaf041b654d818444f3b1efec7240a835f79ec"
@@ -193,7 +203,8 @@ jobs:
           sudo install /tmp/render-cli/cli_v${RENDER_VERSION} /usr/local/bin/render
       - name: Validate render.yaml
         env:
-          RENDER_WORKSPACE_ID: ${{ secrets.RENDER_WORKSPACE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_WORKSPACE_ID: ${{ vars.RENDER_WORKSPACE_ID }}
         run: render blueprints validate render.yaml --workspace "$RENDER_WORKSPACE_ID" --confirm -o text
 
   # ── 7. required ───────────────────────────────────────────────────────────

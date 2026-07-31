@@ -12,10 +12,11 @@
 // Run with:  pnpm --filter @workspace/farmeasy run test
 import { spawn } from "node:child_process";
 import { glob } from "node:fs/promises";
-import { relative } from "node:path";
+import { relative, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkgRoot = fileURLToPath(new URL("..", import.meta.url));
+const tsxBin = join(pkgRoot, "node_modules", ".bin", "tsx");
 
 // Collect every TypeScript test file below the package, including utils/ and
 // planned hooks/. `exclude` keeps node_modules, build output, and the Expo
@@ -41,8 +42,13 @@ if (count === 0) {
   process.exit(1);
 }
 
-const args = ["--import", "tsx/esm", "--test", ...testFiles];
-const child = spawn(process.execPath, args, { stdio: "inherit", cwd: pkgRoot });
+// `node --import tsx/esm --test <files>` hits Node's ERR_REQUIRE_CYCLE_MODULE
+// on Node 22+ when the test runner's internal file-loading require()'s an ESM
+// module in a cycle through the tsx/esm loader hooks. tsx's own `--test` CLI
+// wrapper (which still runs on node:test under the hood) does not hit this —
+// verified locally on Node 26.4.0 and matches the pinned CI Node 22.23.2.
+const args = ["--test", ...testFiles];
+const child = spawn(tsxBin, args, { stdio: "inherit", cwd: pkgRoot });
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
   process.exit(code ?? 1);
