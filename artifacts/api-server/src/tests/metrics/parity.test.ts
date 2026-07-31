@@ -12,6 +12,14 @@ import path from "node:path";
  * Gated on TEST_DATABASE_URL. Run with the metrics fixture suite.
  */
 const TEST_DB = process.env.TEST_DATABASE_URL;
+const REQUIRE_TEST_DB = process.env.REQUIRE_TEST_DATABASE === "true";
+
+if (REQUIRE_TEST_DB && !TEST_DB) {
+  throw new Error(
+    "TEST_DATABASE_URL is required when REQUIRE_TEST_DATABASE=true",
+  );
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {

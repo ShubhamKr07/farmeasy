@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test src/lib/utils.test.ts src/tests/metrics/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "test:metrics": "node --import tsx/esm --test src/tests/metrics/*.test.ts"
   },
   "dependencies": {
