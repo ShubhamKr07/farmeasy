@@ -128,12 +128,14 @@ jobs:
         run: uv run --directory artifacts/recommender-svc pytest -v
 
   # ── 5. dependency-audit ───────────────────────────────────────────────────
-  # Generates npm + Python audit reports and uploads them as artifacts. The
-  # audit commands themselves are non-blocking (|| true), so this job always
-  # passes even if vulnerabilities are found — Task 6 will gate on findings
-  # once remediation lands.
+  # Generates npm + Python audit reports and runs the production vulnerability
+  # baseline gate. The audit report-generation commands themselves are
+  # non-blocking (|| true) so the artifacts are always produced; the gate
+  # (`check-dependency-audit.mjs`) then fails the job on any unresolved
+  # high/critical advisory. Allowlisted advisories must have an unexpired
+  # JSON record (docs/security/dependency-audit-allowlist.json).
   dependency-audit:
-    name: Dependency audit (reports only)
+    name: Dependency audit (gated on high/critical)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -159,6 +161,8 @@ jobs:
         run: uv export --directory artifacts/recommender-svc --locked --no-dev --format requirements.txt --output-file recommender-requirements.txt
       - name: pip-audit (non-blocking)
         run: uvx --from pip-audit pip-audit -r recommender-requirements.txt -f json -o python-audit.json || true
+      - name: Run audit validation gate
+        run: node scripts/ci/check-dependency-audit.mjs
       - name: Upload audit reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

@@ -160,6 +160,38 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+  # ──────────────────────────────────────────────────────────────────────
+  # Security overrides — production vulnerability baseline (Task 6).
+  # Each entry forces the named transitive dependency to a minimum patched
+  # version across every major-version line in the dependency tree. Bumping
+  # direct dependencies was attempted first; the remainder are transitive.
+  # Keep in sync with docs/security/dependency-audit-baseline.md.
+  # ──────────────────────────────────────────────────────────────────────
+  tar: "7.5.21"
+  http-proxy-middleware: "4.1.1"
+  undici: "6.27.0"
+  # brace-expansion ships three independent major-version lines
+  brace-expansion: "^1.1.16"
+  "brace-expansion@>=2.0.0 <3.0.0": "^2.1.2"
+  "brace-expansion@>=3.0.0": "^5.0.8"
+  # js-yaml ships two independent major-version lines
+  js-yaml: "^3.15.0"
+  "js-yaml@>=4.0.0": "^4.3.0"
+  shell-quote: "1.9.0"
+  fast-uri: "3.1.4"
+  postcss: "8.5.18"
+  uuid: "11.1.1"
+  qs: "6.15.2"
+  "@babel/core": "7.29.7"
+  body-parser: "2.3.0"
+
+auditConfig:
+  ignoreGhsas:
+    # brace-expansion DoS — accepted false positive, see
+    # docs/security/dependency-audit-allowlist.json for the time-bounded
+    # justification. The unexpired JSON record is the source of truth; this
+    # mirror suppresses the native pnpm audit noise only.
+    - GHSA-mh99-v99m-4gvg
 
 allowBuilds:
   '@clerk/shared': true

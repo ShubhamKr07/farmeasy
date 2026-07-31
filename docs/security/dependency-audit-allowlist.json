@@ -1,0 +1,11 @@
+[
+  {
+    "ecosystem": "npm",
+    "ghsaId": "GHSA-mh99-v99m-4gvg",
+    "dependencyPath": "brace-expansion",
+    "owner": "security-team",
+    "rationale": "False positive. GHSA-mh99-v99m-4gvg (brace-expansion DoS, vulnerable range '<=5.0.7') is published against the 5.x line but the npm advisory DB semver-matches it against every brace-expansion version < 5.0.8, including the 1.x and 2.x major lines. The 1.x/2.x lines are covered by a SEPARATE advisory, GHSA-3jxr-9vmj-r5cp, which is already remediated via pnpm overrides (brace-expansion ^1.1.16 and ^2.1.2). The 5.x line is bumped to ^5.0.8 (installed 5.0.9). Installed versions in the tree are 1.1.18, 2.1.4, and 5.0.9 — all at or above their respective patched thresholds, so no version is actually exploitable. Re-evaluate when brace-expansion 1.x/2.x are removed from the tree or when the upstream advisory is rescoped.",
+    "acceptanceDate": "2026-01-15",
+    "expiryDate": "2026-08-30"
+  }
+]
