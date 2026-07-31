@@ -18,6 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/supabase/migrations"
 cp "$ROOT/supabase/config.toml" "$WORKDIR/supabase/config.toml"
 
