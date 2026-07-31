@@ -40,6 +40,30 @@ data into it. Seed staging with synthetic/test fixtures only.
 > locally: `PGSSLROOTCERT=<cert> supabase db push --dry-run` connects clean
 > against staging.
 >
+> **Production migration history repaired (2026-07-31).** This repo's
+> `supabase/migrations/*.sql` files use plain `00001`/`00002`/`00003` name
+> prefixes instead of the Supabase CLI's usual 14-digit timestamp convention
+> — pre-existing from before Foundation. On production,
+> `supabase_migrations.schema_migrations` only recorded one row for
+> `00003_media_storage_bucket.sql`, under version key `20260728174133` (a
+> real apply timestamp, not `00003`) — `00001`/`00002` were never recorded
+> at all (their content is live on production; they were most likely
+> applied earlier via the Supabase MCP `apply_migration` tool, which runs
+> the SQL but doesn't write to this bookkeeping table the way `supabase db
+> push` does). `supabase db push --dry-run` refused to run
+> ("Remote migration versions not found in local migrations directory"),
+> exactly as the Supabase CLI is supposed to do on a mismatch, until
+> repaired:
+> ```bash
+> supabase migration repair --db-url "$PRODUCTION_DATABASE_URL_DIRECT" --status reverted 20260728174133
+> supabase migration repair --db-url "$PRODUCTION_DATABASE_URL_DIRECT" --status applied 00001 00002 00003
+> ```
+> Bookkeeping-only — verified before and after that `storage.buckets` (the
+> `media` row) was untouched. `supabase db push --dry-run` now reports
+> "Remote database is up to date." Staging never had this problem (its 3
+> migrations were all applied fresh, this session, via `supabase db push`
+> from the start).
+>
 > **CLI gotcha for whoever touches Auth config next (Release 3/4, or the
 > production hook if it's ever re-registered):** `supabase config push` for a
 > `[auth.hook.*]` block reports `auth: updated` / `up_to_date` even when it
