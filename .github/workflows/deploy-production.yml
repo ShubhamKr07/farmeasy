@@ -49,10 +49,14 @@ jobs:
   # reviewers, so this never blocks).
   validate-staging-evidence:
     name: Validate staging deploy evidence
+    # No `event == 'push'` check here: this job's github.event.workflow_run is
+    # Deploy Staging's own run, whose triggering event is `workflow_run` (it
+    # was itself triggered by CI completing), never `push`. Checking for
+    # 'push' here would always evaluate false and this job — and therefore
+    # the entire production promotion path — would silently never run.
     if: >-
       ${{
         github.event.workflow_run.conclusion == 'success'
-        && github.event.workflow_run.event == 'push'
         && github.event.workflow_run.head_branch == 'main'
         && github.event.workflow_run.head_repository.full_name == github.repository
       }}
