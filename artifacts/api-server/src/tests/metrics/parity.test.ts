@@ -41,9 +41,13 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
   });
 
   test("sh.rev.total: client SUM === SQL scalarAgg", async () => {
+    // node-postgres returns Postgres `numeric` columns as strings (to avoid
+    // float precision loss), not numbers -- despite the TS annotation below.
+    // Without Number(), `a + r.revenue_usd` string-concatenates instead of
+    // summing once `a` picks up a non-zero starting value.
     const rows = await db.execute(sql`SELECT revenue_usd FROM shipments WHERE deleted_at IS NULL`);
-    const clientSum = (rows.rows as { revenue_usd: number | null }[])
-      .reduce((a, r) => a + (r.revenue_usd ?? 0), 0);
+    const clientSum = (rows.rows as { revenue_usd: string | number | null }[])
+      .reduce((a, r) => a + Number(r.revenue_usd ?? 0), 0);
     const sqlRes = await templates.scalarAgg({
       table: "shipments", measure: "revenue_usd", where: "deleted_at IS NULL",
     });
@@ -51,9 +55,10 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
   });
 
   test("sh.sold.total: client SUM === SQL scalarAgg", async () => {
+    // Same numeric-as-string coercion as sh.rev.total above.
     const rows = await db.execute(sql`SELECT yield_sold_kg FROM shipments WHERE deleted_at IS NULL`);
-    const clientSum = (rows.rows as { yield_sold_kg: number | null }[])
-      .reduce((a, r) => a + (r.yield_sold_kg ?? 0), 0);
+    const clientSum = (rows.rows as { yield_sold_kg: string | number | null }[])
+      .reduce((a, r) => a + Number(r.yield_sold_kg ?? 0), 0);
     const sqlRes = await templates.scalarAgg({
       table: "shipments", measure: "yield_sold_kg", where: "deleted_at IS NULL",
     });

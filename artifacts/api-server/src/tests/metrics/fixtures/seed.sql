@@ -7,7 +7,7 @@ BEGIN;
 TRUNCATE
   sensor_readings, sensors, stock_movements, bad_tray_entries, tasks,
   alerts, shipments, inventory_items, cycle_seed_lots, cycles,
-  seed_lots, growth_profiles, crops
+  seed_lots, growth_profiles, crops, channels, rooms
 RESTART IDENTITY CASCADE;
 
 INSERT INTO crops (id, name, scientific_name, category) VALUES
@@ -69,9 +69,17 @@ VALUES
   (1, 1, 'mold',    'high',   2, 0, 200, '2026-06-14 09:00:00'),
   (2, 2, 'dry',     'low',    1, 1, 50,  '2026-06-19 09:00:00');
 
+-- sensors.channel_id/rack_id has a CHECK requiring at least one non-null
+-- (sensors_placement), so a minimal room/channel is seeded for placement.
+INSERT INTO rooms (id, name, sort_order) VALUES
+  (1, 'seeding', 0);
+
+INSERT INTO channels (id, room_id, label, position_index) VALUES
+  (1, 1, 'Room A', 0);
+
 INSERT INTO sensors (id, channel_id, rack_id, type, label, unit, last_value, last_read_at)
 VALUES
-  (1, NULL, NULL, 'temp', 'Room A temp', 'C', 24, '2026-07-03 10:00:00');
+  (1, 1, NULL, 'temp', 'Room A temp', 'C', 24, '2026-07-03 10:00:00');
 
 INSERT INTO sensor_readings (id, sensor_id, metric, value, read_at)
 VALUES
