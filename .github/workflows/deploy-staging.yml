@@ -1,0 +1,206 @@
+# FarmSmart — Deploy Staging workflow
+#
+# Promotes the exact CI-tested SHA to the three staging Render services and
+# the staging Supabase database. Triggered ONLY by a successful `CI` workflow
+# run on `main` in the same repository — never on an arbitrary push and never
+# from a fork.
+#
+# The SHA that CI green-tagged (`github.event.workflow_run.head_sha`) is the
+# only SHA this workflow may deploy. It is checked out explicitly, verified to
+# be the working-tree HEAD and an ancestor of `origin/main`, and then pinned to
+# every Render deploy via `--commit "$DEPLOY_SHA"`. There is no "latest" lookup
+# anywhere in the chain.
+#
+# After the deploy goes live at that SHA, immutable evidence
+# (`deploy-metadata.json`) is uploaded as a 30-day artifact so the production
+# workflow can promote the identical SHA without re-resolving anything.
+#
+# Pinned tool versions and action SHAs are reused verbatim from ci.yml:
+#   - Node:     22.23.2
+#   - pnpm:     11.17.0  (package.json#packageManager)
+#   - uv:       0.11.26
+#   - Render:   2.22.0   (checksum-verified, sha256 below)
+#   - Supabase: 2.109.1  (via devDependencies + frozen install)
+
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-database
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "11.17.0"
+  UV_VERSION: "0.11.26"
+  RENDER_VERSION: "2.22.0"
+  RENDER_SHA256: "6cdcd11897b7bd7e673317e6f4aaf041b654d818444f3b1efec7240a835f79ec"
+
+jobs:
+  deploy-staging:
+    name: Deploy to staging (exact CI-tested SHA)
+    # Only act on a *successful* CI run that was itself a `push` to `main` in
+    # this repository (not a PR, not a fork). `workflow_run` fires for every
+    # completed upstream run regardless of conclusion, so the conclusion/event/
+    # branch/repository predicates are mandatory here.
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_branch == 'main'
+        && github.event.workflow_run.head_repository.full_name == github.repository
+      }}
+    runs-on: ubuntu-24.04
+    environment: staging
+    env:
+      # Single source of truth for the SHA being deployed. Derived once from
+      # the upstream CI run and referenced everywhere else — never re-resolved.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout exact CI-tested SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out HEAD is DEPLOY_SHA and an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          echo "DEPLOY_SHA=${DEPLOY_SHA}"
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [ "${checked_out_sha}" != "${DEPLOY_SHA}" ]; then
+            echo "::error::Checked-out HEAD (${checked_out_sha}) does not equal DEPLOY_SHA (${DEPLOY_SHA})"
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${DEPLOY_SHA}" origin/main; then
+            echo "::error::DEPLOY_SHA (${DEPLOY_SHA}) is not an ancestor of origin/main — refusing to deploy"
+            exit 1
+          fi
+          echo "Verified: working tree is exactly DEPLOY_SHA and DEPLOY_SHA is on origin/main."
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install Render CLI (checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/render.zip \
+            "https://github.com/render-oss/cli/releases/download/v${RENDER_VERSION}/cli_${RENDER_VERSION}_linux_amd64.zip"
+          echo "${RENDER_SHA256}  /tmp/render.zip" | sha256sum -c -
+          unzip -q /tmp/render.zip -d /tmp/render-cli
+          sudo install "/tmp/render-cli/cli_v${RENDER_VERSION}" /usr/local/bin/render
+          render --version
+
+      - name: Install dependencies (pins Supabase CLI 2.109.1)
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply staging migrations
+        env:
+          STAGING_DATABASE_CA_CERT: ${{ secrets.STAGING_DATABASE_CA_CERT }}
+          STAGING_DATABASE_URL_DIRECT: ${{ secrets.STAGING_DATABASE_URL_DIRECT }}
+        run: |
+          set -euo pipefail
+          CA_FILE="${RUNNER_TEMP:-/tmp}/staging-db-ca.pem"
+          install -m 600 /dev/null "$CA_FILE"
+          printf '%s' "$STAGING_DATABASE_CA_CERT" > "$CA_FILE"
+          PGSSLROOTCERT="$CA_FILE" DATABASE_CA_CERT="$STAGING_DATABASE_CA_CERT" \
+            DATABASE_URL="$STAGING_DATABASE_URL_DIRECT" pnpm --filter @workspace/db run db:migrate
+          PGSSLROOTCERT="$CA_FILE" pnpm exec supabase db push --db-url "$STAGING_DATABASE_URL_DIRECT"
+
+      - name: Deploy staging services and wait for live at DEPLOY_SHA
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_STAGING_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_STAGING_RECOMMENDER_SERVICE_ID }}
+          RENDER_STAGING_API_SERVICE_ID: ${{ vars.RENDER_STAGING_API_SERVICE_ID }}
+          RENDER_STAGING_DASHBOARD_SERVICE_ID: ${{ vars.RENDER_STAGING_DASHBOARD_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          render deploys create "$RENDER_STAGING_RECOMMENDER_SERVICE_ID" --commit "$DEPLOY_SHA" --wait --confirm -o json > recommender-deploy.json
+          render deploys create "$RENDER_STAGING_API_SERVICE_ID" --commit "$DEPLOY_SHA" --wait --confirm -o json > api-deploy.json
+          render deploys create "$RENDER_STAGING_DASHBOARD_SERVICE_ID" --commit "$DEPLOY_SHA" --wait --confirm -o json > dashboard-deploy.json
+
+      - name: Validate deploys live at DEPLOY_SHA and persist immutable metadata
+        env:
+          RENDER_STAGING_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_STAGING_RECOMMENDER_SERVICE_ID }}
+          RENDER_STAGING_API_SERVICE_ID: ${{ vars.RENDER_STAGING_API_SERVICE_ID }}
+          RENDER_STAGING_DASHBOARD_SERVICE_ID: ${{ vars.RENDER_STAGING_DASHBOARD_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          # Each `--wait` deploy already blocks to a terminal state and fails
+          # the step on error. Re-confirm from the JSON responses that every
+          # deploy is `live` *and* pinned to DEPLOY_SHA before recording it.
+          for svc in recommender api dashboard; do
+            if ! jq -e --arg sha "${DEPLOY_SHA}" \
+                '(.status == "live") and ((.commit.id // .commit) == $sha)' \
+                "${svc}-deploy.json" > /dev/null; then
+              echo "::error::${svc} staging deploy is not 'live' at DEPLOY_SHA (${DEPLOY_SHA})"
+              cat "${svc}-deploy.json"
+              exit 1
+            fi
+          done
+
+          completion_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg rec_service_id  "${RENDER_STAGING_RECOMMENDER_SERVICE_ID}" \
+            --arg rec_deploy_id   "$(jq -r '.id' recommender-deploy.json)" \
+            --arg api_service_id  "${RENDER_STAGING_API_SERVICE_ID}" \
+            --arg api_deploy_id   "$(jq -r '.id' api-deploy.json)" \
+            --arg dash_service_id "${RENDER_STAGING_DASHBOARD_SERVICE_ID}" \
+            --arg dash_deploy_id  "$(jq -r '.id' dashboard-deploy.json)" \
+            --arg sha             "${DEPLOY_SHA}" \
+            --arg ci_run_id       "${{ github.event.workflow_run.id }}" \
+            --arg staging_run_id  "${{ github.run_id }}" \
+            --arg ts              "${completion_ts}" \
+            '{
+              services: {
+                recommender: { service_id: $rec_service_id,  deploy_id: $rec_deploy_id,  commit: $sha, status: "live" },
+                api:         { service_id: $api_service_id,  deploy_id: $api_deploy_id,  commit: $sha, status: "live" },
+                dashboard:   { service_id: $dash_service_id, deploy_id: $dash_deploy_id, commit: $sha, status: "live" }
+              },
+              tested_sha: $sha,
+              ci_workflow_run_id: $ci_run_id,
+              staging_workflow_run_id: $staging_run_id,
+              completion_timestamp: $ts
+            }' > deploy-metadata.json
+
+          echo "Persisted deploy-metadata.json:"
+          cat deploy-metadata.json
+
+      - name: Upload deployment metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: staging-deploy-${{ env.DEPLOY_SHA }}
+          path: deploy-metadata.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Smoke test staging
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_DASHBOARD_URL: ${{ vars.STAGING_DASHBOARD_URL }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$STAGING_API_URL/api/healthz"
+          curl --fail --silent --show-error "$STAGING_DASHBOARD_URL/"

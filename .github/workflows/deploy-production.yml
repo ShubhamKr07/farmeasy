@@ -1,0 +1,228 @@
+# FarmSmart — Deploy Production workflow
+#
+# Promotes the *exact* SHA that already passed CI and staging to the three
+# production Render services and the production Supabase database. Triggered
+# ONLY by a successful `Deploy Staging` workflow run on `main` in the same
+# repository.
+#
+# The SHA is never re-resolved. It is recovered from the immutable
+# `deploy-metadata.json` artifact that the staging workflow uploaded, validated
+# against protected staging service IDs and a 40-char SHA format, then checked
+# out explicitly and verified to be the working-tree HEAD and an ancestor of
+# `origin/main` before any mutation. The GitHub `production` environment's
+# required-reviewer protection rule gates the actual deploy; this workflow
+# contains no review-gating logic of its own.
+#
+# Pinned tool versions and action SHAs are reused verbatim from ci.yml:
+#   - Node:     22.23.2
+#   - pnpm:     11.17.0  (package.json#packageManager)
+#   - Render:   2.22.0   (checksum-verified, sha256 below)
+#   - Supabase: 2.109.1  (via devDependencies + frozen install)
+
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: [Deploy Staging]
+    types: [completed]
+
+permissions:
+  actions: read   # required to download artifacts from the triggering run
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "11.17.0"
+  RENDER_VERSION: "2.22.0"
+  RENDER_SHA256: "6cdcd11897b7bd7e673317e6f4aaf041b654d818444f3b1efec7240a835f79ec"
+
+jobs:
+  # ── 1. Validate staging evidence (no side effects, not approval-gated) ──────
+  # Downloads the staging workflow's metadata artifact, asserts exactly one
+  # metadata file exists, and validates it before any human is asked to approve
+  # a production rollout. Runs in the `staging` environment because the staging
+  # service IDs it must validate against live there (staging has no required
+  # reviewers, so this never blocks).
+  validate-staging-evidence:
+    name: Validate staging deploy evidence
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_branch == 'main'
+        && github.event.workflow_run.head_repository.full_name == github.repository
+      }}
+    runs-on: ubuntu-24.04
+    environment: staging
+    outputs:
+      tested_sha: ${{ steps.parse.outputs.tested_sha }}
+    steps:
+      - name: Download staging deploy artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          path: staging-evidence
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate metadata and parse TESTED_SHA
+        id: parse
+        env:
+          RENDER_STAGING_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_STAGING_RECOMMENDER_SERVICE_ID }}
+          RENDER_STAGING_API_SERVICE_ID: ${{ vars.RENDER_STAGING_API_SERVICE_ID }}
+          RENDER_STAGING_DASHBOARD_SERVICE_ID: ${{ vars.RENDER_STAGING_DASHBOARD_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          # Require exactly one metadata file across all downloaded artifacts.
+          meta_files="$(find staging-evidence -name deploy-metadata.json -type f || true)"
+          count="$(printf '%s\n' "${meta_files}" | grep -c . || true)"
+          if [ "${count}" -ne 1 ]; then
+            echo "::error::Expected exactly 1 deploy-metadata.json from the staging run, found ${count}"
+            printf '%s\n' "${meta_files}"
+            exit 1
+          fi
+          meta="${meta_files}"
+
+          # tested_sha must be a 40-char lowercase hex SHA.
+          sha="$(jq -r '.tested_sha' "${meta}")"
+          if ! printf '%s' "${sha}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::metadata tested_sha is not a 40-char lowercase hex SHA: '${sha}'"
+            exit 1
+          fi
+
+          triggering_run_id="${{ github.event.workflow_run.id }}"
+
+          # Validate, atomically: the metadata belongs to the triggering
+          # staging run, its service IDs match the protected staging service
+          # IDs, and every recorded staging deploy is `live` at tested_sha.
+          if ! jq -e \
+              --arg sha "${sha}" \
+              --arg stg_run "${triggering_run_id}" \
+              --arg rec "${RENDER_STAGING_RECOMMENDER_SERVICE_ID}" \
+              --arg api "${RENDER_STAGING_API_SERVICE_ID}" \
+              --arg dash "${RENDER_STAGING_DASHBOARD_SERVICE_ID}" \
+              '.staging_workflow_run_id == $stg_run
+                and .services.recommender.service_id == $rec
+                and .services.api.service_id == $api
+                and .services.dashboard.service_id == $dash
+                and ([.services[] | select(.status != "live" or .commit != $sha)] | length == 0)' \
+              "${meta}" > /dev/null; then
+            echo "::error::Staging deploy evidence failed validation against protected staging service IDs / live status."
+            cat "${meta}"
+            exit 1
+          fi
+
+          echo "Staging evidence validated for tested_sha=${sha} (run ${triggering_run_id})."
+          echo "tested_sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+  # ── 2. Promote to production (approval-gated via `production` environment) ──
+  # Gated by the GitHub `production` environment's required reviewers. No
+  # review-gating logic lives in this workflow. After approval, applies
+  # forward-only migrations then deploys each service pinned to TESTED_SHA.
+  deploy-production:
+    name: Promote tested SHA to production (approval-gated)
+    needs: validate-staging-evidence
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      TESTED_SHA: ${{ needs.validate-staging-evidence.outputs.tested_sha }}
+    steps:
+      - name: Checkout exact tested SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.TESTED_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out HEAD is TESTED_SHA and an ancestor of origin/main
+        run: |
+          set -euo pipefail
+          echo "TESTED_SHA=${TESTED_SHA}"
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [ "${checked_out_sha}" != "${TESTED_SHA}" ]; then
+            echo "::error::Checked-out HEAD (${checked_out_sha}) does not equal TESTED_SHA (${TESTED_SHA})"
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${TESTED_SHA}" origin/main; then
+            echo "::error::TESTED_SHA (${TESTED_SHA}) is not an ancestor of origin/main — refusing to promote"
+            exit 1
+          fi
+          echo "Verified: working tree is exactly TESTED_SHA and TESTED_SHA is on origin/main."
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Render CLI (checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/render.zip \
+            "https://github.com/render-oss/cli/releases/download/v${RENDER_VERSION}/cli_${RENDER_VERSION}_linux_amd64.zip"
+          echo "${RENDER_SHA256}  /tmp/render.zip" | sha256sum -c -
+          unzip -q /tmp/render.zip -d /tmp/render-cli
+          sudo install "/tmp/render-cli/cli_v${RENDER_VERSION}" /usr/local/bin/render
+          render --version
+
+      - name: Install dependencies (pins Supabase CLI 2.109.1)
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply production migrations
+        env:
+          PRODUCTION_DATABASE_CA_CERT: ${{ secrets.PRODUCTION_DATABASE_CA_CERT }}
+          PRODUCTION_DATABASE_URL_DIRECT: ${{ secrets.PRODUCTION_DATABASE_URL_DIRECT }}
+        run: |
+          set -euo pipefail
+          CA_FILE="${RUNNER_TEMP:-/tmp}/production-db-ca.pem"
+          install -m 600 /dev/null "$CA_FILE"
+          printf '%s' "$PRODUCTION_DATABASE_CA_CERT" > "$CA_FILE"
+          PGSSLROOTCERT="$CA_FILE" DATABASE_CA_CERT="$PRODUCTION_DATABASE_CA_CERT" \
+            DATABASE_URL="$PRODUCTION_DATABASE_URL_DIRECT" pnpm --filter @workspace/db run db:migrate
+          PGSSLROOTCERT="$CA_FILE" \
+            pnpm exec supabase db push --db-url "$PRODUCTION_DATABASE_URL_DIRECT"
+
+      - name: Deploy production services and wait for live at TESTED_SHA
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_PRODUCTION_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_PRODUCTION_RECOMMENDER_SERVICE_ID }}
+          RENDER_PRODUCTION_API_SERVICE_ID: ${{ vars.RENDER_PRODUCTION_API_SERVICE_ID }}
+          RENDER_PRODUCTION_DASHBOARD_SERVICE_ID: ${{ vars.RENDER_PRODUCTION_DASHBOARD_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          render deploys create "$RENDER_PRODUCTION_RECOMMENDER_SERVICE_ID" --commit "$TESTED_SHA" --wait --confirm -o json > recommender-deploy.json
+          render deploys create "$RENDER_PRODUCTION_API_SERVICE_ID" --commit "$TESTED_SHA" --wait --confirm -o json > api-deploy.json
+          render deploys create "$RENDER_PRODUCTION_DASHBOARD_SERVICE_ID" --commit "$TESTED_SHA" --wait --confirm -o json > dashboard-deploy.json
+
+      - name: Validate production deploys live at TESTED_SHA
+        run: |
+          set -euo pipefail
+          for svc in recommender api dashboard; do
+            if ! jq -e --arg sha "${TESTED_SHA}" \
+                '(.status == "live") and ((.commit.id // .commit) == $sha)' \
+                "${svc}-deploy.json" > /dev/null; then
+              echo "::error::${svc} production deploy is not 'live' at TESTED_SHA (${TESTED_SHA})"
+              cat "${svc}-deploy.json"
+              exit 1
+            fi
+          done
+          echo "All production services live at TESTED_SHA=${TESTED_SHA}."
+
+      - name: Smoke test production
+        env:
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          PRODUCTION_DASHBOARD_URL: ${{ vars.PRODUCTION_DASHBOARD_URL }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$PRODUCTION_API_URL/api/healthz"
+          curl --fail --silent --show-error "$PRODUCTION_DASHBOARD_URL/"

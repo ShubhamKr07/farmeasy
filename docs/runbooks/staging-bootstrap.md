@@ -239,6 +239,86 @@ gate is broken and must be fixed before proceeding.
 
 ---
 
+## Step 6: Deploy workflows (exact-SHA staging and production promotion)
+
+Two GitHub Actions workflows implement the SHA-gated promotion path described
+in Step 5. Both are pinned to the same immutable action SHAs and tool versions
+as `ci.yml`, and both refuse to deploy anything other than an explicit,
+already-CI-tested commit.
+
+### `Deploy Staging` (`.github/workflows/deploy-staging.yml`)
+
+**Purpose:** promote the exact CI-tested SHA to the three staging Render
+services (`recommender` → `api` → `dashboard`) and the staging Supabase
+database, then record immutable evidence so production can promote the same
+SHA without re-resolving anything.
+
+**Trigger:** `workflow_run` on the `CI` workflow, type `completed`. The job's
+`if:` requires `conclusion == 'success'`, `event == 'push'`,
+`head_branch == 'main'`, and `head_repository.full_name == github.repository`
+— so it only fires for a successful CI run on `main` in this repository
+(never a PR, never a fork). It runs in the `staging` GitHub environment and
+holds concurrency group `staging-database` (`cancel-in-progress: false`) so
+two staging deploys can never mutate the staging database concurrently.
+
+**SHA handling:** `DEPLOY_SHA` is set once to
+`github.event.workflow_run.head_sha`. That ref is checked out
+(`fetch-depth: 0`, `persist-credentials: false`), then asserted to equal
+`git rev-parse HEAD` **and** to be an ancestor of `origin/main` before any
+mutation. Every Render deploy pins it via `--commit "$DEPLOY_SHA"`. There is
+no `workflow_dispatch` and no arbitrary SHA input.
+
+**Validation & evidence:** each `render deploys create ... --wait -o json`
+response is re-checked to be `status == "live"` with `commit == DEPLOY_SHA`.
+A `deploy-metadata.json` (service IDs, deploy IDs, commits, statuses,
+`tested_sha`, the triggering CI run id, the staging run id, and a completion
+timestamp) is uploaded as artifact `staging-deploy-$DEPLOY_SHA`
+(`actions/upload-artifact`, 30-day retention, `if-no-files-found: error`).
+Staging smoke tests (`/api/healthz`, `/`) run last. If the artifact expires
+before production promotes, re-run staging — never look up "latest deploy".
+
+### `Deploy Production` (`.github/workflows/deploy-production.yml`)
+
+**Purpose:** promote the *exact* SHA that passed CI **and** staging to the
+three production Render services (`recommender` → `api` → `dashboard`) and the
+production Supabase database, forward-only.
+
+**Trigger:** `workflow_run` on the `Deploy Staging` workflow, type `completed`,
+with the same success/push/main/same-repository predicates. Two jobs:
+
+1. **`validate-staging-evidence`** (runs in the `staging` environment, which has
+   no required reviewers, to read the protected staging service IDs): downloads
+   the staging run's artifact with `actions/download-artifact` scoped to
+   `github.event.workflow_run.id`, requires exactly one `deploy-metadata.json`,
+   and validates the `tested_sha` is a 40-char lowercase hex SHA, the metadata's
+   `staging_workflow_run_id` matches the triggering run, every recorded staging
+   deploy is `live` at that SHA, and the recorded service IDs match the
+   protected `RENDER_STAGING_*_SERVICE_ID` values. It exposes `tested_sha` as a
+   job output. This read-only validation runs *before* any human is asked to
+   approve, so bad evidence fails fast without consuming an approval.
+2. **`deploy-production`** (`environment: production`, gated by that
+   environment's required reviewers; `concurrency: production-deploy`,
+   `cancel-in-progress: false`): checks out `TESTED_SHA` (from the artifact,
+   **not** `workflow_run.head_sha`), asserts it equals `git rev-parse HEAD` and
+   is an ancestor of `origin/main`, installs dependencies, applies migrations,
+   deploys each service pinned to `--commit "$TESTED_SHA"`, validates every
+   response as `live` at `TESTED_SHA`, and runs production smoke tests.
+
+**Approval model:** the workflow contains **no review-gating logic of its own**.
+The human gate is the GitHub `production` environment's required-reviewer
+protection rule configured in Step 3 — that is the only approval mechanism.
+The SHA is recovered from the immutable artifact, never from a "latest" lookup
+and never re-resolved from `workflow_run.head_sha`.
+
+> **Status (2026-07-31):** Both workflow files are committed locally only
+> (`ci: deploy tested commits through staging`) and **not pushed**, awaiting
+> human authorization per Task 7 Step 10. Production auto-deploy remains `off`
+> (set in Step 2). These workflows must be pushed only after explicit approval;
+> do not run them until the protected environments and all secrets/variables
+> from Steps 3–4 are configured.
+
+---
+
 ## Reference: full variable and secret list
 
 The complete set of 23 names configured by this runbook, in one place for
