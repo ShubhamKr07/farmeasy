@@ -74,6 +74,19 @@ Per ADR-004, staging keeps the **current public recommender / web-dashboard
 topology** — do not pre-adopt the blue-green / domain-mapped topology. That
 conversion happens in Release 3.
 
+> **Status (2026-07-31):** `render.yaml` now declares the three staging
+> services (`farmsmart-api-staging`, `farmsmart-dashboard-staging`,
+> `farmsmart-recommender-staging`) mirroring their production counterparts
+> (type, runtime, plan, region, build/start commands, health check). Each is
+> pinned to `branch: main` with `autoDeployTrigger: off` for SHA-gated
+> promotion. In the same change, all three **production** services had
+> `autoDeploy: true` switched to `autoDeployTrigger: off`; that production
+> autodeploy disable was also applied **live via the Render API** on
+> 2026-07-31. Last-good production SHA at disable time: **`e97f09e`**. All
+> three production services were confirmed live (healthy on `/api/healthz`,
+> `/`, and `/healthz` respectively) both **before and after** the API call,
+> so the disable caused no outage or redeploy.
+
 From Render's workspace *Settings* and each service's *Info* panel, collect:
 
 - Workspace ID → `RENDER_WORKSPACE_ID`

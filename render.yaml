@@ -1,12 +1,19 @@
 # FarmSmart — Render infrastructure-as-code
 # Docs: https://render.com/docs/blueprint-spec
 #
-# Three services:
+# Six services (production + staging pair each):
 #   1. farmsmart-api          — Express API (Web Service, $7/mo starter)
 #   2. farmsmart-dashboard    — admin SPA (Web Service, vite preview)
 #   3. farmsmart-recommender  — Python/FastAPI recommender (Web Service, $7/mo starter)
+#   4. farmsmart-api-staging          — staging mirror of the API
+#   5. farmsmart-dashboard-staging    — staging mirror of the dashboard
+#   6. farmsmart-recommender-staging  — staging mirror of the recommender
 # Postgres is external (Supabase) — set DATABASE_URL (transaction pooler).
 # Auth is Supabase Auth.
+#
+# Staging services deploy from branch: main with autoDeployTrigger: off (SHA-gated
+# promotion per ADR-004). Production services also have autoDeployTrigger: off —
+# deploys are driven by the promotion workflow, not by pushes to main.
 #
 # FIRST-DEPLOY ORDER:
 #   1. Deploy the API service; note its URL (Render assigns <name>.onrender.com,
@@ -17,7 +24,7 @@
 #   5. Deploy the dashboard service.
 
 services:
-  # ── API server ────────────────────────────────────────────────────────────
+  # ── API server (production) ───────────────────────────────────────────────
   - type: web
     name: farmsmart-api
     runtime: node
@@ -26,7 +33,7 @@ services:
     buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
     healthCheckPath: /api/healthz
-    autoDeploy: true
+    autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
         value: production
@@ -59,7 +66,7 @@ services:
         sync: false # shared secret with farmsmart-recommender's INTERNAL_API_KEY —
                      # generate once with: openssl rand -base64 32 (same value on both services)
 
-  # ── Admin dashboard SPA (Web Service, vite preview) ───────────────────────
+  # ── Admin dashboard SPA (production, Web Service, vite preview) ───────────
   # Served via `vite preview` (SPA fallback handled by vite's default appType=spa).
   # Free web service spins down after inactivity; first hit re-awakens (~30s).
   - type: web
@@ -70,7 +77,7 @@ services:
     buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/admin-dashboard run build
     startCommand: pnpm --filter @workspace/admin-dashboard serve
     healthCheckPath: /
-    autoDeploy: true
+    autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
         value: production
@@ -85,7 +92,7 @@ services:
       - key: VITE_SUPABASE_ANON_KEY
         sync: false # Project Settings -> API -> anon/public key
 
-  # ── Recommender (Python/FastAPI, dlt ingestion + pgvector search) ─────────
+  # ── Recommender (production, Python/FastAPI, dlt ingestion + pgvector) ────
   # Talks to the same Supabase Postgres as farmsmart-api (DATABASE_URL). Only
   # farmsmart-api calls this service directly (INTERNAL_API_KEY-gated) — it
   # is not exposed to the dashboard or the public internet.
@@ -97,7 +104,7 @@ services:
     buildCommand: cd artifacts/recommender-svc && pip install uv && uv sync --frozen
     startCommand: cd artifacts/recommender-svc && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    autoDeploy: true
+    autoDeployTrigger: off
     envVars:
       - key: DATABASE_URL
         sync: false # same Supabase transaction-pooler string as farmsmart-api (port 6543)
@@ -111,3 +118,97 @@ services:
       - key: INTERNAL_API_KEY
         sync: false # shared secret with farmsmart-api's RECOMMENDER_INTERNAL_KEY —
                      # same value as that key, generated once via: openssl rand -base64 32
+
+  # ── API server (staging) ──────────────────────────────────────────────────
+  # Mirror of farmsmart-api. SHA-gated promotion from branch: main; autodeploy
+  # is off so only the promotion workflow can trigger a deploy (ADR-004).
+  - type: web
+    name: farmsmart-api-staging
+    runtime: node
+    plan: starter
+    region: oregon
+    repo: https://github.com/ShubhamKr07/farmsmart
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # staging Supabase transaction-pooler connection string (port 6543)
+      - key: SUPABASE_URL
+        value: https://jkxlbndnatkxmhpumvhh.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # staging Project Settings -> API -> service_role key (server-side only)
+      - key: CORS_ORIGIN
+        sync: false # staging dashboard URL — set after farmsmart-dashboard-staging URL is known
+      - key: FACILITY_TIMEZONE
+        value: America/New_York # §1.5 rule 1 — facility-local date_trunc / window bounds
+      - key: QBO_CLIENT_ID
+        sync: false # QBO_* vars can stay unset for staging until QuickBooks integration testing
+      - key: QBO_CLIENT_SECRET
+        sync: false # QBO_* vars can stay unset for staging until QuickBooks integration testing
+      - key: QBO_REDIRECT_URI
+        sync: false # QBO_* vars can stay unset for staging until QuickBooks integration testing
+      - key: QBO_ENVIRONMENT
+        value: sandbox # "sandbox" or "production"
+      - key: ACCOUNTING_ENCRYPTION_KEY
+        sync: false # random 32+ char secret for AES-256-GCM token-at-rest encryption
+      - key: RECOMMENDER_URL
+        sync: false # staging farmsmart-recommender URL — set after farmsmart-recommender-staging URL is known
+      - key: RECOMMENDER_INTERNAL_KEY
+        sync: false # shared secret with farmsmart-recommender-staging's INTERNAL_API_KEY
+
+  # ── Admin dashboard SPA (staging) ─────────────────────────────────────────
+  # Mirror of farmsmart-dashboard. SHA-gated promotion from branch: main.
+  - type: web
+    name: farmsmart-dashboard-staging
+    runtime: node
+    plan: free
+    region: oregon
+    repo: https://github.com/ShubhamKr07/farmsmart
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/admin-dashboard run build
+    startCommand: pnpm --filter @workspace/admin-dashboard serve
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000" # vite.config requires PORT at build time; Render injects runtime PORT
+      - key: BASE_PATH
+        value: / # SPA served at root
+      - key: VITE_API_BASE_URL
+        sync: false # staging API URL — set after farmsmart-api-staging URL is known
+      - key: VITE_SUPABASE_URL
+        value: https://jkxlbndnatkxmhpumvhh.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false # staging Project Settings -> API -> anon/public key
+
+  # ── Recommender (staging, Python/FastAPI, dlt ingestion + pgvector) ───────
+  # Mirror of farmsmart-recommender. SHA-gated promotion from branch: main.
+  - type: web
+    name: farmsmart-recommender-staging
+    runtime: python
+    plan: starter
+    region: oregon
+    repo: https://github.com/ShubhamKr07/farmsmart
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: cd artifacts/recommender-svc && pip install uv && uv sync --frozen
+    startCommand: cd artifacts/recommender-svc && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false # staging Supabase transaction-pooler string (port 6543)
+      - key: DATABASE_URL_DIRECT
+        sync: false # staging Supabase session-pooler string (port 5432) — dlt/psycopg2 ingestion only
+      - key: GEMINI_API_KEY
+        sync: false # aistudio.google.com — embeddings + answer synthesis
+      - key: TAVILY_API_KEY
+        sync: false # tavily.com — live search on a cache miss
+      - key: INTERNAL_API_KEY
+        sync: false # shared secret with farmsmart-api-staging's RECOMMENDER_INTERNAL_KEY
