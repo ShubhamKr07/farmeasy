@@ -43,8 +43,7 @@ select
   n.nspname as schema,
   p.proname as function_name,
   r.rolname as grantee,
-  pg_get_userprivoptions(p.proacl, r.oid) as options,
-  case when has_function_privilege(r.oid, p.oid, 'execute') then 'YES' else 'NO' end as can_execute
+  case when has_function_privilege(pg_roles.oid, p.oid, 'execute') then 'YES' else 'NO' end as can_execute
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 cross join (values ('anon'::name), ('authenticated'::name), ('public'::name)) as r(rolname)
@@ -81,14 +80,14 @@ select role, count(*) from public.users group by role order by role;
 \echo ''
 \echo '==== 6. Old UPDATE policy removed; legacy INSERT policy in place ===='
 select
-  polname as policy_name,
+  policyname as policy_name,
   cmd as policy_cmd,
   array_to_string(roles, ', ') as to_roles,
   qual as using_expr,
   with_check as with_check_expr
 from pg_policies
 where schemaname = 'public' and tablename = 'users'
-order by polname;
+order by policyname;
 \echo 'Expected: NO "users can update their own row (not role)" policy.'
 \echo '         "temporary legacy signup duplicate" INSERT policy present.'
 
