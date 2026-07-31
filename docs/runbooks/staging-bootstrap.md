@@ -18,6 +18,24 @@ Create a **separate** Supabase project for staging. Per ADR-004, this is a
 distinct project from production — **do not** copy, clone, or branch production
 data into it. Seed staging with synthetic/test fixtures only.
 
+> **Status (2026-07-31):** Project created — `farmsmart-staging`
+> (ref `jkxlbndnatkxmhpumvhh`, region `us-west-1`, Postgres 17). URL and anon
+> key collected. **Open TODOs, not yet blocking Tasks 3/5/6:**
+> - **DB direct connection string.** Supabase only shows the database
+>   password once at project creation (or on manual reset); it is not
+>   retrievable via API/CLI after the fact. Reset it from *Project Settings →
+>   Database → Reset database password* and use it to build
+>   `STAGING_DATABASE_URL_DIRECT` before running Step 3 of Foundation Task 2
+>   (schema apply) or Foundation Task 4 (disposable-replay history check).
+> - **SMTP test inbox** (`STAGING_MAILBOX_API_TOKEN`) — no Mailtrap/Mailosaur-
+>   style account exists yet. Needed only for `verify-staging-supabase.mjs`'s
+>   OTP-retrieval step and Release 1 Task 2's automated signup script; not
+>   needed for CI, migrations, or the deploy workflows.
+> - **Google OAuth staging client** — no staging redirect URI configured yet
+>   (either a new OAuth client or an added redirect on the existing
+>   production one). Needed only for staging Google sign-in testing, not for
+>   the rest of Foundation.
+
 From the new staging project's *Project Settings → Database → Connection
 string* and *Project Settings → API*, collect:
 
