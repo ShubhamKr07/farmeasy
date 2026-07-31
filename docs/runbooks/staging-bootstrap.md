@@ -33,6 +33,13 @@ data into it. Seed staging with synthetic/test fixtures only.
 >   production one). Needed only for staging Google sign-in testing, not for
 >   the rest of Foundation.
 >
+> `STAGING_DATABASE_CA_CERT`/`PRODUCTION_DATABASE_CA_CERT` are now set (both
+> secrets, same value — Supabase issues one shared root CA,
+> "Supabase Root 2021 CA", for every project, downloaded from any project's
+> *Settings → Database → SSL Configuration*, not project-specific). Verified
+> locally: `PGSSLROOTCERT=<cert> supabase db push --dry-run` connects clean
+> against staging.
+>
 > **CLI gotcha for whoever touches Auth config next (Release 3/4, or the
 > production hook if it's ever re-registered):** `supabase config push` for a
 > `[auth.hook.*]` block reports `auth: updated` / `up_to_date` even when it
