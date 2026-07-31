@@ -104,6 +104,45 @@ And for the existing production services:
 - `farmsmart-api` public URL → `PRODUCTION_API_URL`
 - `farmsmart-dashboard` public URL → `PRODUCTION_DASHBOARD_URL`
 
+> **Status (2026-07-31):** No registered Render "Blueprint" object exists for
+> this workspace (`GET /v1/blueprints` returns `[]`) — the original 3
+> production services were created directly, not through Render's Blueprint
+> sync feature, so pushing `render.yaml` does not auto-create anything. The 3
+> staging services were created directly via `render services create` (using
+> `--from <production-service-id>` failed with `IP allow list is only
+> available for Enterprise workspaces`, so each was created from explicit
+> flags matching its production counterpart instead), then deployed and
+> verified live:
+>
+> | Service | ID | URL | Health check |
+> |---|---|---|---|
+> | `farmsmart-api-staging` | `srv-d9m9928ae00c73bmc7k0` | https://farmsmart-api-staging.onrender.com | `200` on `/api/healthz` |
+> | `farmsmart-dashboard-staging` | `srv-d9m9958ae00c73bmccvg` | https://farmsmart-dashboard-staging.onrender.com | `200` on `/` |
+> | `farmsmart-recommender-staging` | `srv-d9m997p5efls73cnvch0` | https://farmsmart-recommender-staging.onrender.com | `200` on `/healthz` |
+>
+> Render workspace ID: `tea-d943g4u7r5hc73e402tg` (**not** the Supabase
+> organization ID `wmwypyeabwpqsekvlwld` — an earlier `RENDER_WORKSPACE_ID`
+> reference in this session conflated the two; corrected here, no committed
+> file was affected since it was only used in a `render blueprints validate`
+> command, not written to any tracked file).
+>
+> Production service IDs for reference: `farmsmart-api` =
+> `srv-d944vmkvikkc73bj51j0`, `farmsmart-dashboard` =
+> `srv-d944vpnlk1mc73afgv9g`, `farmsmart-recommender` =
+> `srv-d94cakflk1mc73avi9n0`.
+>
+> Env vars set on all 3 staging services via direct `PUT /v1/services/{id}/env-vars`
+> calls (no CLI support for this — `render services update` has no `--env-var`
+> flag, only `render services create` does): staging Supabase URL/DB
+> connection strings/service-role key (real values, already live from Task
+> 2), cross-service URLs (now known since all 3 exist), freshly generated
+> `ACCOUNTING_ENCRYPTION_KEY` and `RECOMMENDER_INTERNAL_KEY` (matching pair
+> across api-staging/recommender-staging), and `GEMINI_API_KEY`/
+> `TAVILY_API_KEY` reused from production (third-party provider keys, not
+> environment-scoped by this app's design). **Still unset, deliberately
+> deferred:** `QBO_CLIENT_ID`/`QBO_CLIENT_SECRET`/`QBO_REDIRECT_URI` on
+> `farmsmart-api-staging` (no staging QuickBooks sandbox app configured yet).
+
 ---
 
 ## Step 3: Create the GitHub protected environments
