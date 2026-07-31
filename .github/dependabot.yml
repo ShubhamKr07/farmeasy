@@ -1,0 +1,61 @@
+# FarmSmart — Dependabot configuration
+#
+# Groups dependency updates into a single PR per ecosystem to reduce review
+# noise. Update cadence is weekly (Monday). Reviewers/labels are intentionally
+# left unset so the defaults apply.
+#
+# Ecosystem notes:
+#   - npm       → pnpm workspace (package.json + pnpm-lock.yaml + catalog in
+#                 pnpm-workspace.yaml). Dependabot edits pnpm-lock.yaml directly.
+#   - github-actions → action version pins in .github/workflows/*.yml
+#   - pip       → Python dependencies. Per Dependabot docs `pip` is the correct
+#                 ecosystem for pyproject.toml (PEP 621) manifests, which is what
+#                 uv manages via uv.lock for artifacts/recommender-svc.
+
+version: 2
+
+updates:
+  # ── npm (pnpm workspace) ──────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps"
+      include: scope
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps(ci)"
+      include: scope
+
+  # ── Python (pip ecosystem; covers pyproject.toml / uv) ────────────────────
+  - package-ecosystem: pip
+    directory: "/artifacts/recommender-svc"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps(recommender)"
+      include: scope
