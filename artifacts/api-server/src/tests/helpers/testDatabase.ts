@@ -1,4 +1,4 @@
-import { after, before } from "node:test";
+import { after, before, beforeEach } from "node:test";
 import { sql } from "drizzle-orm";
 
 /**
@@ -42,6 +42,14 @@ export interface TestDatabaseHandle {
  * (seed lots, growth profiles, facilities, ...) can survive across suites
  * when a test wants it to.
  *
+ * In `beforeEach`: re-truncate the same named tables before every test, not
+ * just once for the whole file. Without this, tests that insert their own
+ * fixture rows accumulate state across each other within a file (node:test's
+ * `before` runs once per describe, not per test) — count-based assertions
+ * become order-dependent. Caught for real running Task 6's route suite
+ * against the disposable Supabase stack: status=done saw 2 rows instead of
+ * 1, carried over from an earlier test's insert in the same file.
+ *
  * In `after`: close the shared `pool` exported by `@workspace/db` so the
  * node:test process exits instead of hanging on a dangling connection.
  *
@@ -63,6 +71,14 @@ export function useDatabaseFixture(
     db: undefined,
   };
 
+  const truncateTables = async () => {
+    if (tables.length === 0) return;
+    const list = tables.map((t) => `"${t.replace(/"/g, '""')}"`).join(", ");
+    await handle.db.execute(
+      sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`),
+    );
+  };
+
   before(async () => {
     if (!handle.url) return;
     // Point the db package at the test database BEFORE its module-level Pool
@@ -70,12 +86,12 @@ export function useDatabaseFixture(
     process.env.DATABASE_URL = handle.url;
     const mod = await import("@workspace/db");
     handle.db = mod.db;
-    if (tables.length > 0) {
-      const list = tables.map((t) => `"${t.replace(/"/g, '""')}"`).join(", ");
-      await handle.db.execute(
-        sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`),
-      );
-    }
+    await truncateTables();
+  });
+
+  beforeEach(async () => {
+    if (!handle.url) return;
+    await truncateTables();
   });
 
   after(async () => {
