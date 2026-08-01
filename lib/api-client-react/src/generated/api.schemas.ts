@@ -444,6 +444,53 @@ export interface SensorAccountConnectionResult {
   status: SensorAccountConnectionResultStatus;
 }
 
+export type FacilityReadinessItemState = typeof FacilityReadinessItemState[keyof typeof FacilityReadinessItemState];
+
+
+export const FacilityReadinessItemState = {
+  pending: 'pending',
+  interim: 'interim',
+  done: 'done',
+  skipped: 'skipped',
+} as const;
+
+export interface FacilityReadinessItem {
+  key: string;
+  label: string;
+  state: FacilityReadinessItemState;
+  /** @nullable */
+  deepLink?: string | null;
+  count?: number;
+}
+
+/**
+ * `completedCount` is derived by filtering `items` for `state === "done"` — by construction, not an independently-tracked number — so it can never diverge from the actual number of done items.
+
+ */
+export interface FacilityReadinessResponse {
+  items: FacilityReadinessItem[];
+  completedCount: number;
+}
+
+export type RecordReadinessEventRequestEventKey = typeof RecordReadinessEventRequestEventKey[keyof typeof RecordReadinessEventRequestEventKey];
+
+
+export const RecordReadinessEventRequestEventKey = {
+  labels_downloaded: 'labels_downloaded',
+  labels_scanned: 'labels_scanned',
+  grow_profile_created: 'grow_profile_created',
+  seeds_added: 'seeds_added',
+  first_cycle_seeded: 'first_cycle_seeded',
+  sensors_skipped: 'sensors_skipped',
+  quickbooks_skipped: 'quickbooks_skipped',
+  team_invited: 'team_invited',
+} as const;
+
+export interface RecordReadinessEventRequest {
+  eventKey: RecordReadinessEventRequestEventKey;
+  undo?: boolean;
+}
+
 export type AlertSeverity = typeof AlertSeverity[keyof typeof AlertSeverity];
 
 
@@ -1079,4 +1126,12 @@ export const ListMetricsRange = {
   custom: 'custom',
   all: 'all',
 } as const;
+
+export type PostFacilityReadinessEvent200 = {
+  ok: boolean;
+};
+
+export type PostFacilityReadinessEvent201 = {
+  ok: boolean;
+};
 

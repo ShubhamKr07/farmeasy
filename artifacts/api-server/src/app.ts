@@ -22,6 +22,7 @@ import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import facilitiesRouter from "./routes/facilities";
 import sensorAccountsRouter from "./routes/sensor-accounts";
+import facilityReadinessRouter from "./routes/facility-readiness";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
 import { resolveTrustProxy } from "./lib/trustProxy";
@@ -124,6 +125,7 @@ app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, facilityLogsRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, sensorAccountsRouter);
+app.use("/api", requireSignedIn, facilityReadinessRouter);
 app.use("/api", requireSignedIn, router);
 
 export default app;

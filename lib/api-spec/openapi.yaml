@@ -1396,6 +1396,63 @@ paths:
         "429":
           description: Too many connection tests for this user
 
+  /facility-readiness:
+    get:
+      operationId: getFacilityReadiness
+      tags: [facility-readiness]
+      summary: >
+        Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003).
+        `completedCount` is always exactly the number of `items` whose
+        `state` is "done" — derived from the same array returned in this
+        response, never an independently-maintained number.
+      responses:
+        "200":
+          description: The signed-in user's facility readiness checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilityReadinessResponse"
+        "409":
+          description: Signed-in user has no facility yet
+
+  /facility-readiness/events:
+    post:
+      operationId: postFacilityReadinessEvent
+      tags: [facility-readiness]
+      summary: >
+        Record (or, with `undo: true`, reverse) a checklist-relevant event.
+        Insert-or-update on (facilityId, eventKey) — a re-fired event
+        refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordReadinessEventRequest"
+      responses:
+        "201":
+          description: Event recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "200":
+          description: Event undone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "409":
+          description: Signed-in user has no facility yet
+
 components:
   schemas:
     HealthStatus:
@@ -1990,6 +2047,57 @@ components:
           type: string
           enum: [connected, failed, pending_integration]
       required: [status]
+
+    FacilityReadinessItem:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        state:
+          type: string
+          enum: [pending, interim, done, skipped]
+        deepLink:
+          type: ["string", "null"]
+        count:
+          type: integer
+      required: [key, label, state]
+
+    FacilityReadinessResponse:
+      type: object
+      description: >
+        `completedCount` is derived by filtering `items` for `state ===
+        "done"` — by construction, not an independently-tracked number — so
+        it can never diverge from the actual number of done items.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityReadinessItem"
+        completedCount:
+          type: integer
+      required: [items, completedCount]
+
+    RecordReadinessEventRequest:
+      type: object
+      required: [eventKey]
+      properties:
+        eventKey:
+          type: string
+          enum:
+            [
+              labels_downloaded,
+              labels_scanned,
+              grow_profile_created,
+              seeds_added,
+              first_cycle_seeded,
+              sensors_skipped,
+              quickbooks_skipped,
+              team_invited,
+            ]
+        undo:
+          type: boolean
 
     ActionRequiredItem:
       type: object

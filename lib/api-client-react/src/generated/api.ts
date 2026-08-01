@@ -58,6 +58,7 @@ import type {
   Facility,
   FacilityLog,
   FacilityLogRequest,
+  FacilityReadinessResponse,
   GrowthProfile,
   HealthStatus,
   InventoryItem,
@@ -76,9 +77,12 @@ import type {
   MetricsResponse,
   MonitoringApiInput,
   MoveFertigationRequest,
+  PostFacilityReadinessEvent200,
+  PostFacilityReadinessEvent201,
   RackItem,
   RecommendRequest,
   RecommendResponse,
+  RecordReadinessEventRequest,
   ResolveLayoutQrParams,
   RoomItem,
   SeedLot,
@@ -5574,5 +5578,181 @@ export const useTestSensorAccountConnection = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getTestSensorAccountConnectionMutationOptions(options), queryClient);
+    }
+
+export const getGetFacilityReadinessUrl = () => {
+
+
+
+
+  return `/api/facility-readiness`
+}
+
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+export const getFacilityReadiness = async ( options?: RequestInit): Promise<FacilityReadinessResponse> => {
+
+  return customFetch<FacilityReadinessResponse>(getGetFacilityReadinessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFacilityReadinessQueryKey = () => {
+    return [
+    `/api/facility-readiness`
+    ] as const;
+    }
+
+
+export const getGetFacilityReadinessQueryOptions = <TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFacilityReadinessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFacilityReadiness>>> = ({ signal }) => getFacilityReadiness({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFacilityReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof getFacilityReadiness>>>
+export type GetFacilityReadinessQueryError = ErrorType<void>
+
+
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFacilityReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getFacilityReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFacilityReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getFacilityReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetFacilityReadinessQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPostFacilityReadinessEventUrl = () => {
+
+
+
+
+  return `/api/facility-readiness/events`
+}
+
+/**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const postFacilityReadinessEvent = async (recordReadinessEventRequest: RecordReadinessEventRequest, options?: RequestInit): Promise<PostFacilityReadinessEvent200 | PostFacilityReadinessEvent201> => {
+
+  return customFetch<PostFacilityReadinessEvent200 | PostFacilityReadinessEvent201>(getPostFacilityReadinessEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      recordReadinessEventRequest,)
+  }
+);}
+
+
+
+
+export const getPostFacilityReadinessEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext> => {
+
+const mutationKey = ['postFacilityReadinessEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, {data: BodyType<RecordReadinessEventRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postFacilityReadinessEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostFacilityReadinessEventMutationResult = NonNullable<Awaited<ReturnType<typeof postFacilityReadinessEvent>>>
+    export type PostFacilityReadinessEventMutationBody = BodyType<RecordReadinessEventRequest>
+    export type PostFacilityReadinessEventMutationError = ErrorType<void>
+
+    /**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const usePostFacilityReadinessEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postFacilityReadinessEvent>>,
+        TError,
+        {data: BodyType<RecordReadinessEventRequest>},
+        TContext
+      > => {
+      return useMutation(getPostFacilityReadinessEventMutationOptions(options), queryClient);
     }
 

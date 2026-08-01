@@ -1235,3 +1235,33 @@ export const TestSensorAccountConnectionResponse = zod.object({
 })
 
 
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+export const GetFacilityReadinessResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "state": zod.enum(['pending', 'interim', 'done', 'skipped']),
+  "deepLink": zod.string().nullish(),
+  "count": zod.number().optional()
+})),
+  "completedCount": zod.number()
+}).describe('`completedCount` is derived by filtering `items` for `state === \"done\"` — by construction, not an independently-tracked number — so it can never diverge from the actual number of done items.\n')
+
+
+/**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const PostFacilityReadinessEventBody = zod.object({
+  "eventKey": zod.enum(['labels_downloaded', 'labels_scanned', 'grow_profile_created', 'seeds_added', 'first_cycle_seeded', 'sensors_skipped', 'quickbooks_skipped', 'team_invited']),
+  "undo": zod.boolean().optional()
+})
+
+export const PostFacilityReadinessEventResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
