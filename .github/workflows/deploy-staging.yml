@@ -172,6 +172,36 @@ jobs:
           set -euo pipefail
           node scripts/ci/test-supabase-signup.mjs
 
+      # Staging gate (Task 12): end-to-end private-media probe. Exercises the
+      # FULL path the Task 12 migration must leave working — a real
+      # authenticated identity uploads an image through the live /api/media/
+      # upload, persists the returned key through /api/facility-logs, fetches
+      # the API-signed URL (must be 2xx), and fetches the hand-constructed
+      # OLD-STYLE public Storage URL (must be NON-2xx, proving the bucket is
+      # actually private). Cleans up its own user/log/object/profile in a
+      # finally block. Same script, same OTP/session flow, and the SAME
+      # HAS_MAILBOX_TOKEN soft-gate as the signup step above (it inherits the
+      # identical un-provisioned-secret situation — STAGING_MAILBOX_API_TOKEN
+      # is still not a real secret, so this skips until provisioned too). The
+      # signed URL is a credential-bearing URL and is never logged; only HTTP
+      # statuses and a key hash reach the step output.
+      - name: Run private-media probe (staging gate)
+        if: ${{ env.HAS_MAILBOX_TOKEN == 'true' }}
+        env:
+          PROBE_ENV_PREFIX: STAGING
+          PROBE_WORKFLOW_ID: ${{ github.run_id }}
+          PROBE_DEPLOY_SHA: ${{ env.DEPLOY_SHA }}
+          STAGING_SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_ANON_KEY: ${{ vars.STAGING_SUPABASE_ANON_KEY }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_TEST_EMAIL_DOMAIN: ${{ vars.STAGING_TEST_EMAIL_DOMAIN }}
+          STAGING_MAILBOX_API_TOKEN: ${{ secrets.STAGING_MAILBOX_API_TOKEN }}
+          STAGING_TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/probe-private-media.mjs
+
       - name: Validate deploys live at DEPLOY_SHA and persist immutable metadata
         env:
           RENDER_STAGING_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_STAGING_RECOMMENDER_SERVICE_ID }}

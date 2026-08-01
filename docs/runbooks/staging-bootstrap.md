@@ -350,6 +350,78 @@ and never re-resolved from `workflow_run.head_sha`.
 
 ---
 
+## Step 7: Private-media probe secrets (Release 1 Task 12)
+
+`scripts/ci/probe-private-media.mjs` is a live, authenticated, end-to-end
+probe wired into both deploy workflows. It signs up a throwaway Auth identity
+(via the same OTP-into-Mailosaur flow as `test-supabase-signup.mjs`), uploads a
+tiny image through the live `POST /api/media/upload`, persists the returned key
+through `POST /api/facility-logs`, then asserts the API-signed URL returns 2xx
+**and** the hand-constructed OLD-STYLE public Storage URL returns NON-2xx
+(proving the `media` bucket is actually private after the Task 12 migration).
+It cleans up its own user / facility-log row / storage object / profile in a
+`finally` block. The signed URL is a credential-bearing URL and is never
+logged — only HTTP statuses and a SHA-256 hash of the object key reach the
+workflow output.
+
+The probe is **prefix-parameterized** via `PROBE_ENV_PREFIX`
+(`STAGING` or `PRODUCTION`) so the same script runs in both deploy workflows.
+For each prefix it reads these names (this runbook records the **names and
+where each value comes from**, never the values themselves):
+
+| Name | Kind | Source (per environment) |
+|---|---|---|
+| `<PREFIX>_SUPABASE_URL` | variable | Supabase project *Settings → API → Project URL* |
+| `<PREFIX>_SUPABASE_ANON_KEY` | variable | Supabase project *Settings → API → `anon` public key* |
+| `<PREFIX>_SUPABASE_SERVICE_ROLE_KEY` | secret | Supabase project *Settings → API → `service_role` secret key* |
+| `<PREFIX>_API_URL` | variable | Render API service public URL (`STAGING_API_URL` / `PRODUCTION_API_URL`) |
+| `<PREFIX>_TEST_EMAIL_DOMAIN` | variable | Mailosaur-verified test email domain (the **probe email domain**) |
+| `<PREFIX>_MAILBOX_API_TOKEN` | secret | Mailosaur API key (OTP retrieval) |
+| `<PREFIX>_TEST_PASSWORD` | secret (optional) | Per-process generated if unset |
+
+**Staging (`PROBE_ENV_PREFIX=STAGING`):** already fully provisioned by Steps 1
+and 2 — the probe reuses the exact `STAGING_SUPABASE_URL` /
+`STAGING_SUPABASE_ANON_KEY` / `STAGING_SUPABASE_SERVICE_ROLE_KEY` /
+`STAGING_API_URL` / `STAGING_TEST_EMAIL_DOMAIN` / `STAGING_MAILBOX_API_TOKEN` /
+`STAGING_TEST_PASSWORD` names Task 2's signup test consumes. No new staging
+secrets to add.
+
+> ⚠️ **Production (`PROBE_ENV_PREFIX=PRODUCTION`) is NOT yet provisioned for
+> this probe.** Today the `production` GitHub environment only carries
+> `PRODUCTION_DATABASE_URL_DIRECT`, `PRODUCTION_DATABASE_CA_CERT`, the
+> `RENDER_PRODUCTION_*_SERVICE_ID`s, `PRODUCTION_API_URL`,
+> `PRODUCTION_DASHBOARD_URL`, `RENDER_API_KEY`, and `RENDER_WORKSPACE_ID`. The
+> probe additionally needs the **protected production Supabase URL / anon key
+> / service-role key / probe email domain / mailbox token / test password**:
+>
+> - `PRODUCTION_SUPABASE_URL` (variable)
+> - `PRODUCTION_SUPABASE_ANON_KEY` (variable)
+> - `PRODUCTION_SUPABASE_SERVICE_ROLE_KEY` (secret)
+> - `PRODUCTION_TEST_EMAIL_DOMAIN` (variable)
+> - `PRODUCTION_MAILBOX_API_TOKEN` (secret)
+> - `PRODUCTION_TEST_PASSWORD` (secret, optional)
+>
+> Collect them from the **production** Supabase project's *Settings → API*
+> and from a Mailosaur server whose MX domain forwards production-bound test
+> mail (the same Mailosaur account used for staging works; the domain is what
+> must be verified). The **service-role key is sensitive** — same
+> never-in-a-`VITE_*`/`EXPO_PUBLIC_*` rule from Step 4 applies.
+>
+> Until that set exists, the production probe step **silently skips**
+> (soft-gated on `HAS_MAILBOX_TOKEN`, the actionlint-safe job-level env var
+> that mirrors the staging `HAS_MAILBOX_TOKEN` from Task 9 — `secrets.*` cannot
+> be referenced directly inside a step's `if:`). A probe that actually runs but
+> fails its signed-URL / private-bucket checks DOES hard-fail production
+> promotion (the intended safety behavior); only the "secret not provisioned"
+> case is skipped. The orchestrator must decide whether a production deploy
+> silently skipping its own safety probe is acceptable, or whether production
+> should hard-require the full `PRODUCTION_*` probe-secret set before any
+> promotion. Provision the set **all-or-nothing**: the step runs whenever
+> `PRODUCTION_MAILBOX_API_TOKEN` exists, so a half-provisioned set would run
+> the probe and fail it loudly on the missing Supabase/URL values.
+
+---
+
 ## Reference: full variable and secret list
 
 The complete set of 23 names configured by this runbook, in one place for

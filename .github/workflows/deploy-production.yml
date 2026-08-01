@@ -134,6 +134,18 @@ jobs:
     environment: production
     env:
       TESTED_SHA: ${{ needs.validate-staging-evidence.outputs.tested_sha }}
+      # `secrets` isn't a valid context inside a step's `if:` (actionlint:
+      # "context 'secrets' is not allowed here"). Thread presence of the
+      # production mailbox token through a job-level env var, checked via the
+      # (allowed) `env` context. Same pattern as deploy-staging.yml's
+      # HAS_MAILBOX_TOKEN (Task 9). SOFT-GATE: PRODUCTION_MAILBOX_API_TOKEN and
+      # the rest of the PRODUCTION_ probe-secret set are NOT yet provisioned
+      # (see docs/runbooks/staging-bootstrap.md), so this probe SKIPS on
+      # production until they are — the production promotion is NOT hard-failed
+      # on a missing secret. A probe that actually RUNS but FAILS its checks
+      # (signed-URL or private-bucket regression) DOES hard-fail this workflow,
+      # which is the intended safety behavior.
+      HAS_MAILBOX_TOKEN: ${{ secrets.PRODUCTION_MAILBOX_API_TOKEN != '' }}
     steps:
       - name: Checkout exact tested SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -221,6 +233,53 @@ jobs:
             fi
           done
           echo "All production services live at TESTED_SHA=${TESTED_SHA}."
+
+      # Production gate (Task 12 Step 11): the SAME private-media probe that
+      # gated staging, now run against REAL production at the exact TESTED_SHA
+      # that already passed CI and staging. It uploads a real image, persists
+      # it through /api/facility-logs, requires the API-signed URL to return
+      # 2xx AND the hand-constructed public Storage URL to return NON-2xx
+      # (proving the production media bucket is actually private), then cleans
+      # up its own user/log/object/profile in a finally block. The signed URL
+      # is never logged; only HTTP statuses, an object-key hash, deploy IDs,
+      # the workflow id, and TESTED_SHA are persisted to the step output.
+      #
+      # SOFT-GATED on HAS_MAILBOX_TOKEN: the PRODUCTION_ probe-secret set
+      # (PRODUCTION_SUPABASE_URL / _ANON_KEY / _SERVICE_ROLE_KEY /
+      # _API_URL / _TEST_EMAIL_DOMAIN / _MAILBOX_API_TOKEN / _TEST_PASSWORD)
+      # is NOT yet provisioned in the `production` GitHub environment — only
+      # PRODUCTION_DATABASE_URL_DIRECT / PRODUCTION_DATABASE_CA_CERT and the
+      # Render service IDs/URLs exist there today. Until those are added, this
+      # step silently skips. Flagged in .superpowers/sdd/task-12b-report.md for
+      # the orchestrator: a production deploy silently skipping its own safety
+      # probe is a bigger deal than staging skipping one. Provisioning must be
+      # all-or-nothing (the step runs whenever PRODUCTION_MAILBOX_API_TOKEN
+      # exists; if the rest of the set is missing the probe then runs and fails
+      # loudly, which WOULD fail promotion — provision the full set together).
+      - name: Run private-media probe (production gate)
+        if: ${{ env.HAS_MAILBOX_TOKEN == 'true' }}
+        env:
+          PROBE_ENV_PREFIX: PRODUCTION
+          PROBE_WORKFLOW_ID: ${{ github.run_id }}
+          PROBE_DEPLOY_SHA: ${{ env.TESTED_SHA }}
+          PRODUCTION_SUPABASE_URL: ${{ vars.PRODUCTION_SUPABASE_URL }}
+          PRODUCTION_SUPABASE_ANON_KEY: ${{ vars.PRODUCTION_SUPABASE_ANON_KEY }}
+          PRODUCTION_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_SERVICE_ROLE_KEY }}
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          PRODUCTION_TEST_EMAIL_DOMAIN: ${{ vars.PRODUCTION_TEST_EMAIL_DOMAIN }}
+          PRODUCTION_MAILBOX_API_TOKEN: ${{ secrets.PRODUCTION_MAILBOX_API_TOKEN }}
+          PRODUCTION_TEST_PASSWORD: ${{ secrets.PRODUCTION_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Persist the three Render deploy ids (comma-joined) into the probe's
+          # summary line so production evidence ties key-hash + HTTP statuses
+          # to the exact deploys at TESTED_SHA (Task 12 Step 11).
+          # (Assign-then-export: `export X="$(...)"` would mask jq's exit
+          # status under `set -e` — shellcheck SC2155.)
+          PROBE_DEPLOY_IDS="$(jq -rs 'map(.id) | join(",")' \
+            recommender-deploy.json api-deploy.json dashboard-deploy.json)"
+          export PROBE_DEPLOY_IDS
+          node scripts/ci/probe-private-media.mjs
 
       - name: Smoke test production
         env:
