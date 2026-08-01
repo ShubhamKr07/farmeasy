@@ -1195,6 +1195,29 @@ export const GetMyFacilityResponse = zod.union([zod.object({
 
 
 /**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+export const GetWizardProgressResponse = zod.union([zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown())
+}),zod.null()])
+
+
+/**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const PutWizardProgressBody = zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const PutWizardProgressResponse = zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * @summary List the signed-in user's organization's vendor sensor accounts
  */
 export const ListSensorAccountsResponseItem = zod.object({

@@ -378,6 +378,44 @@ export interface Facility {
   currency: string;
 }
 
+export type WizardProgressCurrentStep = typeof WizardProgressCurrentStep[keyof typeof WizardProgressCurrentStep];
+
+
+export const WizardProgressCurrentStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type WizardProgressStepData = { [key: string]: unknown };
+
+export interface WizardProgress {
+  currentStep: WizardProgressCurrentStep;
+  stepData: WizardProgressStepData;
+}
+
+export type PutWizardProgressRequestCurrentStep = typeof PutWizardProgressRequestCurrentStep[keyof typeof PutWizardProgressRequestCurrentStep];
+
+
+export const PutWizardProgressRequestCurrentStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type PutWizardProgressRequestStepData = { [key: string]: unknown };
+
+export interface PutWizardProgressRequest {
+  currentStep: PutWizardProgressRequestCurrentStep;
+  stepData?: PutWizardProgressRequestStepData;
+}
+
 export type CreateSensorAccountRequestAuthMethod = typeof CreateSensorAccountRequestAuthMethod[keyof typeof CreateSensorAccountRequestAuthMethod];
 
 

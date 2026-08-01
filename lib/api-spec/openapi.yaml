@@ -32,6 +32,8 @@ tags:
     description: Facility layout management
   - name: facilities
     description: Onboarding wizard facility creation and existence check
+  - name: wizard
+    description: Onboarding wizard resume/progress tracking
   - name: sensor-accounts
     description: Vendor sensor account credentials and connection testing
 paths:
@@ -1334,6 +1336,38 @@ paths:
                   - $ref: "#/components/schemas/Facility"
                   - type: "null"
 
+  /wizard/progress:
+    get:
+      operationId: getWizardProgress
+      tags: [wizard]
+      summary: Resume support — the signed-in user's current wizard step + saved draft data
+      responses:
+        "200":
+          description: The signed-in user's wizard progress, or null if the wizard hasn't been started yet
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WizardProgress"
+                  - type: "null"
+    put:
+      operationId: putWizardProgress
+      tags: [wizard]
+      summary: Save the current step's draft data and/or advance currentStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWizardProgressRequest"
+      responses:
+        "200":
+          description: The updated wizard progress row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WizardProgress"
+
   /sensor-accounts:
     get:
       operationId: listSensorAccounts
@@ -2003,6 +2037,28 @@ components:
         currency:
           type: string
       required: [id, name, organizationId, facilityName, timezone, units, currency]
+
+    WizardProgress:
+      type: object
+      properties:
+        currentStep:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        stepData:
+          type: object
+          additionalProperties: true
+      required: [currentStep, stepData]
+
+    PutWizardProgressRequest:
+      type: object
+      properties:
+        currentStep:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        stepData:
+          type: object
+          additionalProperties: true
+      required: [currentStep]
 
     CreateSensorAccountRequest:
       type: object

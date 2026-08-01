@@ -79,6 +79,7 @@ import type {
   MoveFertigationRequest,
   PostFacilityReadinessEvent200,
   PostFacilityReadinessEvent201,
+  PutWizardProgressRequest,
   RackItem,
   RecommendRequest,
   RecommendResponse,
@@ -106,7 +107,8 @@ import type {
   UpdateChannelInput,
   UpdateRackInput,
   UserSettingInput,
-  UserSettingsResponse
+  UserSettingsResponse,
+  WizardProgress
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -5335,6 +5337,178 @@ export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility
 
 
 
+
+export const getGetWizardProgressUrl = () => {
+
+
+
+
+  return `/api/wizard/progress`
+}
+
+/**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+export const getWizardProgress = async ( options?: RequestInit): Promise<WizardProgress | null> => {
+
+  return customFetch<WizardProgress | null>(getGetWizardProgressUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetWizardProgressQueryKey = () => {
+    return [
+    `/api/wizard/progress`
+    ] as const;
+    }
+
+
+export const getGetWizardProgressQueryOptions = <TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetWizardProgressQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWizardProgress>>> = ({ signal }) => getWizardProgress({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetWizardProgressQueryResult = NonNullable<Awaited<ReturnType<typeof getWizardProgress>>>
+export type GetWizardProgressQueryError = ErrorType<unknown>
+
+
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWizardProgress>>,
+          TError,
+          Awaited<ReturnType<typeof getWizardProgress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWizardProgress>>,
+          TError,
+          Awaited<ReturnType<typeof getWizardProgress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetWizardProgressQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPutWizardProgressUrl = () => {
+
+
+
+
+  return `/api/wizard/progress`
+}
+
+/**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const putWizardProgress = async (putWizardProgressRequest: PutWizardProgressRequest, options?: RequestInit): Promise<WizardProgress> => {
+
+  return customFetch<WizardProgress>(getPutWizardProgressUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      putWizardProgressRequest,)
+  }
+);}
+
+
+
+
+export const getPutWizardProgressMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext> => {
+
+const mutationKey = ['putWizardProgress'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putWizardProgress>>, {data: BodyType<PutWizardProgressRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  putWizardProgress(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutWizardProgressMutationResult = NonNullable<Awaited<ReturnType<typeof putWizardProgress>>>
+    export type PutWizardProgressMutationBody = BodyType<PutWizardProgressRequest>
+    export type PutWizardProgressMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const usePutWizardProgress = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putWizardProgress>>,
+        TError,
+        {data: BodyType<PutWizardProgressRequest>},
+        TContext
+      > => {
+      return useMutation(getPutWizardProgressMutationOptions(options), queryClient);
+    }
 
 export const getListSensorAccountsUrl = () => {
 
