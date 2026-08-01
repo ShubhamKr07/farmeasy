@@ -33,31 +33,44 @@ export function Wizard() {
   const [resumed, setResumed] = useState(false);
   const postEvent = usePostWizardEvent();
 
-  if (isLoading) return null; // AuthGate's LoadingScreen already covers the outer shell
-
   // Adjust state during render (React's documented pattern for syncing local
   // state from a query result — "You Might Not Need an Effect"), guarded by
   // `!resumed` so it only fires once: the same component reads its own
   // just-fetched prop and seeds its own state, not a child updating a parent.
+  // This isn't a hook call itself (just setStep/setResumed invocations), so
+  // it's fine to keep above the isLoading early return below; it's also
+  // naturally already isLoading-safe since `progress` is undefined/null
+  // while loading, making `progress?.currentStep` falsy.
   if (progress?.currentStep && !resumed) {
     setStep(progress.currentStep as WizardStep);
     setResumed(true);
   }
 
-  // WIZ-006: fire a "view" telemetry event once per step mount. Fire-and-forget
-  // (per README: "client does not await/block on this") — no error handling
-  // needed beyond the mutation's own default behavior, a dropped telemetry
-  // event should never surface to the user or block the wizard.
+  // WIZ-006: fire a "view" telemetry event once per step mount. The hook
+  // call itself must be unconditional (Rules of Hooks) — kept above the
+  // isLoading early return below, since on first mount isLoading is true and
+  // an early return there would otherwise make this component call a
+  // different number of hooks between the loading and loaded renders of the
+  // same fiber. The isLoading guard INSIDE the effect body prevents firing a
+  // spurious event for the default "farm_basics" step before the real
+  // resumed step is known. Fire-and-forget (per README: "client does not
+  // await/block on this") — no error handling needed beyond the mutation's
+  // own default behavior, a dropped telemetry event should never surface to
+  // the user or block the wizard.
   useEffect(() => {
+    if (isLoading) return;
     postEvent.mutate({ data: { step, eventType: "view" } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, isLoading]);
 
   // WIZ-006: best-effort "abandon" event when the tab is hidden/closed while
-  // still on this step. Fire-and-forget, no guaranteed delivery if the tab
-  // closes immediately after — acceptable per the brief's own "best-effort"
-  // framing, not a metric that needs 100% delivery guarantees.
+  // still on this step. Same isLoading-guard reasoning as above — the hook
+  // call is unconditional, only the effect body no-ops while loading.
+  // Fire-and-forget, no guaranteed delivery if the tab closes immediately
+  // after — acceptable per the brief's own "best-effort" framing, not a
+  // metric that needs 100% delivery guarantees.
   useEffect(() => {
+    if (isLoading) return;
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         postEvent.mutate({ data: { step, eventType: "abandon" } });
@@ -66,7 +79,9 @@ export function Wizard() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, isLoading]);
+
+  if (isLoading) return null; // AuthGate's LoadingScreen already covers the outer shell
 
   const advance = () => {
     // "save" fires for the step being left (the one whose data was just
