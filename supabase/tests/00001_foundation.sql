@@ -51,14 +51,16 @@ SELECT is(
   'media bucket exists in storage.buckets'
 );
 
--- Supabase's own migration ledger should reflect the four Supabase
--- migrations (00001-00004) applied via `supabase db push --include-all`.
+-- Supabase's own migration ledger should reflect the five Supabase
+-- migrations (00001-00005) applied via `supabase db push --include-all`.
 -- 00004_create_auth_profiles.sql installs the profile-provisioning trigger
--- and removes the self-UPDATE policy (Task 1).
+-- and removes the self-UPDATE policy (Task 1). 00005_private_media.sql
+-- backfills legacy photo-URL references and makes the media bucket private
+-- (Task 12).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  4,
-  'supabase_migrations.schema_migrations has exactly 4 rows (Supabase migrations 00001-00004)'
+  5,
+  'supabase_migrations.schema_migrations has exactly 5 rows (Supabase migrations 00001-00005)'
 );
 
 SELECT * FROM finish();
