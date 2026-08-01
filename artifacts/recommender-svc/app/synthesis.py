@@ -5,7 +5,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client = genai.Client(api_key=settings.gemini_api_key)
+# Same HTTP-timeout backstop as embeddings.py (Task 9 / Step 7).
+_client = genai.Client(
+    api_key=settings.gemini_api_key,
+    http_options=types.HttpOptions(timeout=settings.gemini_timeout_ms),
+)
 
 
 async def synthesize_answer(question: str, docs: list[dict], farm_context_text: str | None) -> str | None:

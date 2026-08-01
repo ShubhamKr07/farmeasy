@@ -1,5 +1,5 @@
+import httpx
 import dlt
-from dlt.sources.rest_api import RESTAPIConfig, rest_api_resources
 from app.config import settings
 
 DATASET_NAME = "recommender_staging"
@@ -28,34 +28,38 @@ def _unpooled_database_url(settings=settings) -> str:
 
 def _fetch_tavily_rows(query: str, max_results: int) -> list[dict]:
     """
-    dlt's declarative REST API source handles the Tavily HTTP call (bearer
-    auth, JSON body, response-path selection via data_selector) — this is
-    the extract half of the "search API -> dlt -> cache" pipeline.
+    Extract half of the "search API -> dlt -> cache" pipeline. Issues the
+    Tavily /search POST directly via a synchronous httpx.Client with finite
+    connect/read/write/pool timeouts (Task 9 / Step 7) and returns the same
+    projected row shape the previous dlt rest_api_resources source produced
+    (it selected the response body's top-level `results` array).
+
+    This is a SYNC function and intentionally uses a sync httpx.Client (not
+    AsyncClient) because the whole thing runs inside a worker thread via
+    asyncio.to_thread from main.py — introducing an event loop here would
+    nest loops. The load half (dlt pipeline.run into Postgres) happens in
+    run_tavily_ingest and is unchanged.
     """
-    config: RESTAPIConfig = {
-        "client": {
-            "base_url": "https://api.tavily.com",
-            "auth": {"type": "bearer", "token": settings.tavily_api_key},
-        },
-        "resource_defaults": {
-            "endpoint": {
-                "method": "POST",
-                "json": {
-                    "query": query,
-                    "max_results": max_results,
-                    "search_depth": "basic",
-                    "include_answer": False,
-                },
+    if not settings.tavily_api_key:
+        return []
+
+    t = settings.tavily_timeout_seconds
+    with httpx.Client(timeout=httpx.Timeout(connect=t, read=t, write=t, pool=t)) as client:
+        resp = client.post(
+            "https://api.tavily.com/search",
+            headers={
+                "Authorization": f"Bearer {settings.tavily_api_key}",
+                "Content-Type": "application/json",
             },
-        },
-        "resources": [
-            {
-                "name": "raw_docs",
-                "endpoint": {"path": "search", "data_selector": "results"},
+            json={
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic",
+                "include_answer": False,
             },
-        ],
-    }
-    (resource,) = rest_api_resources(config)
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
 
     def project(item: dict) -> dict:
         return {
@@ -66,8 +70,7 @@ def _fetch_tavily_rows(query: str, max_results: int) -> list[dict]:
             "query_text": query,
         }
 
-    rows = [project(item) for item in resource if item.get("content")]
-    return rows
+    return [project(item) for item in results if item.get("content")]
 
 
 def run_tavily_ingest(query: str, max_results: int = 5) -> list[dict]:

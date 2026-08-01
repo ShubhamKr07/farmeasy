@@ -2,7 +2,13 @@ from google import genai
 from google.genai import types
 from app.config import settings
 
-_client = genai.Client(api_key=settings.gemini_api_key)
+# Bound the underlying HTTP call with settings.gemini_timeout_ms (Task 9 /
+# Step 7). The request deadline in main.py governs user-facing latency; this
+# http_options timeout is a provider-level backstop (see config.py docs).
+_client = genai.Client(
+    api_key=settings.gemini_api_key,
+    http_options=types.HttpOptions(timeout=settings.gemini_timeout_ms),
+)
 
 
 async def embed(text: str) -> list[float]:
