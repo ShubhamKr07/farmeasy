@@ -980,6 +980,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Sensor"
 
+  /sensors/bulk:
+    post:
+      operationId: bulkCreateSensors
+      tags: [sensors]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateSensorsRequest"
+      responses:
+        "201":
+          description: One sensor row created per (type × placement target)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkCreateSensorsResponse"
+
   /sensor-readings:
     get:
       operationId: listSensorReadings
@@ -2467,6 +2484,14 @@ components:
         rackId:
           type: integer
           nullable: true
+        roomId:
+          type: integer
+          nullable: true
+        facilityWide:
+          type: boolean
+        sensorAccountId:
+          type: integer
+          nullable: true
         type:
           type: string
           enum: [temp, ph, water, humidity, ec]
@@ -2501,6 +2526,24 @@ components:
         unit:
           type: string
       required: [type, label]
+
+    BulkCreateSensorsRequest:
+      type: object
+      required: [label, types]
+      properties:
+        label: { type: string }
+        types: { type: array, items: { type: string, enum: [temp, ph, water, humidity, ec] }, minItems: 1 }
+        channelIds: { type: array, items: { type: integer } }
+        rackIds: { type: array, items: { type: integer } }
+        roomId: { type: integer }
+        facilityWide: { type: boolean }
+        sensorAccountId: { type: integer, nullable: true }
+    BulkCreateSensorsResponse:
+      type: object
+      properties:
+        created:
+          type: array
+          items: { $ref: "#/components/schemas/Sensor" }
 
     SensorReading:
       type: object

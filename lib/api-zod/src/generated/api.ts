@@ -908,6 +908,9 @@ export const ListSensorsResponseItem = zod.object({
   "id": zod.number(),
   "channelId": zod.number().nullish(),
   "rackId": zod.number().nullish(),
+  "roomId": zod.number().nullish(),
+  "facilityWide": zod.boolean().optional(),
+  "sensorAccountId": zod.number().nullish(),
   "type": zod.enum(['temp', 'ph', 'water', 'humidity', 'ec']),
   "label": zod.string(),
   "unit": zod.string().nullish(),
@@ -927,6 +930,20 @@ export const CreateSensorBody = zod.object({
   "type": zod.enum(['temp', 'ph', 'water', 'humidity', 'ec']),
   "label": zod.string(),
   "unit": zod.string().optional()
+})
+
+
+
+
+
+export const BulkCreateSensorsBody = zod.object({
+  "label": zod.string(),
+  "types": zod.array(zod.enum(['temp', 'ph', 'water', 'humidity', 'ec'])).min(1),
+  "channelIds": zod.array(zod.number()).optional(),
+  "rackIds": zod.array(zod.number()).optional(),
+  "roomId": zod.number().optional(),
+  "facilityWide": zod.boolean().optional(),
+  "sensorAccountId": zod.number().nullish()
 })
 
 

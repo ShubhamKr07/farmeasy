@@ -11,6 +11,9 @@ export interface Sensor {
   id: number;
   channelId?: number | null;
   rackId?: number | null;
+  roomId?: number | null;
+  facilityWide?: boolean;
+  sensorAccountId?: number | null;
   type: SensorType;
   label: string;
   unit?: string | null;

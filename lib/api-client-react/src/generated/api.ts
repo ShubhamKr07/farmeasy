@@ -34,6 +34,8 @@ import type {
   AlertStatusUpdate,
   BadTrayEntryInput,
   BadTraysAnalysis,
+  BulkCreateSensorsRequest,
+  BulkCreateSensorsResponse,
   ChannelItem,
   ChannelMonitoringItem,
   ChannelResolved,
@@ -3693,6 +3695,71 @@ export const useCreateSensor = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateSensorMutationOptions(options), queryClient);
+    }
+
+export const getBulkCreateSensorsUrl = () => {
+
+
+
+
+  return `/api/sensors/bulk`
+}
+
+export const bulkCreateSensors = async (bulkCreateSensorsRequest?: BulkCreateSensorsRequest, options?: RequestInit): Promise<BulkCreateSensorsResponse> => {
+
+  return customFetch<BulkCreateSensorsResponse>(getBulkCreateSensorsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      bulkCreateSensorsRequest,)
+  }
+);}
+
+
+
+
+export const getBulkCreateSensorsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext> => {
+
+const mutationKey = ['bulkCreateSensors'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bulkCreateSensors>>, {data?: BodyType<BulkCreateSensorsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  bulkCreateSensors(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BulkCreateSensorsMutationResult = NonNullable<Awaited<ReturnType<typeof bulkCreateSensors>>>
+    export type BulkCreateSensorsMutationBody = BodyType<BulkCreateSensorsRequest> | undefined
+    export type BulkCreateSensorsMutationError = ErrorType<unknown>
+
+    export const useBulkCreateSensors = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof bulkCreateSensors>>,
+        TError,
+        {data?: BodyType<BulkCreateSensorsRequest>},
+        TContext
+      > => {
+      return useMutation(getBulkCreateSensorsMutationOptions(options), queryClient);
     }
 
 export const getListSensorReadingsUrl = (params?: ListSensorReadingsParams,) => {

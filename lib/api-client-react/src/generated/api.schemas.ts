@@ -800,6 +800,9 @@ export interface Sensor {
   id: number;
   channelId?: number | null;
   rackId?: number | null;
+  roomId?: number | null;
+  facilityWide?: boolean;
+  sensorAccountId?: number | null;
   type: SensorType;
   label: string;
   unit?: string | null;
@@ -825,6 +828,32 @@ export interface SensorInput {
   type: SensorInputType;
   label: string;
   unit?: string;
+}
+
+export type BulkCreateSensorsRequestTypesItem = typeof BulkCreateSensorsRequestTypesItem[keyof typeof BulkCreateSensorsRequestTypesItem];
+
+
+export const BulkCreateSensorsRequestTypesItem = {
+  temp: 'temp',
+  ph: 'ph',
+  water: 'water',
+  humidity: 'humidity',
+  ec: 'ec',
+} as const;
+
+export interface BulkCreateSensorsRequest {
+  label: string;
+  /** @minItems 1 */
+  types: BulkCreateSensorsRequestTypesItem[];
+  channelIds?: number[];
+  rackIds?: number[];
+  roomId?: number;
+  facilityWide?: boolean;
+  sensorAccountId?: number | null;
+}
+
+export interface BulkCreateSensorsResponse {
+  created?: Sensor[];
 }
 
 export interface SensorReading {
