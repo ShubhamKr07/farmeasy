@@ -22,6 +22,7 @@ import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
+import { resolveTrustProxy } from "./lib/trustProxy";
 
 // Bounded client-version extraction for request logging. The mobile app
 // advertises its version via `X-FarmSmart-Client-Version` (see custom-fetch).
@@ -37,6 +38,19 @@ function boundedClientVersion(req: Request): string | undefined {
 }
 
 const app: Express = express();
+
+// Trust proxy: production requires an explicit positive-integer hop count
+// (TRUST_PROXY_HOPS) so `req.ip` reflects the real client behind Render's
+// edge proxy. The IP-keyed recommendation rate limiter (routes/recommend.ts)
+// is only sound when `req.ip` can't be spoofed via a forged left-most
+// X-Forwarded-For entry — resolveTrustProxy throws at startup in production
+// when unset/invalid (fail-closed, same pattern as CORS_ORIGINS). Outside
+// production the var is optional; when unset we leave Express's default
+// (trust no proxy) in place so local/test loopback traffic is unaffected.
+const trustProxyHops = resolveTrustProxy();
+if (trustProxyHops !== undefined) {
+  app.set("trust proxy", trustProxyHops);
+}
 
 app.use(
   pinoHttp({
@@ -64,7 +78,13 @@ app.use(
 // (fail-closed). Requests with no Origin header (native mobile, server-to-
 // server) are allowed unconditionally — see lib/cors.ts.
 app.use(cors(buildCorsOptions()));
-app.use(express.json({ limit: "20mb" }));
+// 1 MiB JSON body limit (Task 9 Step 4). Recommendation questions are
+// capped at 2,000 chars in routes/recommend.ts and every other JSON route
+// sends small payloads; 20 MiB was an over-large global default that let a
+// single request pin ~20 MiB of parse buffer. Multipart upload
+// (routes/media.ts) is unaffected — multer parses multipart bodies itself and
+// keeps its own route-specific 5 MiB limit.
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(supabaseAuthMiddleware);
 

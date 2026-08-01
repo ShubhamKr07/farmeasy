@@ -53,6 +53,10 @@ services:
       - key: DASHBOARD_URL
         sync: false # dashboard base URL the QuickBooks OAuth callback redirects to, e.g.
                      # https://farmsmart-dashboard.onrender.com (distinct from CORS_ORIGINS)
+      - key: TRUST_PROXY_HOPS
+        value: "1" # Render runs the API single-hop behind its edge proxy; req.ip (and the
+                    # IP-keyed recommendation rate limiter) is only trustworthy when Express
+                    # is told exactly how many proxy hops to honor for X-Forwarded-For.
       - key: FACILITY_TIMEZONE
         value: America/New_York # §1.5 rule 1 — facility-local date_trunc / window bounds
       - key: QBO_CLIENT_ID
@@ -156,6 +160,8 @@ services:
       - key: DASHBOARD_URL
         sync: false # staging dashboard base URL the QuickBooks OAuth callback redirects to —
                      # set after farmsmart-dashboard-staging URL is known
+      - key: TRUST_PROXY_HOPS
+        value: "1" # staging API is also single-hop behind Render's edge proxy (same as prod)
       - key: FACILITY_TIMEZONE
         value: America/New_York # §1.5 rule 1 — facility-local date_trunc / window bounds
       - key: QBO_CLIENT_ID
