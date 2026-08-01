@@ -17,12 +17,20 @@ const MEASURE_OPTIONS: { value: MeasureType; label: string }[] = [
   { value: "water", label: "Water level" },
 ];
 
-interface AddedDevice {
+export interface AddedDevice {
   label: string;
+  types: MeasureType[];
+  accountLabel: string;
   placementSummary: string;
 }
 
-export function DeviceRegistry({ onSaved }: { onSaved: () => void }) {
+export function DeviceRegistry({
+  onSaved,
+  onDeviceAdded,
+}: {
+  onSaved: () => void;
+  onDeviceAdded?: (device: AddedDevice) => void;
+}) {
   const { data: layout } = useGetLayout();
   const { data: accounts } = useListSensorAccounts();
   const bulkCreate = useBulkCreateSensors();
@@ -112,7 +120,11 @@ export function DeviceRegistry({ onSaved }: { onSaved: () => void }) {
                       .filter((r) => rackIds.includes(r.id))
                       .map((r) => r.label)
                       .join(", ")}`;
-          setAddedDevices((prev) => [...prev, { label: label.trim(), placementSummary }]);
+          const accountLabel =
+            accountId === "local" ? "Local" : (accounts?.find((a) => String(a.id) === accountId)?.vendor ?? "Local");
+          const newDevice: AddedDevice = { label: label.trim(), types, accountLabel, placementSummary };
+          setAddedDevices((prev) => [...prev, newDevice]);
+          onDeviceAdded?.(newDevice);
           setLabel("");
           setTypes([]);
           setChannelIds([]);

@@ -4,6 +4,7 @@ import { FarmBasics } from "./steps/FarmBasics";
 import { LayoutGrid } from "./steps/LayoutGrid";
 import { VendorAccounts } from "./steps/sensors/VendorAccounts";
 import { DeviceRegistry } from "./steps/sensors/DeviceRegistry";
+import type { AddedDevice } from "./steps/sensors/DeviceRegistry";
 import { SensorReview } from "./steps/sensors/SensorReview";
 import { Done } from "./steps/Done";
 import { StepIndicator } from "./components/StepIndicator";
@@ -31,6 +32,7 @@ export function Wizard() {
   const { data: progress, isLoading } = useGetWizardProgress();
   const [step, setStep] = useState<WizardStep>("farm_basics");
   const [resumed, setResumed] = useState(false);
+  const [addedDevices, setAddedDevices] = useState<AddedDevice[]>([]);
   const postEvent = usePostWizardEvent();
 
   // Adjust state during render (React's documented pattern for syncing local
@@ -101,6 +103,11 @@ export function Wizard() {
     setStep("done");
   };
 
+  // Lets the review screen's "+ Add more devices" link jump straight back to
+  // the device-registry step — a local state transition (see the module doc
+  // comment above: no wizard step is URL-addressable), not a route.
+  const goToDevices = () => setStep("sensors_devices");
+
   // Resume banner is only meaningful while the wizard is still sitting on the
   // step the user was resumed to — once they advance past it, it's dismissed
   // (README: "dismissable-on-advance only, no close button"). Comparing
@@ -125,8 +132,12 @@ export function Wizard() {
       {step === "farm_basics" && <FarmBasics onSaved={advance} />}
       {step === "layout" && <LayoutGrid onSaved={advance} />}
       {step === "sensors_accounts" && <VendorAccounts onSaved={advance} onSkipAll={skipToDone} />}
-      {step === "sensors_devices" && <DeviceRegistry onSaved={advance} />}
-      {step === "sensors_review" && <SensorReview onFinish={advance} />}
+      {step === "sensors_devices" && (
+        <DeviceRegistry onSaved={advance} onDeviceAdded={(d) => setAddedDevices((prev) => [...prev, d])} />
+      )}
+      {step === "sensors_review" && (
+        <SensorReview devices={addedDevices} onAddMore={goToDevices} onFinish={advance} />
+      )}
       {step === "done" && <Done />}
     </div>
   );
