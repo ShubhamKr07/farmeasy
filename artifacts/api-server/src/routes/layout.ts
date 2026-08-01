@@ -11,15 +11,17 @@ import {
 
 const router = Router();
 
+// No-op as of Task 1 of the onboarding-wizard plan (2026-08-01): rooms now require a
+// facilityId (roomsTable.facilityId is NOT NULL, composite-unique on (facilityId, name)
+// -- see lib/db/src/schema/index.ts), so an unconditional 3-room auto-seed with no
+// facility context no longer type-checks and would be wrong even if it did (rooms are
+// per-facility now, not global). This function is superseded by `POST /facilities`
+// (Task 2 of the same plan), which creates a facility's rooms transactionally. Left as
+// a no-op (rather than deleted) so existing call sites below don't need to change yet;
+// Task 2 removes this function and its call sites once the real facility-scoped route
+// lands.
 async function ensureRoomsExist() {
-  const existing = await db.select().from(roomsTable);
-  if (existing.length === 0) {
-    await db.insert(roomsTable).values([
-      { name: "seeding", sortOrder: 0 },
-      { name: "fertigation", sortOrder: 1 },
-      { name: "harvesting", sortOrder: 2 },
-    ]);
-  }
+  return;
 }
 
 router.get("/layout", async (req: Request, res: Response) => {

@@ -96,6 +96,7 @@ export const usersTable = pgTable("users", {
   id: uuid("id").primaryKey(), // matches auth.users.id — not generated here, Supabase owns it
   email: text("email").notNull(),
   role: userRoleEnum("role").notNull().default("technician"),
+  organizationId: integer("organization_id").references(() => organizationsTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -265,9 +266,22 @@ export const shipmentsTable = pgTable("shipments", {
   ],
 );
 
+export const organizationsTable = pgTable("organizations", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const facilitiesTable = pgTable("facilities", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  organizationId: integer("organization_id")
+    .notNull()
+    .references(() => organizationsTable.id, { onDelete: "cascade" }),
+  facilityName: text("facility_name").notNull(),
+  timezone: text("timezone").notNull(),
+  units: text("units", { enum: ["metric", "imperial"] }).notNull().default("metric"),
+  currency: text("currency").notNull().default("USD"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -277,13 +291,124 @@ export const roomNameEnum = pgEnum("room_name", [
   "harvesting",
 ]);
 
-export const roomsTable = pgTable("rooms", {
+export const roomsTable = pgTable(
+  "rooms",
+  {
+    id: serial("id").primaryKey(),
+    name: roomNameEnum("name").notNull(), // .unique() REMOVED — was a global-unique bug, see composite unique below
+    sortOrder: integer("sort_order").notNull().default(0),
+    facilityId: integer("facility_id")
+      .notNull() // was nullable
+      .references(() => facilitiesTable.id, { onDelete: "cascade" }), // was "set null"
+  },
+  (table) => [
+    uniqueIndex("rooms_facility_id_name_uniq").on(table.facilityId, table.name),
+  ],
+);
+
+// wizard_progress — resume support (WIZ-001 "resume at last incomplete step")
+export const wizardStepEnum = pgEnum("wizard_step", [
+  "farm_basics",
+  "layout",
+  "sensors_accounts",
+  "sensors_devices",
+  "sensors_review",
+  "done",
+]);
+
+export const wizardProgressTable = pgTable(
+  "wizard_progress",
+  {
+    id: serial("id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => usersTable.id),
+    organizationId: integer("organization_id").references(() => organizationsTable.id),
+    currentStep: wizardStepEnum("current_step").notNull().default("farm_basics"),
+    stepData: jsonb("step_data").notNull().default({}),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("wizard_progress_user_id_uniq").on(table.userId)],
+);
+
+// sensor_accounts — vendor cloud accounts (SEN-002/003), org-scoped per README
+export const sensorAuthMethodEnum = pgEnum("sensor_auth_method", [
+  "api_key",
+  "oauth",
+  "username_password",
+]);
+export const sensorAccountStatusEnum = pgEnum("sensor_account_status", [
+  "connected",
+  "failed",
+  "pending_integration",
+]);
+
+export const sensorAccountsTable = pgTable(
+  "sensor_accounts",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organizationsTable.id, { onDelete: "cascade" }),
+    vendor: text("vendor").notNull(),
+    authMethod: sensorAuthMethodEnum("auth_method").notNull(),
+    status: sensorAccountStatusEnum("status").notNull().default("pending_integration"),
+    maskedFingerprint: text("masked_fingerprint"),
+    credentialCiphertext: text("credential_ciphertext"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sensor_accounts_org_vendor_uniq").on(table.organizationId, table.vendor),
+  ],
+);
+
+// facility_readiness_events — event-driven checklist state (CHK-001..003)
+export const readinessEventKeyEnum = pgEnum("readiness_event_key", [
+  "labels_downloaded",
+  "labels_scanned",       // completes item 1 — set ONLY by mobile on first shelf scan (CHK-001)
+  "grow_profile_created",
+  "seeds_added",
+  "first_cycle_seeded",
+  "sensors_skipped",      // W3.5 "Set up later" — item 5 skip (reversible)
+  "quickbooks_skipped",   // W4 QuickBooks "Skip" — item 6 -> "Later"
+  "team_invited",
+]);
+
+export const facilityReadinessEventsTable = pgTable(
+  "facility_readiness_events",
+  {
+    id: serial("id").primaryKey(),
+    facilityId: integer("facility_id")
+      .notNull()
+      .references(() => facilitiesTable.id, { onDelete: "cascade" }),
+    eventKey: readinessEventKeyEnum("event_key").notNull(),
+    occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+    undoneAt: timestamp("undone_at"), // set when a skip is reversed (item 5 "undo from Sensors")
+  },
+  (table) => [
+    index("facility_readiness_events_facility_id_idx").on(table.facilityId),
+    uniqueIndex("facility_readiness_events_facility_key_uniq").on(
+      table.facilityId,
+      table.eventKey,
+    ),
+  ],
+);
+
+// wizard_events — minimal telemetry (WIZ-006), append-only, no PII beyond userId
+export const wizardEventTypeEnum = pgEnum("wizard_event_type", [
+  "view",
+  "save",
+  "abandon",
+  "skip",
+]);
+
+export const wizardEventsTable = pgTable("wizard_events", {
   id: serial("id").primaryKey(),
-  name: roomNameEnum("name").notNull().unique(),
-  sortOrder: integer("sort_order").notNull().default(0),
-  facilityId: integer("facility_id").references(() => facilitiesTable.id, {
-    onDelete: "set null",
-  }),
+  userId: uuid("user_id").notNull().references(() => usersTable.id),
+  step: wizardStepEnum("step").notNull(),
+  eventType: wizardEventTypeEnum("event_type").notNull(),
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
 });
 
 export const channelsTable = pgTable("channels", {
@@ -334,12 +459,13 @@ export const sensorsTable = pgTable(
   "sensors",
   {
     id: serial("id").primaryKey(),
-    channelId: integer("channel_id").references(() => channelsTable.id, {
-      onDelete: "cascade",
-    }),
-    rackId: integer("rack_id").references(() => racksTable.id, {
-      onDelete: "cascade",
-    }),
+    channelId: integer("channel_id").references(() => channelsTable.id, { onDelete: "cascade" }),
+    rackId: integer("rack_id").references(() => racksTable.id, { onDelete: "cascade" }),
+    roomId: integer("room_id").references(() => roomsTable.id, { onDelete: "cascade" }), // new
+    facilityWide: boolean("facility_wide").notNull().default(false), // new
+    sensorAccountId: integer("sensor_account_id").references(() => sensorAccountsTable.id, {
+      onDelete: "set null",
+    }), // new — null = "Local (none)"
     type: sensorTypeEnum("type").notNull(),
     label: text("label").notNull(),
     unit: text("unit"),
@@ -350,9 +476,11 @@ export const sensorsTable = pgTable(
   (table) => [
     index("sensors_channel_id_idx").on(table.channelId),
     index("sensors_rack_id_idx").on(table.rackId),
+    index("sensors_room_id_idx").on(table.roomId),
+    index("sensors_sensor_account_id_idx").on(table.sensorAccountId),
     check(
       "sensors_placement",
-      sql`${table.channelId} IS NOT NULL OR ${table.rackId} IS NOT NULL`,
+      sql`${table.channelId} IS NOT NULL OR ${table.rackId} IS NOT NULL OR ${table.roomId} IS NOT NULL OR ${table.facilityWide} = true`,
     ),
   ],
 );
