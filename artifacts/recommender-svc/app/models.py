@@ -1,9 +1,11 @@
-from pydantic import BaseModel
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class RecommendRequest(BaseModel):
-    clerk_user_id: str
-    question: str
+    user_id: UUID
+    question: str = Field(min_length=1, max_length=2000)
     # Dashboard snapshot text, attached by api-server when the question
     # mentions operational keywords (yield, cycles, bad trays, ...) — this
     # service's own crop/seed-name grounding can't answer "what's my yield

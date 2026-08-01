@@ -68,7 +68,7 @@ async def recommend(req: RecommendRequest) -> RecommendResponse:
             if used_live_search
             else "No cached knowledge matches this question yet, and live search isn't configured."
         )
-        await log_query(req.clerk_user_id, req.question, message, [], farm_context)
+        await log_query(req.user_id, req.question, message, [], farm_context)
         return RecommendResponse(answer=message, sources=[], cache_hit=False)
 
     sources = [
@@ -91,5 +91,5 @@ async def recommend(req: RecommendRequest) -> RecommendResponse:
     if req.ops_context:
         logged_context = {**(logged_context or {}), "ops_context": req.ops_context}
 
-    await log_query(req.clerk_user_id, req.question, answer, [s.model_dump() for s in sources], logged_context)
+    await log_query(req.user_id, req.question, answer, [s.model_dump() for s in sources], logged_context)
     return RecommendResponse(answer=answer, sources=sources, cache_hit=not used_live_search)

@@ -86,7 +86,11 @@ router.post("/recommend", async (req: Request, res: Response) => {
         "Content-Type": "application/json",
         "x-internal-key": internalKey,
       },
-      body: JSON.stringify({ clerk_user_id: userId, question, ops_context: opsContext }),
+      body: JSON.stringify({
+        user_id: userId,
+        question: question.trim(),
+        ops_context: opsContext,
+      }),
     });
     const body = await upstream.json();
     return res.status(upstream.status).json(body);

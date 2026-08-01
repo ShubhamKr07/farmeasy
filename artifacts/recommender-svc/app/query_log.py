@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 from app.db import get_pool
 
 
@@ -13,7 +14,7 @@ def _json_default(obj):
 
 
 async def log_query(
-    clerk_user_id: str,
+    user_id: UUID,
     question: str,
     answer: str,
     sources: list[dict],
@@ -24,10 +25,10 @@ async def log_query(
     await pool.execute(
         """
         INSERT INTO recommender_queries
-            (clerk_user_id, question, answer, sources, farm_context_used)
+            (user_id, question, answer, sources, farm_context_used)
         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
         """,
-        clerk_user_id,
+        user_id,
         question,
         answer,
         json.dumps(sources, default=_json_default),
