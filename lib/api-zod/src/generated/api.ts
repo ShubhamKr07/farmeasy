@@ -654,6 +654,17 @@ export const CreateBadTrayEntryBody = zod.object({
 
 
 /**
+ * Stores the file under a bucket-relative key (media/<file>) and returns both `key` (the permanent, stable reference to persist — e.g. in a manual check's or facility log's photoUrls) and `url` (a signed URL valid for one hour, for immediate display). Request body is multipart/form-data with a single `file` field — not modeled as a strict schema here since this endpoint is never called through the generated client (mobile builds its own FormData and posts it directly via customFetch); modeling `format: binary` triggers a File/Blob type reference that doesn't resolve in this Node-target codegen output.
+
+ * @summary Upload a photo, returning its stored key and a signed URL
+ */
+export const UploadMediaResponse = zod.object({
+  "key": zod.string().describe('Bucket-relative object key (e.g. \"media\/a1b2c3d4.jpg\") — the stable reference to persist as a photo reference.\n'),
+  "url": zod.string().describe('Signed URL for the just-uploaded key, valid for one hour — for immediate display only, not for persisting.\n')
+})
+
+
+/**
  * @summary Get full facility layout (rooms → channels → racks → trays)
  */
 export const GetLayoutResponseItem = zod.object({

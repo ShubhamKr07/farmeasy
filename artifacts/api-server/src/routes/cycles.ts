@@ -11,6 +11,7 @@ import {
   badTrayEntriesTable,
 } from "@workspace/db";
 import { calcDaysOverdue, generateShortId, seedingWeight } from "../lib/utils";
+import { signMediaReferences } from "../services/mediaUrls";
 
 const router = Router();
 
@@ -152,7 +153,11 @@ function formatCycle(cycle: Cycle, profile: Profile) {
   };
 }
 
-function formatCheck(c: typeof manualChecksTable.$inferSelect) {
+// Task 11 Step 4: async because photo references are signed at the response
+// boundary (signMediaReferences). Callers must `await Promise.all(...)` the
+// mapping. A check with no photos calls signMediaReferences([]) which returns
+// [] immediately without touching storage.
+async function formatCheck(c: typeof manualChecksTable.$inferSelect) {
   return {
     id: c.id,
     cycleId: c.cycleId,
@@ -161,7 +166,7 @@ function formatCheck(c: typeof manualChecksTable.$inferSelect) {
     isBadTrays: c.isBadTrays,
     issue: c.issue ?? null,
     notes: c.notes ?? null,
-    photoUrls: c.photoUrls ?? [],
+    photoUrls: await signMediaReferences(c.photoUrls ?? []),
     createdBy: c.userId ?? null,
     createdAt: c.createdAt.toISOString(),
   };
@@ -312,7 +317,7 @@ router.get("/cycles/:id", async (req, res) => {
 
     return res.json({
       ...formatCycle(rows[0].cycle, rows[0].profile!),
-      manualChecks: checks.map(formatCheck),
+      manualChecks: await Promise.all(checks.map(formatCheck)),
     });
   } catch (err) {
     console.error(err);
@@ -568,7 +573,7 @@ router.get("/cycles/:id/manual-checks", async (req, res) => {
       .from(manualChecksTable)
       .where(eq(manualChecksTable.cycleId, id))
       .orderBy(desc(manualChecksTable.createdAt));
-    return res.json(checks.map(formatCheck));
+    return res.json(await Promise.all(checks.map(formatCheck)));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to fetch manual checks" });
@@ -633,7 +638,7 @@ router.post("/cycles/:id/manual-checks", enforceAuth, async (req, res) => {
       });
     }
 
-    return res.status(201).json(formatCheck(check));
+    return res.status(201).json(await formatCheck(check));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to create manual check" });

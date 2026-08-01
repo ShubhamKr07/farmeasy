@@ -68,6 +68,7 @@ export * from './listTasksParams';
 export * from './listTasksStatus';
 export * from './lookupSeedLotParams';
 export * from './manualCheck';
+export * from './mediaUploadResponse';
 export * from './metricsAvailability';
 export * from './metricSeriesPoint';
 export * from './metricsResponse';

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { manualChecksTable, cyclesTable, alertsTable } from "@workspace/db";
+import { signMediaReferences } from "../services/mediaUrls";
 
 const router = Router();
 
@@ -126,7 +127,11 @@ router.post("/bad-trays/manual-checks", async (req: Request, res: Response) => {
       isBadTrays: check.isBadTrays,
       issue: check.issue ?? null,
       notes: check.notes ?? null,
-      photoUrls: check.photoUrls ?? [],
+      // Task 11 Step 4: sign the just-stored photo references before echoing
+      // them to the client. (This is the only response path in this file that
+      // returns photoUrls — the GET /bad-trays analysis `manualEntries` carry
+      // none.) signMediaReferences([]) is a no-op when there are no photos.
+      photoUrls: await signMediaReferences(check.photoUrls ?? []),
       createdBy: check.userId ?? null,
       createdAt: check.createdAt.toISOString(),
     });

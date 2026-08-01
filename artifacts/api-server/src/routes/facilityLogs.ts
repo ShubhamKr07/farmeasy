@@ -3,6 +3,7 @@ import { getAuth } from "../middlewares/supabaseAuth";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { facilityLogsTable } from "@workspace/db";
+import { signMediaReferences } from "../services/mediaUrls";
 
 const router = Router();
 
@@ -115,10 +116,33 @@ router.post("/facility-logs", async (req: Request, res: Response) => {
       })
       .returning();
 
+    // Task 11 Step 4: only waste/cleaning/receiving logs carry a `photoUrls`
+    // array inside their jsonb `data` blob; maintenance/env_check/visitor do
+    // not. Sign it in place before echoing `data` back so the client gets
+    // immediately-usable URLs, leaving every other field untouched. If there's
+    // no `photoUrls` property, return `data` as-is (signMediaReferences is
+    // never even called).
+    const logData = log.data as Record<string, unknown>;
+    let responseData: Record<string, unknown> = logData;
+    if (Array.isArray(logData?.photoUrls)) {
+      try {
+        responseData = {
+          ...logData,
+          photoUrls: await signMediaReferences(logData.photoUrls as string[]),
+        };
+      } catch (signErr) {
+        req.log.error(
+          { err: signErr },
+          "failed to sign facility log media references",
+        );
+        return res.status(502).json({ error: "Failed to sign media references" });
+      }
+    }
+
     return res.status(201).json({
       id: log.id,
       logType: log.logType,
-      data: log.data,
+      data: responseData,
       notes: log.notes ?? null,
       createdAt: log.createdAt.toISOString(),
     });

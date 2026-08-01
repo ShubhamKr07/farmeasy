@@ -9,6 +9,15 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface MediaUploadResponse {
+  /** Bucket-relative object key (e.g. "media/a1b2c3d4.jpg") — the stable reference to persist as a photo reference.
+   */
+  key: string;
+  /** Signed URL for the just-uploaded key, valid for one hour — for immediate display only, not for persisting.
+   */
+  url: string;
+}
+
 export interface GrowthProfile {
   id: number;
   name: string;

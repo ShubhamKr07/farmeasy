@@ -65,6 +65,7 @@ import type {
   ListTasksParams,
   LookupSeedLotParams,
   ManualCheck,
+  MediaUploadResponse,
   MetricsAvailability,
   MetricsResponse,
   MonitoringApiInput,
@@ -2421,6 +2422,78 @@ export const useCreateBadTrayEntry = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateBadTrayEntryMutationOptions(options), queryClient);
+    }
+
+export const getUploadMediaUrl = () => {
+
+
+
+
+  return `/api/media/upload`
+}
+
+/**
+ * Stores the file under a bucket-relative key (media/<file>) and returns both `key` (the permanent, stable reference to persist — e.g. in a manual check's or facility log's photoUrls) and `url` (a signed URL valid for one hour, for immediate display). Request body is multipart/form-data with a single `file` field — not modeled as a strict schema here since this endpoint is never called through the generated client (mobile builds its own FormData and posts it directly via customFetch); modeling `format: binary` triggers a File/Blob type reference that doesn't resolve in this Node-target codegen output.
+
+ * @summary Upload a photo, returning its stored key and a signed URL
+ */
+export const uploadMedia = async ( options?: RequestInit): Promise<MediaUploadResponse> => {
+
+  return customFetch<MediaUploadResponse>(getUploadMediaUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getUploadMediaMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadMedia>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadMedia>>, TError,void, TContext> => {
+
+const mutationKey = ['uploadMedia'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadMedia>>, void> = () => {
+
+
+          return  uploadMedia(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadMediaMutationResult = NonNullable<Awaited<ReturnType<typeof uploadMedia>>>
+
+    export type UploadMediaMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Upload a photo, returning its stored key and a signed URL
+ */
+export const useUploadMedia = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadMedia>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadMedia>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getUploadMediaMutationOptions(options), queryClient);
     }
 
 export const getGetLayoutUrl = () => {
