@@ -83,17 +83,16 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
     strictEqual(rows[0].currentStep, "layout");
   });
 
-  // Regression test for the lost-update race a code review caught: a plain
-  // read-then-write (SELECT stepData, then a separate INSERT/UPDATE) lets a
-  // concurrent draft-save and advance-only PUT interleave, so whichever
-  // commits second can silently overwrite the other's already-saved
-  // stepData with stale/empty data. The fix wraps the read + upsert in one
-  // transaction with `SELECT ... FOR UPDATE` (same precedent as
-  // facilities.ts) so concurrent PUTs for the same user serialize instead of
-  // racing. Fired via Promise.all against the real test database so the two
-  // requests' transactions genuinely overlap, not just call the handler
-  // twice sequentially.
-  test("concurrent draft-save + advance-only PUTs never lose the draft to a race", async () => {
+  // Regression test for the lost-update race a code review caught, for the
+  // case where a wizard_progress row already exists: a concurrent draft-save
+  // and advance-only PUT must never let the advance-only call's write
+  // silently overwrite the draft-save's already-saved stepData. Fired via
+  // Promise.all against the real test database so the two requests
+  // genuinely overlap, not just call the handler twice sequentially. Seeds
+  // an existing row first (sequential PUT) specifically so this test's
+  // concurrent pair races against an UPDATE path — the separate test below
+  // covers the narrower, no-existing-row race this one can't reach.
+  test("concurrent draft-save + advance-only PUTs never lose the draft to a race (existing row)", async () => {
     const { app, db, wizardProgressTable } = await setup();
 
     await request(app)
@@ -113,5 +112,43 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
       .where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
     const stepData = row.stepData as Record<string, unknown>;
     ok(stepData.farmName, "draft's farmName must survive a concurrent advance-only PUT");
+  });
+
+  // Regression test for the narrower race a second review round caught: a
+  // transaction + `SELECT ... FOR UPDATE` only closes the race once a row
+  // exists to lock. For a user's very first-ever save, there is no row yet,
+  // so both concurrent PUTs' SELECTs see nothing to lock, both compute
+  // stepData from only their own request body in JS, and only then does
+  // Postgres's ON CONFLICT serialize the actual INSERTs — by which point
+  // each statement's SET values were already fixed. Whichever insert loses
+  // that row-level race and converts to the conflict-UPDATE could still
+  // clobber the winner's just-committed draft with its own stale
+  // precomputed value.
+  //
+  // Deliberately does NOT seed a row first (unlike the test above) — these
+  // two PUTs are the very first requests for this user, fired concurrently,
+  // so this test exercises the INSERT-vs-INSERT-that-becomes-UPDATE path the
+  // seeded test above cannot reach. The fix (a single atomic upsert whose
+  // SET clause references the target table's own stepData column instead of
+  // a JS-computed value when no stepData was sent) has no separate read at
+  // any point, for any row state, so this race is closed regardless of
+  // which request's INSERT Postgres resolves first.
+  test("concurrent draft-save + advance-only PUTs never lose the draft on a user's very first save", async () => {
+    const { app, db, wizardProgressTable } = await setup();
+
+    await Promise.all([
+      request(app)
+        .put("/api/wizard/progress")
+        .send({ currentStep: "layout", stepData: { farmName: "Sunrise Greens" } }),
+      request(app).put("/api/wizard/progress").send({ currentStep: "farm_basics" }),
+    ]);
+
+    const rows = await db
+      .select()
+      .from(wizardProgressTable)
+      .where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
+    strictEqual(rows.length, 1, "the unique userId index must still collapse both concurrent inserts to one row");
+    const stepData = rows[0].stepData as Record<string, unknown>;
+    ok(stepData.farmName, "draft's farmName must survive regardless of which concurrent insert wins the conflict");
   });
 });

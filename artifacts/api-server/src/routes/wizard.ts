@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { wizardProgressTable, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
 
 const router = Router();
@@ -56,15 +56,32 @@ router.get("/wizard/progress", async (req: Request, res: Response) => {
 // (set by POST /facilities) purely for admin/debugging convenience — not
 // read by any client code path.
 //
-// The read-existing-stepData-then-write is done inside a transaction with a
-// locking `SELECT ... FOR UPDATE` (same precedent as facilities.ts's
-// already-has-a-facility check), not a plain read beforehand: two concurrent
-// PUTs for the same user (double-click submit, two open tabs) — one saving a
-// draft, one an advance-only call with no stepData — would otherwise be able
-// to interleave their read and write, letting the advance-only call silently
-// overwrite the just-saved draft with stale/empty stepData (a lost update).
-// With the lock, the second PUT's SELECT blocks until the first PUT's
-// transaction commits, then reads the up-to-date stepData.
+// This must be a single atomic statement, not a read-then-write (even a
+// transaction with `SELECT ... FOR UPDATE` isn't enough — see below). Two
+// concurrent PUTs for the same user (double-click submit, two open tabs) —
+// one saving a draft, one an advance-only call with no stepData — must never
+// let the advance-only call's write clobber the draft-save's write,
+// regardless of which one Postgres actually commits first.
+//
+// A `SELECT ... FOR UPDATE` inside a transaction closes this race only when
+// a wizard_progress row already exists to lock: if the very first save for a
+// brand-new user races (the common case, since nothing pre-creates this row
+// at signup), both concurrent SELECTs see no row (nothing to lock), both
+// compute stepData in JS from only their own request body, and only *then*
+// does Postgres serialize the actual INSERTs at the row level via ON
+// CONFLICT — by which point each statement's SET values were already fixed
+// as static parameters. Whichever insert loses the row-level race and
+// converts to the conflict-UPDATE still overwrites the winner's just-
+// committed stepData with its own stale precomputed value. Same lost-update
+// bug, just a narrower window (first-ever save instead of every save).
+//
+// Fixed by removing the separate read entirely: when this PUT sent no
+// stepData, the SET clause references the target table's own stepData
+// column directly (`sql`${wizardProgressTable.stepData}``) instead of a
+// JS-computed value. Postgres evaluates that expression against whichever
+// row actually wins the conflict, as part of conflict resolution in the same
+// statement — there is no window between "read what's there" and "write"
+// because there is no separate read, at any point, for any row state.
 router.put("/wizard/progress", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
@@ -74,41 +91,30 @@ router.put("/wizard/progress", async (req: Request, res: Response) => {
 
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
 
-    const row = await db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select({ stepData: wizardProgressTable.stepData })
-        .from(wizardProgressTable)
-        .where(eq(wizardProgressTable.userId, userId!))
-        .for("update");
-
-      // Only overwrite stepData when the caller actually sent a draft
-      // payload; a plain "advance to next step" PUT (currentStep only) must
-      // not blow away the previous step's already-saved draft.
-      const stepData = body.stepData ?? existing?.stepData ?? {};
-
-      const [updated] = await tx
-        .insert(wizardProgressTable)
-        .values({
-          userId: userId!,
-          organizationId: user?.organizationId ?? null,
+    const [row] = await db
+      .insert(wizardProgressTable)
+      .values({
+        userId: userId!,
+        organizationId: user?.organizationId ?? null,
+        currentStep: body.currentStep,
+        stepData: body.stepData ?? {},
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: wizardProgressTable.userId,
+        set: {
           currentStep: body.currentStep,
-          stepData,
+          stepData:
+            body.stepData !== undefined
+              ? sql`${JSON.stringify(body.stepData)}::jsonb`
+              : sql`${wizardProgressTable.stepData}`,
           updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: wizardProgressTable.userId,
-          set: {
-            currentStep: body.currentStep,
-            stepData,
-            updatedAt: new Date(),
-          },
-        })
-        .returning({
-          currentStep: wizardProgressTable.currentStep,
-          stepData: wizardProgressTable.stepData,
-        });
-      return updated;
-    });
+        },
+      })
+      .returning({
+        currentStep: wizardProgressTable.currentStep,
+        stepData: wizardProgressTable.stepData,
+      });
 
     return res.status(200).json(row);
   } catch (err) {
