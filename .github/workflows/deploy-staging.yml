@@ -63,6 +63,10 @@ jobs:
       # Single source of truth for the SHA being deployed. Derived once from
       # the upstream CI run and referenced everywhere else — never re-resolved.
       DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+      # `secrets` isn't a valid context inside a step's `if:` (actionlint:
+      # "context 'secrets' is not allowed here"). Thread presence through a
+      # job-level env var instead, checked via the (allowed) `env` context.
+      HAS_MAILBOX_TOKEN: ${{ secrets.STAGING_MAILBOX_API_TOKEN != '' }}
     steps:
       - name: Checkout exact CI-tested SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -156,7 +160,7 @@ jobs:
       # NOT remove this condition as a way to "turn the gate on" -- provision
       # the secret instead, or the step fails closed on the placeholder domain.
       - name: Run hosted Auth signup integration test (staging gate)
-        if: ${{ secrets.STAGING_MAILBOX_API_TOKEN != '' }}
+        if: ${{ env.HAS_MAILBOX_TOKEN == 'true' }}
         env:
           STAGING_SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
           STAGING_SUPABASE_ANON_KEY: ${{ vars.STAGING_SUPABASE_ANON_KEY }}
