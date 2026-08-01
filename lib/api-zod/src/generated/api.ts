@@ -1144,3 +1144,36 @@ export const PostFacilityLogBody = zod.object({
 })
 
 
+/**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+
+
+export const createFacilityBodyCurrencyMin = 3;
+export const createFacilityBodyCurrencyMax = 3;
+
+
+
+export const CreateFacilityBody = zod.object({
+  "farmName": zod.string().min(1),
+  "facilityName": zod.string().min(1).optional(),
+  "timezone": zod.string(),
+  "units": zod.enum(['metric', 'imperial']),
+  "currency": zod.string().min(createFacilityBodyCurrencyMin).max(createFacilityBodyCurrencyMax)
+})
+
+
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+export const GetMyFacilityResponse = zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "organizationId": zod.number(),
+  "facilityName": zod.string(),
+  "timezone": zod.string(),
+  "units": zod.enum(['metric', 'imperial']),
+  "currency": zod.string()
+}),zod.null()])
+
+

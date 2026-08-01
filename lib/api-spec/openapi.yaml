@@ -30,6 +30,8 @@ tags:
     description: Photo upload and signed-URL resolution
   - name: layout
     description: Facility layout management
+  - name: facilities
+    description: Onboarding wizard facility creation and existence check
 paths:
   /healthz:
     get:
@@ -1277,6 +1279,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/FacilityLog"
 
+  /facilities:
+    post:
+      operationId: createFacility
+      tags: [facilities]
+      summary: W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFacilityRequest"
+      responses:
+        "201":
+          description: Facility created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFacilityResponse"
+        "409":
+          description: Signed-in user already belongs to a facility
+
+  /facilities/me:
+    get:
+      operationId: getMyFacility
+      tags: [facilities]
+      summary: Facility-existence check for the signed-in user (wizard gate)
+      responses:
+        "200":
+          description: The signed-in user's facility, or null if they have none yet
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Facility"
+                  - type: "null"
+
 components:
   schemas:
     HealthStatus:
@@ -1790,6 +1828,43 @@ components:
         createdAt:
           type: string
       required: [id, logType, data, createdAt]
+
+    CreateFacilityRequest:
+      type: object
+      required: [farmName, timezone, units, currency]
+      properties:
+        farmName: { type: string, minLength: 1 }
+        facilityName: { type: string, minLength: 1 }
+        timezone: { type: string }
+        units: { type: string, enum: [metric, imperial] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+
+    CreateFacilityResponse:
+      type: object
+      properties:
+        facilityId: { type: integer }
+        organizationId: { type: integer }
+      required: [facilityId, organizationId]
+
+    Facility:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        organizationId:
+          type: integer
+        facilityName:
+          type: string
+        timezone:
+          type: string
+        units:
+          type: string
+          enum: [metric, imperial]
+        currency:
+          type: string
+      required: [id, name, organizationId, facilityName, timezone, units, currency]
 
     ActionRequiredItem:
       type: object

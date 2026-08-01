@@ -20,6 +20,7 @@ import userSettingsRouter from "./routes/userSettings";
 import { accountingRouter, accountingPublicRouter } from "./routes/accounting";
 import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
+import facilitiesRouter from "./routes/facilities";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
 import { resolveTrustProxy } from "./lib/trustProxy";
@@ -120,6 +121,7 @@ app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, accountingRouter);
 app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, facilityLogsRouter);
+app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, router);
 
 export default app;

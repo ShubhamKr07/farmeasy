@@ -40,6 +40,8 @@ import type {
   CompleteHarvestRequest,
   CreateChannelInput,
   CreateCycleRequest,
+  CreateFacilityRequest,
+  CreateFacilityResponse,
   CreateManualCheckRequest,
   CreateRackInput,
   CreateTrayInput,
@@ -50,6 +52,7 @@ import type {
   DashboardStats,
   DeleteResult,
   ErrorResponse,
+  Facility,
   FacilityLog,
   FacilityLogRequest,
   GrowthProfile,
@@ -5086,4 +5089,176 @@ export const usePostFacilityLog = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getPostFacilityLogMutationOptions(options), queryClient);
     }
+
+export const getCreateFacilityUrl = () => {
+
+
+
+
+  return `/api/facilities`
+}
+
+/**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+export const createFacility = async (createFacilityRequest: CreateFacilityRequest, options?: RequestInit): Promise<CreateFacilityResponse> => {
+
+  return customFetch<CreateFacilityResponse>(getCreateFacilityUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createFacilityRequest,)
+  }
+);}
+
+
+
+
+export const getCreateFacilityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext> => {
+
+const mutationKey = ['createFacility'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFacility>>, {data: BodyType<CreateFacilityRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFacility(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFacilityMutationResult = NonNullable<Awaited<ReturnType<typeof createFacility>>>
+    export type CreateFacilityMutationBody = BodyType<CreateFacilityRequest>
+    export type CreateFacilityMutationError = ErrorType<void>
+
+    /**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+export const useCreateFacility = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createFacility>>,
+        TError,
+        {data: BodyType<CreateFacilityRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateFacilityMutationOptions(options), queryClient);
+    }
+
+export const getGetMyFacilityUrl = () => {
+
+
+
+
+  return `/api/facilities/me`
+}
+
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+export const getMyFacility = async ( options?: RequestInit): Promise<Facility | null> => {
+
+  return customFetch<Facility | null>(getGetMyFacilityUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyFacilityQueryKey = () => {
+    return [
+    `/api/facilities/me`
+    ] as const;
+    }
+
+
+export const getGetMyFacilityQueryOptions = <TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyFacilityQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyFacility>>> = ({ signal }) => getMyFacility({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetMyFacilityQueryResult = NonNullable<Awaited<ReturnType<typeof getMyFacility>>>
+export type GetMyFacilityQueryError = ErrorType<unknown>
+
+
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyFacility>>,
+          TError,
+          Awaited<ReturnType<typeof getMyFacility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyFacility>>,
+          TError,
+          Awaited<ReturnType<typeof getMyFacility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetMyFacilityQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 

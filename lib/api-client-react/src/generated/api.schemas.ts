@@ -333,6 +333,51 @@ export interface FacilityLog {
   createdAt: string;
 }
 
+export type CreateFacilityRequestUnits = typeof CreateFacilityRequestUnits[keyof typeof CreateFacilityRequestUnits];
+
+
+export const CreateFacilityRequestUnits = {
+  metric: 'metric',
+  imperial: 'imperial',
+} as const;
+
+export interface CreateFacilityRequest {
+  /** @minLength 1 */
+  farmName: string;
+  /** @minLength 1 */
+  facilityName?: string;
+  timezone: string;
+  units: CreateFacilityRequestUnits;
+  /**
+     * @minLength 3
+     * @maxLength 3
+     */
+  currency: string;
+}
+
+export interface CreateFacilityResponse {
+  facilityId: number;
+  organizationId: number;
+}
+
+export type FacilityUnits = typeof FacilityUnits[keyof typeof FacilityUnits];
+
+
+export const FacilityUnits = {
+  metric: 'metric',
+  imperial: 'imperial',
+} as const;
+
+export interface Facility {
+  id: number;
+  name: string;
+  organizationId: number;
+  facilityName: string;
+  timezone: string;
+  units: FacilityUnits;
+  currency: string;
+}
+
 export type AlertSeverity = typeof AlertSeverity[keyof typeof AlertSeverity];
 
 
