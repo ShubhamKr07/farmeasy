@@ -36,6 +36,8 @@ tags:
     description: Onboarding wizard resume/progress tracking
   - name: sensor-accounts
     description: Vendor sensor account credentials and connection testing
+  - name: wizard-events
+    description: WIZ-006 fire-and-forget onboarding wizard step telemetry (view/save/abandon/skip)
 paths:
   /healthz:
     get:
@@ -1430,6 +1432,23 @@ paths:
         "429":
           description: Too many connection tests for this user
 
+  /wizard-events:
+    post:
+      operationId: postWizardEvent
+      tags: [wizard-events]
+      summary: WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostWizardEventRequest"
+      responses:
+        "202":
+          description: Event recorded (no response body)
+        "429":
+          description: Too many telemetry events for this user
+
   /facility-readiness:
     get:
       operationId: getFacilityReadiness
@@ -2059,6 +2078,17 @@ components:
           type: object
           additionalProperties: true
       required: [currentStep]
+
+    PostWizardEventRequest:
+      type: object
+      required: [step, eventType]
+      properties:
+        step:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        eventType:
+          type: string
+          enum: [view, save, abandon, skip]
 
     CreateSensorAccountRequest:
       type: object

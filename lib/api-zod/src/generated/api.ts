@@ -1259,6 +1259,15 @@ export const TestSensorAccountConnectionResponse = zod.object({
 
 
 /**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const PostWizardEventBody = zod.object({
+  "step": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "eventType": zod.enum(['view', 'save', 'abandon', 'skip'])
+})
+
+
+/**
  * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
 
  */

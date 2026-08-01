@@ -79,6 +79,7 @@ import type {
   MoveFertigationRequest,
   PostFacilityReadinessEvent200,
   PostFacilityReadinessEvent201,
+  PostWizardEventRequest,
   PutWizardProgressRequest,
   RackItem,
   RecommendRequest,
@@ -5752,6 +5753,77 @@ export const useTestSensorAccountConnection = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getTestSensorAccountConnectionMutationOptions(options), queryClient);
+    }
+
+export const getPostWizardEventUrl = () => {
+
+
+
+
+  return `/api/wizard-events`
+}
+
+/**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const postWizardEvent = async (postWizardEventRequest: PostWizardEventRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getPostWizardEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      postWizardEventRequest,)
+  }
+);}
+
+
+
+
+export const getPostWizardEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext> => {
+
+const mutationKey = ['postWizardEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postWizardEvent>>, {data: BodyType<PostWizardEventRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postWizardEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostWizardEventMutationResult = NonNullable<Awaited<ReturnType<typeof postWizardEvent>>>
+    export type PostWizardEventMutationBody = BodyType<PostWizardEventRequest>
+    export type PostWizardEventMutationError = ErrorType<void>
+
+    /**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const usePostWizardEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postWizardEvent>>,
+        TError,
+        {data: BodyType<PostWizardEventRequest>},
+        TContext
+      > => {
+      return useMutation(getPostWizardEventMutationOptions(options), queryClient);
     }
 
 export const getGetFacilityReadinessUrl = () => {

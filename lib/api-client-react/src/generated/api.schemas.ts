@@ -416,6 +416,33 @@ export interface PutWizardProgressRequest {
   stepData?: PutWizardProgressRequestStepData;
 }
 
+export type PostWizardEventRequestStep = typeof PostWizardEventRequestStep[keyof typeof PostWizardEventRequestStep];
+
+
+export const PostWizardEventRequestStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type PostWizardEventRequestEventType = typeof PostWizardEventRequestEventType[keyof typeof PostWizardEventRequestEventType];
+
+
+export const PostWizardEventRequestEventType = {
+  view: 'view',
+  save: 'save',
+  abandon: 'abandon',
+  skip: 'skip',
+} as const;
+
+export interface PostWizardEventRequest {
+  step: PostWizardEventRequestStep;
+  eventType: PostWizardEventRequestEventType;
+}
+
 export type CreateSensorAccountRequestAuthMethod = typeof CreateSensorAccountRequestAuthMethod[keyof typeof CreateSensorAccountRequestAuthMethod];
 
 

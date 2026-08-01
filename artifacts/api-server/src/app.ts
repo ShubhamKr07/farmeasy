@@ -24,6 +24,7 @@ import facilitiesRouter from "./routes/facilities";
 import wizardRouter from "./routes/wizard";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
+import wizardEventsRouter from "./routes/wizard-events";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
 import { resolveTrustProxy } from "./lib/trustProxy";
@@ -128,6 +129,7 @@ app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
 app.use("/api", requireSignedIn, sensorAccountsRouter);
 app.use("/api", requireSignedIn, facilityReadinessRouter);
+app.use("/api", requireSignedIn, wizardEventsRouter);
 app.use("/api", requireSignedIn, router);
 
 export default app;
