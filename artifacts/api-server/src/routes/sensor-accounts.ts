@@ -7,8 +7,6 @@ import { eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
 import { encryptToken } from "../lib/accounting/crypto";
 
-const router = Router();
-
 const CreateSensorAccountSchema = z.object({
   vendor: z.string().min(1),
   authMethod: z.enum(["api_key", "oauth", "username_password"]),
@@ -23,66 +21,6 @@ function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | 
   }
   return result.data;
 }
-
-// GET /sensor-accounts — list the signed-in user's organization's vendor accounts.
-// NEVER select credentialCiphertext (SEN-002) — explicit column list, not select-all.
-router.get("/sensor-accounts", async (req: Request, res: Response) => {
-  try {
-    const { userId } = getAuth(req);
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
-    if (!user?.organizationId) return res.status(200).json([]);
-
-    const accounts = await db
-      .select({
-        id: sensorAccountsTable.id,
-        vendor: sensorAccountsTable.vendor,
-        authMethod: sensorAccountsTable.authMethod,
-        status: sensorAccountsTable.status,
-        maskedFingerprint: sensorAccountsTable.maskedFingerprint,
-        createdAt: sensorAccountsTable.createdAt,
-      })
-      .from(sensorAccountsTable)
-      .where(eq(sensorAccountsTable.organizationId, user.organizationId));
-    return res.status(200).json(accounts);
-  } catch (err) {
-    req.log.error(err);
-    return res.status(500).json({ error: "Failed to list sensor accounts" });
-  }
-});
-
-router.post("/sensor-accounts", async (req: Request, res: Response) => {
-  try {
-    const { userId } = getAuth(req);
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
-    if (!user?.organizationId) return res.status(409).json({ error: "No facility yet" });
-
-    const body = validate(CreateSensorAccountSchema, req.body, res);
-    if (!body) return;
-
-    const masked = `····${body.credential.slice(-4)}`;
-    const [account] = await db
-      .insert(sensorAccountsTable)
-      .values({
-        organizationId: user.organizationId,
-        vendor: body.vendor,
-        authMethod: body.authMethod,
-        status: "pending_integration",
-        maskedFingerprint: masked,
-        credentialCiphertext: encryptToken(body.credential),
-      })
-      .returning({
-        id: sensorAccountsTable.id,
-        vendor: sensorAccountsTable.vendor,
-        authMethod: sensorAccountsTable.authMethod,
-        status: sensorAccountsTable.status,
-        maskedFingerprint: sensorAccountsTable.maskedFingerprint,
-      });
-    return res.status(201).json(account); // NEVER return credentialCiphertext or plaintext (SEN-002)
-  } catch (err) {
-    req.log.error(err);
-    return res.status(500).json({ error: "Failed to create sensor account" });
-  }
-});
 
 // Vendor allowlist: empty at launch — every vendor falls through to
 // "pending_integration" with honest copy (SEN-003: never a fake "connected").
@@ -102,69 +40,149 @@ const VENDOR_ADAPTERS: Record<string, (credential: string) => Promise<boolean>> 
 const TEST_CONNECTION_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const TEST_CONNECTION_RATE_LIMIT = 20;
 
-const testConnectionLimiter = rateLimit({
-  windowMs: TEST_CONNECTION_RATE_LIMIT_WINDOW_MS,
-  limit: TEST_CONNECTION_RATE_LIMIT,
-  keyGenerator: (req) => getAuth(req).userId ?? "anon",
-  handler: (_req, res) => {
-    res.status(429).json({
-      error: "Too many connection tests for this user. Please try again later.",
-    });
-  },
-  legacyHeaders: false,
-});
+/**
+ * Build a fresh sensor-accounts router with its OWN rate-limit store.
+ *
+ * `app.ts` calls this once at startup for the default export. Tests call it
+ * per-suite (same pattern as `createRecommendRouter`, routes/recommend.ts) so
+ * each describe block gets an isolated process-local MemoryStore for
+ * `testConnectionLimiter` — without that, a plain module-level singleton
+ * limiter would have its counters shared (via Node's ESM import cache)
+ * across every describe block in a test file, letting one suite's requests
+ * count against another's budget.
+ */
+export function createSensorAccountsRouter(): Router {
+  const router = Router();
 
-router.post(
-  "/sensor-accounts/:id/test-connection",
-  testConnectionLimiter,
-  async (req: Request, res: Response) => {
+  // GET /sensor-accounts — list the signed-in user's organization's vendor accounts.
+  // NEVER select credentialCiphertext (SEN-002) — explicit column list, not select-all.
+  router.get("/sensor-accounts", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuth(req);
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
+      if (!user?.organizationId) return res.status(200).json([]);
+
+      const accounts = await db
+        .select({
+          id: sensorAccountsTable.id,
+          vendor: sensorAccountsTable.vendor,
+          authMethod: sensorAccountsTable.authMethod,
+          status: sensorAccountsTable.status,
+          maskedFingerprint: sensorAccountsTable.maskedFingerprint,
+          createdAt: sensorAccountsTable.createdAt,
+        })
+        .from(sensorAccountsTable)
+        .where(eq(sensorAccountsTable.organizationId, user.organizationId));
+      return res.status(200).json(accounts);
+    } catch (err) {
+      req.log.error(err);
+      return res.status(500).json({ error: "Failed to list sensor accounts" });
+    }
+  });
+
+  router.post("/sensor-accounts", async (req: Request, res: Response) => {
     try {
       const { userId } = getAuth(req);
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
       if (!user?.organizationId) return res.status(409).json({ error: "No facility yet" });
 
-      const id = Number(req.params.id);
+      const body = validate(CreateSensorAccountSchema, req.body, res);
+      if (!body) return;
+
+      const masked = `····${body.credential.slice(-4)}`;
       const [account] = await db
-        .select()
-        .from(sensorAccountsTable)
-        .where(eq(sensorAccountsTable.id, id));
-      if (!account || account.organizationId !== user.organizationId) {
-        return res.status(404).json({ error: "Sensor account not found" });
-      }
-
-      const adapter = VENDOR_ADAPTERS[account.vendor.toLowerCase()];
-      if (!adapter) {
-        // No adapter for this vendor yet — honest "pending_integration", never a fake success.
-        await db
-          .update(sensorAccountsTable)
-          .set({ status: "pending_integration", updatedAt: new Date() })
-          .where(eq(sensorAccountsTable.id, id));
-        return res.status(200).json({ status: "pending_integration" });
-      }
-
-      try {
-        const { decryptToken } = await import("../lib/accounting/crypto");
-        const credential = decryptToken(account.credentialCiphertext!);
-        const connected = await adapter(credential);
-        const status = connected ? "connected" : "failed";
-        await db
-          .update(sensorAccountsTable)
-          .set({ status, updatedAt: new Date() })
-          .where(eq(sensorAccountsTable.id, id));
-        return res.status(200).json({ status });
-      } catch (adapterErr) {
-        req.log.error(adapterErr);
-        await db
-          .update(sensorAccountsTable)
-          .set({ status: "failed", updatedAt: new Date() })
-          .where(eq(sensorAccountsTable.id, id));
-        return res.status(200).json({ status: "failed" });
-      }
+        .insert(sensorAccountsTable)
+        .values({
+          organizationId: user.organizationId,
+          vendor: body.vendor,
+          authMethod: body.authMethod,
+          status: "pending_integration",
+          maskedFingerprint: masked,
+          credentialCiphertext: encryptToken(body.credential),
+        })
+        .returning({
+          id: sensorAccountsTable.id,
+          vendor: sensorAccountsTable.vendor,
+          authMethod: sensorAccountsTable.authMethod,
+          status: sensorAccountsTable.status,
+          maskedFingerprint: sensorAccountsTable.maskedFingerprint,
+        });
+      return res.status(201).json(account); // NEVER return credentialCiphertext or plaintext (SEN-002)
     } catch (err) {
       req.log.error(err);
-      return res.status(500).json({ error: "Failed to test connection" });
+      return res.status(500).json({ error: "Failed to create sensor account" });
     }
-  },
-);
+  });
 
-export default router;
+  // Fresh limiter instance per router build — see the createSensorAccountsRouter
+  // doc comment above for why this can't be a module-level singleton.
+  const testConnectionLimiter = rateLimit({
+    windowMs: TEST_CONNECTION_RATE_LIMIT_WINDOW_MS,
+    limit: TEST_CONNECTION_RATE_LIMIT,
+    keyGenerator: (req) => getAuth(req).userId ?? "anon",
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: "Too many connection tests for this user. Please try again later.",
+      });
+    },
+    legacyHeaders: false,
+  });
+
+  router.post(
+    "/sensor-accounts/:id/test-connection",
+    testConnectionLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const { userId } = getAuth(req);
+        const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
+        if (!user?.organizationId) return res.status(409).json({ error: "No facility yet" });
+
+        const id = Number(req.params.id);
+        const [account] = await db
+          .select()
+          .from(sensorAccountsTable)
+          .where(eq(sensorAccountsTable.id, id));
+        if (!account || account.organizationId !== user.organizationId) {
+          return res.status(404).json({ error: "Sensor account not found" });
+        }
+
+        const adapter = VENDOR_ADAPTERS[account.vendor.toLowerCase()];
+        if (!adapter) {
+          // No adapter for this vendor yet — honest "pending_integration", never a fake success.
+          await db
+            .update(sensorAccountsTable)
+            .set({ status: "pending_integration", updatedAt: new Date() })
+            .where(eq(sensorAccountsTable.id, id));
+          return res.status(200).json({ status: "pending_integration" });
+        }
+
+        try {
+          const { decryptToken } = await import("../lib/accounting/crypto");
+          const credential = decryptToken(account.credentialCiphertext!);
+          const connected = await adapter(credential);
+          const status = connected ? "connected" : "failed";
+          await db
+            .update(sensorAccountsTable)
+            .set({ status, updatedAt: new Date() })
+            .where(eq(sensorAccountsTable.id, id));
+          return res.status(200).json({ status });
+        } catch (adapterErr) {
+          req.log.error(adapterErr);
+          await db
+            .update(sensorAccountsTable)
+            .set({ status: "failed", updatedAt: new Date() })
+            .where(eq(sensorAccountsTable.id, id));
+          return res.status(200).json({ status: "failed" });
+        }
+      } catch (err) {
+        req.log.error(err);
+        return res.status(500).json({ error: "Failed to test connection" });
+      }
+    },
+  );
+
+  return router;
+}
+
+const sensorAccountsRouter = createSensorAccountsRouter();
+export default sensorAccountsRouter;

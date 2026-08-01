@@ -20,9 +20,17 @@ import { requireTestDatabaseUrl, useDatabaseFixture } from "../helpers/testDatab
  * "pending_integration" honestly.
  *
  * Gated on TEST_DATABASE_URL, mirroring facilities.test.ts/inventory.test.ts:
- * the router and `@workspace/db` are imported lazily inside `setup()` so
- * this file loads (and skips cleanly) even when no test database is
+ * `@workspace/db` and the route module are imported lazily inside `setup()`
+ * so this file loads (and skips cleanly) even when no test database is
  * configured.
+ *
+ * Each `setup()` calls `sensorAccounts.createSensorAccountsRouter()` fresh
+ * rather than using the module's default export — same pattern as
+ * `recommend.test.ts` calling `createRecommendRouter()` per test. The
+ * test-connection route's per-user rate limiter is built inside the
+ * factory, so a fresh call gets its own isolated MemoryStore; reusing the
+ * cached default-export singleton across describe blocks would let one
+ * block's requests count against another's rate-limit budget.
  *
  * The handler reads `usersTable` keyed by the JWT `sub` (`getAuth(req).userId`)
  * and gates every route on `user.organizationId` being set (409 "No facility
@@ -47,7 +55,7 @@ describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
       role: "technician",
       organizationId: org.id,
     });
-    return { app: createAuthenticatedTestApp(sensorAccounts.default), db, org };
+    return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
   }
 
   test("never returns the plaintext or ciphertext credential", async () => {
@@ -86,7 +94,7 @@ describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
       email: "test-user@example.com",
       role: "technician",
     });
-    const app = createAuthenticatedTestApp(sensorAccounts.default);
+    const app = createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter());
 
     const res = await request(app)
       .post("/api/sensor-accounts")
@@ -116,7 +124,7 @@ describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
       role: "technician",
       organizationId: org.id,
     });
-    return { app: createAuthenticatedTestApp(sensorAccounts.default), db, org };
+    return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
   }
 
   test("returns an empty list when the org has no sensor accounts yet", async () => {
@@ -151,7 +159,7 @@ describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
       email: "test-user@example.com",
       role: "technician",
     });
-    const app = createAuthenticatedTestApp(sensorAccounts.default);
+    const app = createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter());
 
     const res = await request(app).get("/api/sensor-accounts");
     strictEqual(res.status, 200);
@@ -172,7 +180,7 @@ describe("POST /api/sensor-accounts/:id/test-connection", { skip: !dbUrl }, () =
       role: "technician",
       organizationId: org.id,
     });
-    return { app: createAuthenticatedTestApp(sensorAccounts.default), db, org };
+    return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
   }
 
   test("falls through to pending_integration honestly (no adapter exists yet, SEN-003)", async () => {
