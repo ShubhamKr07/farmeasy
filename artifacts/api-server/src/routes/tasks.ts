@@ -24,9 +24,16 @@ router.get("/tasks", async (req: Request, res: Response) => {
     const status = req.query["status"] as string | undefined;
     const conds = [];
     if (status === "pending" || status === "in_progress" || status === "done") {
+      // Explicit valid status filter: return matching tasks of that status
+      // (including completed ones for status=done). Replaces the open-tasks
+      // default entirely — these branches are mutually exclusive, otherwise
+      // status=done would AND "status = done" with "completedAt IS NULL",
+      // which no row can satisfy (a done task always has completedAt set).
       conds.push(eq(tasksTable.status, status));
+    } else {
+      // No (or invalid) status filter: default to open tasks only.
+      conds.push(isNull(tasksTable.completedAt));
     }
-    conds.push(isNull(tasksTable.completedAt)); // default: open tasks
     const rows = await db
       .select()
       .from(tasksTable)
