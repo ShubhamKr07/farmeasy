@@ -4,6 +4,18 @@ import { type UserRole, USER_ROLE_LABELS, isSupervisorOrLead } from "@workspace/
 
 export type { UserRole };
 
+// Reads the custom `user_role` claim Task 1's auth hook injects into the JWT
+// (supabase/migrations/00001_custom_access_token_hook.sql). getClaims()
+// verifies the JWT locally and is the supported claims API; getSession()'s
+// claim access relied on an unchecked `as any` cast into session shape that
+// Supabase never actually guaranteed. Absent claim defaults to technician,
+// matching the server-side default the profile trigger assigns.
+export async function getUserRole(): Promise<UserRole> {
+  const { data, error } = await supabase.auth.getClaims();
+  if (error) throw error;
+  return (data?.claims.user_role as UserRole | undefined) ?? "technician";
+}
+
 export function useUserRole(): {
   role: UserRole;
   label: string;
@@ -12,10 +24,7 @@ export function useUserRole(): {
   const [role, setRole] = useState<UserRole>("technician");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      const claimRole = (data.session as any)?.user_role as UserRole | undefined;
-      if (claimRole) setRole(claimRole);
-    });
+    getUserRole().then(setRole);
   }, []);
 
   return {

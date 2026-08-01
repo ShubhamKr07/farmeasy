@@ -47,7 +47,9 @@ if (count === 0) {
 // module in a cycle through the tsx/esm loader hooks. tsx's own `--test` CLI
 // wrapper (which still runs on node:test under the hood) does not hit this —
 // verified locally on Node 26.4.0 and matches the pinned CI Node 22.23.2.
-const args = ["--test", ...testFiles];
+// --experimental-test-module-mocks: hooks/*.test.ts mocks `@/lib/supabase`
+// via node:test's mock.module(), which is gated behind this flag.
+const args = ["--test", "--experimental-test-module-mocks", ...testFiles];
 const child = spawn(tsxBin, args, { stdio: "inherit", cwd: pkgRoot });
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
