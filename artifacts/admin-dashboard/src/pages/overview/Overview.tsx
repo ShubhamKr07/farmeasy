@@ -4,6 +4,7 @@ import { getMetricDef } from "@workspace/metrics";
 import { useMetricSelection } from "@/hooks/use-metric-selection";
 import { MetricPicker } from "@/components/metrics/MetricPicker";
 import { DraggableMetricGrid } from "@/components/metrics/DraggableMetricGrid";
+import { FarmReadinessCard } from "@/components/dashboard/FarmReadinessCard";
 import { MetricCard } from "@/components/metrics/MetricCard";
 import { TimeRangeSelector, type MetricRange } from "@/components/metrics/TimeRangeSelector";
 import type { MetricDataMap } from "@/components/metrics/renderers";
@@ -52,6 +53,8 @@ export function Overview() {
           />
         </div>
       </div>
+
+      <FarmReadinessCard mode="dashboard" />
 
       <DraggableMetricGrid
         ids={selected}
