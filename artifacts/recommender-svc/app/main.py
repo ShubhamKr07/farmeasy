@@ -8,6 +8,7 @@ from app.cache_repo import search_cache
 from app.config import settings
 from app.db import close_pool, get_pool
 from app.embed_upsert import upsert_cache_docs
+from app.tls import cleanup_ca_cert_file, write_ca_cert_file
 from app.embeddings import embed
 from app.farm_context import format_farm_context, get_farm_context
 from app.ingest import run_tavily_ingest
@@ -19,8 +20,13 @@ from app.synthesis import synthesize_answer
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await get_pool()  # warm the connection pool on startup
+    # Materialize the CA cert to /tmp for dlt/psycopg2's sslrootcert= (Task
+    # 10) — asyncpg uses the SSLContext in-memory, but psycopg2 needs a file
+    # path. Written once here at startup; removed at shutdown below.
+    write_ca_cert_file()
     yield
     await close_pool()
+    cleanup_ca_cert_file()
 
 
 app = FastAPI(title="FarmSmart Recommender", lifespan=lifespan)

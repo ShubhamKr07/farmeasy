@@ -17,6 +17,13 @@ class Settings(BaseSettings):
 
     database_url: str
     database_url_direct: str | None = None
+    # PEM-encoded "Supabase Root 2021 CA" pinning TLS for the DB connection
+    # (Release 1 Task 10). Required (fail-closed) for both asyncpg
+    # (app/db.py) and dlt/psycopg2 (app/ingest.py); see app/tls.py. Maps to
+    # the DATABASE_CA_CERT env var via pydantic-settings' default
+    # snake_case-field -> UPPERCASE_ENV mapping (same as database_url ->
+    # DATABASE_URL).
+    database_ca_cert: str | None = None
     gemini_api_key: str
     tavily_api_key: str | None = None
     internal_api_key: str

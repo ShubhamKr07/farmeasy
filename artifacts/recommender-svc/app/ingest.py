@@ -1,6 +1,7 @@
 import httpx
 import dlt
 from app.config import settings
+from app.tls import CA_CERT_PATH
 
 DATASET_NAME = "recommender_staging"
 
@@ -23,7 +24,16 @@ def _unpooled_database_url(settings=settings) -> str:
             "connection string) — dlt's ingestion pipeline cannot use the "
             "transaction-pooler DATABASE_URL."
         )
-    return settings.database_url_direct
+    # CA-pinned TLS (Release 1 Task 10): psycopg2 (under dlt) needs the CA as
+    # a FILE PATH (sslrootcert=, written by app.tls.write_ca_cert_file at
+    # startup), and sslmode=verify-full enforces strict CA + hostname
+    # verification — the prior default encrypted but did not validate the
+    # server cert. Append defensively: use "&" if the DSN already carries
+    # query params, "?" otherwise (DATABASE_URL_DIRECT as documented has
+    # none, but a future Supabase string might).
+    base = settings.database_url_direct
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}sslmode=verify-full&sslrootcert={CA_CERT_PATH}"
 
 
 def _fetch_tavily_rows(query: str, max_results: int) -> list[dict]:

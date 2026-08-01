@@ -131,6 +131,16 @@ services:
         sync: false # same Supabase transaction-pooler string as farmsmart-api (port 6543)
       - key: DATABASE_URL_DIRECT
         sync: false # Supabase session-pooler string (port 5432) — dlt/psycopg2 ingestion only, see ADR-003
+      - key: DATABASE_CA_CERT
+        sync: false # PEM-encoded "Supabase Root 2021 CA" that pins TLS for the
+                     # recommender's asyncpg + dlt/psycopg2 connections (Release
+                     # 1 Task 10). Same shared public root as farmsmart-api;
+                     # the GitHub Actions secret PRODUCTION_DATABASE_CA_CERT
+                     # holds the identical bytes. NOTE: declaring it here does
+                     # NOT set it on the live Render service — a code-only
+                     # Blueprint deploy never syncs envVars (Task 9 hit this
+                     # gap); the orchestrator must apply the live value
+                     # separately.
       - key: GEMINI_API_KEY
         sync: false # aistudio.google.com — used for gemini-embedding-001 (embeddings)
                      # and gemini-2.5-flash (answer synthesis) — one provider, one key
@@ -242,6 +252,15 @@ services:
         sync: false # staging Supabase transaction-pooler string (port 6543)
       - key: DATABASE_URL_DIRECT
         sync: false # staging Supabase session-pooler string (port 5432) — dlt/psycopg2 ingestion only
+      - key: DATABASE_CA_CERT
+        sync: false # PEM-encoded "Supabase Root 2021 CA" that pins TLS for the
+                     # recommender's asyncpg + dlt/psycopg2 connections (Release
+                     # 1 Task 10). Same shared public root as farmsmart-api;
+                     # the GitHub Actions secret STAGING_DATABASE_CA_CERT holds
+                     # the identical bytes. NOTE: declaring it here does NOT set
+                     # it on the live Render service — a code-only Blueprint
+                     # deploy never syncs envVars (Task 9 hit this gap); the
+                     # orchestrator must apply the live value separately.
       - key: GEMINI_API_KEY
         sync: false # aistudio.google.com — embeddings + answer synthesis
       - key: TAVILY_API_KEY
