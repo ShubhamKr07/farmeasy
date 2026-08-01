@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   getAccountingConnectUri,
   usePostFacilityReadinessEvent,
+  getGetFacilityReadinessQueryKey,
   RecordReadinessEventRequestEventKey,
 } from "@workspace/api-client-react";
 import { Card } from "@/components/ui/card";
@@ -11,6 +13,7 @@ import { toast } from "sonner";
 export function QuickBooksCard() {
   const [connecting, setConnecting] = useState(false);
   const postEvent = usePostFacilityReadinessEvent();
+  const queryClient = useQueryClient();
 
   // Verbatim from Accounting.tsx's handleConnect: getAccountingConnectUri()
   // is a plain async function (not a query/mutation hook) that returns an
@@ -27,7 +30,10 @@ export function QuickBooksCard() {
   };
 
   const handleSkip = () => {
-    postEvent.mutate({ data: { eventKey: RecordReadinessEventRequestEventKey.quickbooks_skipped } });
+    postEvent.mutate(
+      { data: { eventKey: RecordReadinessEventRequestEventKey.quickbooks_skipped } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetFacilityReadinessQueryKey() }) },
+    );
   };
 
   return (

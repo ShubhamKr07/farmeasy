@@ -79,6 +79,13 @@ export function Settings() {
     );
   };
 
+  const handleUndoQuickBooks = () => {
+    postEvent.mutate(
+      { data: { eventKey: RecordReadinessEventRequestEventKey.quickbooks_skipped, undo: true } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetFacilityReadinessQueryKey() }) },
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3">
@@ -178,7 +185,16 @@ export function Settings() {
                 onUndo={sensorsItem.state === "skipped" ? handleUndoSensors : undefined}
               />
             )}
-            {qboItem && (qboItem.state !== "done" ? <QuickBooksCard /> : <ReadinessRow label={qboItem.label} state={qboItem.state} />)}
+            {qboItem &&
+              (qboItem.state === "pending" ? (
+                <QuickBooksCard />
+              ) : (
+                <ReadinessRow
+                  label={qboItem.label}
+                  state={qboItem.state}
+                  onUndo={qboItem.state === "skipped" ? handleUndoQuickBooks : undefined}
+                />
+              ))}
             {teamItem && <ReadinessRow label={teamItem.label} state={teamItem.state} />}
           </CardContent>
         </Card>

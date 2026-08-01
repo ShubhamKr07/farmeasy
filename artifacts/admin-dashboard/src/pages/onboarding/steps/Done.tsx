@@ -9,9 +9,10 @@ export function Done() {
   const { data: facility } = useGetMyFacility();
 
   const handleGoToDashboard = () => {
-    // Hard navigation (not a wouter navigate): the wizard isn't mounted
-    // inside the router (see Wizard.tsx's module doc comment), so this
-    // forces App.tsx's FacilityGate to re-evaluate and now find a facility.
+    // Hard navigation (not a wouter navigate): the wizard isn't mounted inside
+    // the router (see Wizard.tsx's module doc comment), so this forces
+    // App.tsx's FacilityGate to re-evaluate — by this point currentStep is
+    // already "done", so the gate now mounts <Router/> instead of <Wizard/>.
     window.location.assign("/");
   };
 
