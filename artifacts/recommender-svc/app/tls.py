@@ -48,10 +48,29 @@ def build_asyncpg_ssl_context(settings: Settings = settings) -> ssl.SSLContext:
     ``cadata`` (in-memory PEM), the resulting context has
     ``verify_mode=CERT_REQUIRED`` and ``check_hostname=True`` by default —
     full CA + hostname verification, no file on disk required for this path.
+
+    Python 3.13+ sets ``ssl.VERIFY_X509_STRICT`` by default (Python 3.12
+    does not) -- this additionally enforces that every CA in the presented
+    chain, not just the leaf, carries a Key Usage extension permitting cert
+    signing. Supabase's own "Supabase Intermediate 2021 CA" (sent by the
+    server alongside the leaf) has ``Basic Constraints: CA:TRUE`` but no
+    Key Usage extension at all, which fails that pedantic RFC 5280 check
+    even though the chain is otherwise completely legitimate -- reproduced
+    directly against real staging Postgres on Python 3.14 (Render's runtime):
+    fails with strict flag on, connects and completes the TLS 1.3 handshake
+    cleanly with it off. Clearing VERIFY_X509_STRICT here does NOT weaken
+    the actual security property Task 10 requires (the connection is still
+    validated against the pinned root CA with hostname verification,
+    CERT_REQUIRED unchanged) -- it only stops rejecting a real, non-forged
+    Supabase certificate chain over a schema pedantry both Node's TLS stack
+    and Python 3.12 don't enforce.
     """
     if not settings.database_ca_cert:
         raise RuntimeError(_UNSET_MESSAGE)
-    return ssl.create_default_context(cadata=settings.database_ca_cert)
+    ctx = ssl.create_default_context(cadata=settings.database_ca_cert)
+    if hasattr(ssl, "VERIFY_X509_STRICT"):
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return ctx
 
 
 def write_ca_cert_file(settings: Settings = settings, path: str = CA_CERT_PATH) -> str:
