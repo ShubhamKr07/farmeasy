@@ -141,6 +141,33 @@ jobs:
           render deploys create "$RENDER_STAGING_API_SERVICE_ID" --commit "$DEPLOY_SHA" --wait --confirm -o json > api-deploy.json
           render deploys create "$RENDER_STAGING_DASHBOARD_SERVICE_ID" --commit "$DEPLOY_SHA" --wait --confirm -o json > dashboard-deploy.json
 
+      # Staging gate: exercise the hosted Auth signup → profile-trigger →
+      # custom-claim pipeline end-to-end (real identity, real OTP, real
+      # delete) against the services that just went live at DEPLOY_SHA. This
+      # is the non-hardware replacement for the deleted Clerk/Replit Playwright
+      # suite. Must pass BEFORE promotion metadata is recorded so a broken
+      # signup pipeline can never be blessed as promotion-eligible. (The native
+      # UI smoke remains a manual physical-runtime exception.)
+      # Soft-gated on STAGING_MAILBOX_API_TOKEN existing: the Mailosaur test
+      # inbox is a known open item from the foundation runbook, not yet
+      # provisioned. Once it is (real secret + a real verified test domain in
+      # STAGING_TEST_EMAIL_DOMAIN, replacing today's placeholder), this step
+      # starts running for real with no further workflow changes needed. Do
+      # NOT remove this condition as a way to "turn the gate on" -- provision
+      # the secret instead, or the step fails closed on the placeholder domain.
+      - name: Run hosted Auth signup integration test (staging gate)
+        if: ${{ secrets.STAGING_MAILBOX_API_TOKEN != '' }}
+        env:
+          STAGING_SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_ANON_KEY: ${{ vars.STAGING_SUPABASE_ANON_KEY }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          STAGING_TEST_EMAIL_DOMAIN: ${{ vars.STAGING_TEST_EMAIL_DOMAIN }}
+          STAGING_MAILBOX_API_TOKEN: ${{ secrets.STAGING_MAILBOX_API_TOKEN }}
+          STAGING_TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/test-supabase-signup.mjs
+
       - name: Validate deploys live at DEPLOY_SHA and persist immutable metadata
         env:
           RENDER_STAGING_RECOMMENDER_SERVICE_ID: ${{ vars.RENDER_STAGING_RECOMMENDER_SERVICE_ID }}
