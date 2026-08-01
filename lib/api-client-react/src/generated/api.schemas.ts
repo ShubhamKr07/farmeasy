@@ -378,6 +378,72 @@ export interface Facility {
   currency: string;
 }
 
+export type CreateSensorAccountRequestAuthMethod = typeof CreateSensorAccountRequestAuthMethod[keyof typeof CreateSensorAccountRequestAuthMethod];
+
+
+export const CreateSensorAccountRequestAuthMethod = {
+  api_key: 'api_key',
+  oauth: 'oauth',
+  username_password: 'username_password',
+} as const;
+
+export interface CreateSensorAccountRequest {
+  /** @minLength 1 */
+  vendor: string;
+  authMethod: CreateSensorAccountRequestAuthMethod;
+  /**
+     * API key, or JSON-stringified username/password — encrypted before storage, never persisted or returned in plaintext.
+
+     * @minLength 1
+     */
+  credential: string;
+}
+
+export type SensorAccountAuthMethod = typeof SensorAccountAuthMethod[keyof typeof SensorAccountAuthMethod];
+
+
+export const SensorAccountAuthMethod = {
+  api_key: 'api_key',
+  oauth: 'oauth',
+  username_password: 'username_password',
+} as const;
+
+export type SensorAccountStatus = typeof SensorAccountStatus[keyof typeof SensorAccountStatus];
+
+
+export const SensorAccountStatus = {
+  connected: 'connected',
+  failed: 'failed',
+  pending_integration: 'pending_integration',
+} as const;
+
+/**
+ * Vendor sensor account, deliberately excluding credentialCiphertext — the handler explicitly selects columns rather than select-all (SEN-002) so credentials can never leak into a response.
+
+ */
+export interface SensorAccount {
+  id: number;
+  vendor: string;
+  authMethod: SensorAccountAuthMethod;
+  status: SensorAccountStatus;
+  /** @nullable */
+  maskedFingerprint: string | null;
+  createdAt?: string;
+}
+
+export type SensorAccountConnectionResultStatus = typeof SensorAccountConnectionResultStatus[keyof typeof SensorAccountConnectionResultStatus];
+
+
+export const SensorAccountConnectionResultStatus = {
+  connected: 'connected',
+  failed: 'failed',
+  pending_integration: 'pending_integration',
+} as const;
+
+export interface SensorAccountConnectionResult {
+  status: SensorAccountConnectionResultStatus;
+}
+
 export type AlertSeverity = typeof AlertSeverity[keyof typeof AlertSeverity];
 
 

@@ -44,6 +44,7 @@ import type {
   CreateFacilityResponse,
   CreateManualCheckRequest,
   CreateRackInput,
+  CreateSensorAccountRequest,
   CreateTrayInput,
   Crop,
   CropInput,
@@ -80,6 +81,8 @@ import type {
   RoomItem,
   SeedLot,
   Sensor,
+  SensorAccount,
+  SensorAccountConnectionResult,
   SensorInput,
   SensorReading,
   SensorReadingInput,
@@ -5261,4 +5264,248 @@ export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility
 
 
 
+
+export const getListSensorAccountsUrl = () => {
+
+
+
+
+  return `/api/sensor-accounts`
+}
+
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+export const listSensorAccounts = async ( options?: RequestInit): Promise<SensorAccount[]> => {
+
+  return customFetch<SensorAccount[]>(getListSensorAccountsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSensorAccountsQueryKey = () => {
+    return [
+    `/api/sensor-accounts`
+    ] as const;
+    }
+
+
+export const getListSensorAccountsQueryOptions = <TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSensorAccountsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSensorAccounts>>> = ({ signal }) => listSensorAccounts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListSensorAccountsQueryResult = NonNullable<Awaited<ReturnType<typeof listSensorAccounts>>>
+export type ListSensorAccountsQueryError = ErrorType<unknown>
+
+
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSensorAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listSensorAccounts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSensorAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listSensorAccounts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListSensorAccountsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateSensorAccountUrl = () => {
+
+
+
+
+  return `/api/sensor-accounts`
+}
+
+/**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+export const createSensorAccount = async (createSensorAccountRequest: CreateSensorAccountRequest, options?: RequestInit): Promise<SensorAccount> => {
+
+  return customFetch<SensorAccount>(getCreateSensorAccountUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createSensorAccountRequest,)
+  }
+);}
+
+
+
+
+export const getCreateSensorAccountMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext> => {
+
+const mutationKey = ['createSensorAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSensorAccount>>, {data: BodyType<CreateSensorAccountRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSensorAccount(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSensorAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createSensorAccount>>>
+    export type CreateSensorAccountMutationBody = BodyType<CreateSensorAccountRequest>
+    export type CreateSensorAccountMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+export const useCreateSensorAccount = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createSensorAccount>>,
+        TError,
+        {data: BodyType<CreateSensorAccountRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateSensorAccountMutationOptions(options), queryClient);
+    }
+
+export const getTestSensorAccountConnectionUrl = (id: number,) => {
+
+
+
+
+  return `/api/sensor-accounts/${id}/test-connection`
+}
+
+/**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const testSensorAccountConnection = async (id: number, options?: RequestInit): Promise<SensorAccountConnectionResult> => {
+
+  return customFetch<SensorAccountConnectionResult>(getTestSensorAccountConnectionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getTestSensorAccountConnectionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['testSensorAccountConnection'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testSensorAccountConnection>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  testSensorAccountConnection(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestSensorAccountConnectionMutationResult = NonNullable<Awaited<ReturnType<typeof testSensorAccountConnection>>>
+
+    export type TestSensorAccountConnectionMutationError = ErrorType<void>
+
+    /**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const useTestSensorAccountConnection = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof testSensorAccountConnection>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getTestSensorAccountConnectionMutationOptions(options), queryClient);
+    }
 

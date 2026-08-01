@@ -32,6 +32,8 @@ tags:
     description: Facility layout management
   - name: facilities
     description: Onboarding wizard facility creation and existence check
+  - name: sensor-accounts
+    description: Vendor sensor account credentials and connection testing
 paths:
   /healthz:
     get:
@@ -1315,6 +1317,68 @@ paths:
                   - $ref: "#/components/schemas/Facility"
                   - type: "null"
 
+  /sensor-accounts:
+    get:
+      operationId: listSensorAccounts
+      tags: [sensor-accounts]
+      summary: List the signed-in user's organization's vendor sensor accounts
+      responses:
+        "200":
+          description: The organization's sensor accounts (never includes credentials)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SensorAccount"
+    post:
+      operationId: createSensorAccount
+      tags: [sensor-accounts]
+      summary: Create a vendor sensor account, encrypting the credential at rest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSensorAccountRequest"
+      responses:
+        "201":
+          description: Sensor account created (never returns the credential)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorAccount"
+        "409":
+          description: Signed-in user has no facility yet
+
+  /sensor-accounts/{id}/test-connection:
+    post:
+      operationId: testSensorAccountConnection
+      tags: [sensor-accounts]
+      summary: >
+        Test a vendor sensor account's connection. Falls through to
+        pending_integration when no adapter exists yet for the vendor —
+        never fakes a successful connection (SEN-003).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorAccountConnectionResult"
+        "404":
+          description: Sensor account not found
+        "409":
+          description: Signed-in user has no facility yet
+        "429":
+          description: Too many connection tests for this user
+
 components:
   schemas:
     HealthStatus:
@@ -1865,6 +1929,50 @@ components:
         currency:
           type: string
       required: [id, name, organizationId, facilityName, timezone, units, currency]
+
+    CreateSensorAccountRequest:
+      type: object
+      required: [vendor, authMethod, credential]
+      properties:
+        vendor: { type: string, minLength: 1 }
+        authMethod: { type: string, enum: [api_key, oauth, username_password] }
+        credential:
+          type: string
+          minLength: 1
+          description: >
+            API key, or JSON-stringified username/password — encrypted
+            before storage, never persisted or returned in plaintext.
+
+    SensorAccount:
+      type: object
+      description: >
+        Vendor sensor account, deliberately excluding credentialCiphertext —
+        the handler explicitly selects columns rather than select-all
+        (SEN-002) so credentials can never leak into a response.
+      properties:
+        id:
+          type: integer
+        vendor:
+          type: string
+        authMethod:
+          type: string
+          enum: [api_key, oauth, username_password]
+        status:
+          type: string
+          enum: [connected, failed, pending_integration]
+        maskedFingerprint:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, vendor, authMethod, status, maskedFingerprint]
+
+    SensorAccountConnectionResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [connected, failed, pending_integration]
+      required: [status]
 
     ActionRequiredItem:
       type: object

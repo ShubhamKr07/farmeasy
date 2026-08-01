@@ -1177,3 +1177,44 @@ export const GetMyFacilityResponse = zod.union([zod.object({
 }),zod.null()])
 
 
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+export const ListSensorAccountsResponseItem = zod.object({
+  "id": zod.number(),
+  "vendor": zod.string(),
+  "authMethod": zod.enum(['api_key', 'oauth', 'username_password']),
+  "status": zod.enum(['connected', 'failed', 'pending_integration']),
+  "maskedFingerprint": zod.string().nullable(),
+  "createdAt": zod.string().optional()
+}).describe('Vendor sensor account, deliberately excluding credentialCiphertext — the handler explicitly selects columns rather than select-all (SEN-002) so credentials can never leak into a response.\n')
+export const ListSensorAccountsResponse = zod.array(ListSensorAccountsResponseItem)
+
+
+/**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+
+
+
+
+export const CreateSensorAccountBody = zod.object({
+  "vendor": zod.string().min(1),
+  "authMethod": zod.enum(['api_key', 'oauth', 'username_password']),
+  "credential": zod.string().min(1).describe('API key, or JSON-stringified username\/password — encrypted before storage, never persisted or returned in plaintext.\n')
+})
+
+
+/**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const TestSensorAccountConnectionParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const TestSensorAccountConnectionResponse = zod.object({
+  "status": zod.enum(['connected', 'failed', 'pending_integration'])
+})
+
+
