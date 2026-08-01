@@ -24,27 +24,45 @@ function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | 
   return result.data;
 }
 
+// Sentinel thrown inside the transaction when the locking read finds the
+// user already has an organization. Thrown (rather than returned) so
+// db.transaction rolls back cleanly; caught outside and mapped to 409.
+class AlreadyHasFacilityError extends Error {}
+
 // POST /facilities — W2 farm-basics submit (WIZ-001/TEN-001/TEN-003).
 // Creates an organization, its first facility, and the 3 index-1 rooms
 // (seeding/fertigation/harvesting) in a single transaction, then assigns the
 // signed-in user to the new organization. One facility per user is enforced
 // here (usersTable.organizationId already set -> 409) even though the schema
 // itself permits multiple facilities per organization.
+//
+// The existence check runs as a `SELECT ... FOR UPDATE` INSIDE this
+// transaction (not a plain read beforehand) so two near-simultaneous POSTs
+// from the same brand-new user serialize on the user row instead of racing:
+// without the lock, both requests could observe organizationId as null
+// before either commits, both proceed to create their own
+// organization+facility+3 rooms, and whichever UPDATE users commits last
+// wins — leaving the other transaction's rows fully committed but orphaned
+// (unreachable from that user's organizationId). With the lock, the second
+// request blocks until the first's transaction commits, then sees the
+// now-set organizationId and cleanly rejects with 409 instead.
 router.post("/facilities", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
-    const [existingUser] = await db
-      .select()
-      .from(usersTable)
-      .where(eq(usersTable.id, userId!));
-    if (existingUser?.organizationId) {
-      return res.status(409).json({ error: "User already belongs to a facility" });
-    }
 
     const body = validate(CreateFacilitySchema, req.body, res);
     if (!body) return;
 
     const result = await db.transaction(async (tx) => {
+      const [existingUser] = await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, userId!))
+        .for("update");
+      if (existingUser?.organizationId) {
+        throw new AlreadyHasFacilityError();
+      }
+
       const [org] = await tx
         .insert(organizationsTable)
         .values({ name: body.farmName })
@@ -74,6 +92,9 @@ router.post("/facilities", async (req: Request, res: Response) => {
 
     return res.status(201).json(result);
   } catch (err) {
+    if (err instanceof AlreadyHasFacilityError) {
+      return res.status(409).json({ error: "User already belongs to a facility" });
+    }
     req.log.error(err);
     return res.status(500).json({ error: "Failed to create facility" });
   }
