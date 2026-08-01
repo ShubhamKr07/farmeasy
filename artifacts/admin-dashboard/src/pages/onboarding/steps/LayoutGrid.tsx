@@ -16,7 +16,7 @@ const ROOMS: { name: RoomName; label: string; stageInitial: string }[] = [
 const emptyZoneState = (): ZoneState => ({ channels: 0, racksPerChannel: 0, levelsPerRack: 0 });
 
 export function LayoutGrid({ onSaved }: { onSaved: () => void }) {
-  const { data: layout } = useGetLayout();
+  const { data: layout, refetch: refetchLayout } = useGetLayout();
   const [zoneStates, setZoneStates] = useState<Record<RoomName, ZoneState>>({
     seeding: emptyZoneState(),
     fertigation: emptyZoneState(),
@@ -38,20 +38,37 @@ export function LayoutGrid({ onSaved }: { onSaved: () => void }) {
   const activeState = zoneStates[expandedZone];
 
   const handleSubmit = async () => {
-    if (!isValid || !layout) return;
+    if (!isValid) return;
     setSubmitting(true);
     try {
+      // Refetch fresh layout data right before submitting so a retry after a
+      // partial failure can detect what's already been created and skip it.
+      // This is a resume strategy, not a real backend transaction (no
+      // bulk-create endpoint exists — out of scope for this task). It
+      // correctly handles a full retry and a retry where one zone already
+      // fully succeeded. A channel that failed partway through its OWN
+      // racks/trays (not a whole-zone failure) is a known residual edge case
+      // this can't fully resolve without a dedicated backend endpoint — in
+      // that narrow case the user may need to check the Layout tab.
+      const { data: freshLayout } = await refetchLayout();
+      const currentLayout = freshLayout ?? layout ?? [];
+
       // Sequential, not Promise.all: channels must exist before their racks
       // can reference them, and racks before their trays — this is a real
       // data dependency chain, not an arbitrary choice to serialize.
       for (const room of ROOMS) {
         const state = zoneStates[room.name];
-        const roomRow = layout.find((r) => r.name === room.name);
+        const roomRow = currentLayout.find((r) => r.name === room.name);
         if (!roomRow) continue; // should never happen post-wizard-gate, but don't crash if it does
 
-        for (let c = 0; c < state.channels; c++) {
+        const existingChannelCount = roomRow.channels.length;
+        const channelsToCreate = Math.max(0, state.channels - existingChannelCount);
+        if (channelsToCreate === 0) continue; // zone already has enough channels — assume already done
+
+        for (let c = 0; c < channelsToCreate; c++) {
+          const channelIndex = existingChannelCount + c + 1; // continue numbering from where we left off
           const channel = await createChannel.mutateAsync({
-            data: { roomId: roomRow.id, label: `${room.stageInitial}-CH${c + 1}` },
+            data: { roomId: roomRow.id, label: `${room.stageInitial}-CH${channelIndex}` },
           });
           for (let r = 0; r < state.racksPerChannel; r++) {
             const rack = await createRack.mutateAsync({
@@ -64,8 +81,11 @@ export function LayoutGrid({ onSaved }: { onSaved: () => void }) {
         }
       }
       onSaved();
-    } catch {
-      toast.error("Could not save your layout. Please try again.");
+    } catch (err) {
+      console.error("[LayoutGrid] failed to save layout", err);
+      toast.error(
+        "Some of your layout may not have saved. You can safely try again — already-created channels won't be duplicated.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -88,7 +108,7 @@ export function LayoutGrid({ onSaved }: { onSaved: () => void }) {
                 expanded={expandedZone === room.name}
                 onToggleExpanded={() => setExpandedZone(room.name)}
               />
-              {expandedZone === room.name && zoneStates[room.name].channels < 1 && (
+              {zoneStates[room.name].channels < 1 && (
                 <p className="text-xs text-status-critical mt-1 px-1">Every zone needs at least 1 channel</p>
               )}
             </div>
