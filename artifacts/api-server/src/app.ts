@@ -21,6 +21,7 @@ import { accountingRouter, accountingPublicRouter } from "./routes/accounting";
 import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import { logger } from "./lib/logger";
+import { buildCorsOptions } from "./lib/cors";
 
 // Bounded client-version extraction for request logging. The mobile app
 // advertises its version via `X-FarmSmart-Client-Version` (see custom-fetch).
@@ -58,8 +59,11 @@ app.use(
     },
   }),
 );
-// CORS: in production set CORS_ORIGIN to the dashboard URL; unset = allow all (dev).
-app.use(cors({ origin: process.env.CORS_ORIGIN ?? true }));
+// CORS: production requires CORS_ORIGINS (comma-separated browser origins);
+// buildCorsOptions throws at startup if it's unset under NODE_ENV=production
+// (fail-closed). Requests with no Origin header (native mobile, server-to-
+// server) are allowed unconditionally — see lib/cors.ts.
+app.use(cors(buildCorsOptions()));
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(supabaseAuthMiddleware);

@@ -68,7 +68,13 @@ accountingPublicRouter.get("/accounting/callback", async (req: Request, res: Res
   const state = req.query.state as string | undefined;
   const entry = state ? pendingStates.get(state) : undefined;
 
-  const dashboardUrl = process.env.CORS_ORIGIN ?? "/";
+  // Dedicated dashboard redirect target (Release 1 Task 9 Step 3). This used
+  // to reuse CORS_ORIGIN, which was always fragile (CORS_ORIGIN configured
+  // allowed CORS origins, not a redirect destination) and would have silently
+  // broken the redirect once CORS_ORIGIN became a comma-separated list
+  // (CORS_ORIGINS). Falls back to "/" when unset so the route still functions
+  // in local dev without configuration.
+  const dashboardUrl = process.env.DASHBOARD_URL ?? "/";
   const redirectWithStatus = (status: "connected" | "error", message?: string) => {
     const url = new URL(`${dashboardUrl}/accounting`);
     url.searchParams.set("qbo", status);

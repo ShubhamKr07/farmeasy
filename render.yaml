@@ -19,7 +19,11 @@
 #   1. Deploy the API service; note its URL (Render assigns <name>.onrender.com,
 #      suffixed if the bare name is taken, e.g. https://farmsmart-api-j3qt.onrender.com).
 #   2. Set the dashboard's VITE_API_BASE_URL env var to that API URL.
-#   3. Set the API's CORS_ORIGIN env var to the dashboard URL.
+#   3. Set the API's CORS_ORIGINS env var to a comma-separated list of allowed
+#      dashboard origins (e.g. https://farmsmart-dashboard.onrender.com), and
+#      set DASHBOARD_URL to the dashboard base URL the QuickBooks callback
+#      redirects to. In production (NODE_ENV=production) the API will refuse to
+#      start unless CORS_ORIGINS is set.
 #   4. Add both URLs to Supabase Auth's allowed redirect URLs (if needed).
 #   5. Deploy the dashboard service.
 
@@ -43,8 +47,12 @@ services:
         value: https://meorgbbtxlpzxyfxmnyu.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false # Project Settings -> API -> service_role key (server-side only, never exposed to clients)
-      - key: CORS_ORIGIN
-        sync: false # dashboard URL, e.g. https://farmsmart-dashboard.onrender.com
+      - key: CORS_ORIGINS
+        sync: false # comma-separated list of allowed dashboard origins, e.g.
+                     # https://farmsmart-dashboard.onrender.com (add staging/preview origins as needed)
+      - key: DASHBOARD_URL
+        sync: false # dashboard base URL the QuickBooks OAuth callback redirects to, e.g.
+                     # https://farmsmart-dashboard.onrender.com (distinct from CORS_ORIGINS)
       - key: FACILITY_TIMEZONE
         value: America/New_York # §1.5 rule 1 — facility-local date_trunc / window bounds
       - key: QBO_CLIENT_ID
@@ -142,8 +150,12 @@ services:
         value: https://jkxlbndnatkxmhpumvhh.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false # staging Project Settings -> API -> service_role key (server-side only)
-      - key: CORS_ORIGIN
-        sync: false # staging dashboard URL — set after farmsmart-dashboard-staging URL is known
+      - key: CORS_ORIGINS
+        sync: false # comma-separated list of allowed staging dashboard origins — set after
+                     # farmsmart-dashboard-staging URL is known
+      - key: DASHBOARD_URL
+        sync: false # staging dashboard base URL the QuickBooks OAuth callback redirects to —
+                     # set after farmsmart-dashboard-staging URL is known
       - key: FACILITY_TIMEZONE
         value: America/New_York # §1.5 rule 1 — facility-local date_trunc / window bounds
       - key: QBO_CLIENT_ID
