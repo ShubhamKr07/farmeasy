@@ -82,4 +82,36 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
     strictEqual(rows.length, 1);
     strictEqual(rows[0].currentStep, "layout");
   });
+
+  // Regression test for the lost-update race a code review caught: a plain
+  // read-then-write (SELECT stepData, then a separate INSERT/UPDATE) lets a
+  // concurrent draft-save and advance-only PUT interleave, so whichever
+  // commits second can silently overwrite the other's already-saved
+  // stepData with stale/empty data. The fix wraps the read + upsert in one
+  // transaction with `SELECT ... FOR UPDATE` (same precedent as
+  // facilities.ts) so concurrent PUTs for the same user serialize instead of
+  // racing. Fired via Promise.all against the real test database so the two
+  // requests' transactions genuinely overlap, not just call the handler
+  // twice sequentially.
+  test("concurrent draft-save + advance-only PUTs never lose the draft to a race", async () => {
+    const { app, db, wizardProgressTable } = await setup();
+
+    await request(app)
+      .put("/api/wizard/progress")
+      .send({ currentStep: "layout", stepData: { farmName: "Sunrise Greens" } });
+
+    await Promise.all([
+      request(app)
+        .put("/api/wizard/progress")
+        .send({ currentStep: "layout", stepData: { farmName: "Sunrise Greens", timezone: "UTC" } }),
+      request(app).put("/api/wizard/progress").send({ currentStep: "sensors_accounts" }),
+    ]);
+
+    const [row] = await db
+      .select()
+      .from(wizardProgressTable)
+      .where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
+    const stepData = row.stepData as Record<string, unknown>;
+    ok(stepData.farmName, "draft's farmName must survive a concurrent advance-only PUT");
+  });
 });
