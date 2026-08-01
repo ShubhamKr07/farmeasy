@@ -1,4 +1,4 @@
-import { describe, test } from "node:test";
+import { describe, test, beforeEach } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import request from "supertest";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
@@ -32,6 +32,17 @@ describe(
     // Truncate only `tasks`; cycleId/userId are nullable FKs (safe to omit in
     // the fixture rows below), and nothing else this suite touches.
     const fixture = useDatabaseFixture(["tasks"]);
+
+    // useDatabaseFixture's truncate runs once per FILE (in a `before` hook),
+    // not per test. Every test below inserts its own PENDING/DONE rows, so
+    // without a per-test truncate, rows accumulate across tests in this file
+    // and count-based assertions become order-dependent (caught by an actual
+    // disposable-DB run: status=done saw 2 rows instead of 1, carried over
+    // from the previous test's insert).
+    beforeEach(async () => {
+      const { db, tasksTable } = await import("@workspace/db");
+      await db.delete(tasksTable);
+    });
 
     async function setup() {
       // Lazily imported: pulls in `@workspace/db` (opens the module-level Pool
