@@ -36,13 +36,22 @@ services:
     region: oregon
     buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
-    healthCheckPath: /api/healthz
+    healthCheckPath: /api/readyz
     autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
         sync: false # Supabase transaction-pooler connection string (port 6543) — see ADR-003
+      - key: DATABASE_CA_CERT
+        sync: false # PEM-encoded "Supabase Root 2021 CA" that pins TLS for the
+                     # Postgres connection (Release 1 Task 10). Same shared
+                     # public root for every Supabase project; the GitHub
+                     # Actions secret PRODUCTION_DATABASE_CA_CERT holds the
+                     # identical bytes. NOTE: declaring it here does NOT set it
+                     # on the live Render service — a code-only Blueprint
+                     # deploy never syncs envVars (Task 9 hit this exact gap);
+                     # the orchestrator must apply the live value separately.
       - key: SUPABASE_URL
         value: https://meorgbbtxlpzxyfxmnyu.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
@@ -144,12 +153,21 @@ services:
     autoDeployTrigger: off
     buildCommand: npm i -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
-    healthCheckPath: /api/healthz
+    healthCheckPath: /api/readyz
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
         sync: false # staging Supabase transaction-pooler connection string (port 6543)
+      - key: DATABASE_CA_CERT
+        sync: false # PEM-encoded "Supabase Root 2021 CA" that pins TLS for the
+                     # Postgres connection (Release 1 Task 10). Same shared
+                     # public root for every Supabase project; the GitHub
+                     # Actions secret STAGING_DATABASE_CA_CERT holds the
+                     # identical bytes. NOTE: declaring it here does NOT set it
+                     # on the live Render service — a code-only Blueprint
+                     # deploy never syncs envVars (Task 9 hit this exact gap);
+                     # the orchestrator must apply the live value separately.
       - key: SUPABASE_URL
         value: https://jkxlbndnatkxmhpumvhh.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY

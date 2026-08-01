@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema";
+import { buildSslConfig } from "./ssl";
 
 const { Pool } = pg;
 
@@ -12,20 +13,16 @@ if (!connectionString) {
   );
 }
 
-// Local/disposable Postgres (Docker, e.g. Supabase's local dev stack used by
-// scripts/ci/test-disposable-supabase.sh) doesn't offer SSL at all -- forcing
-// it here throws "The server does not support SSL connections" and the
-// connection never opens. Every real (hosted Supabase) target does support
-// and expect SSL, so this only relaxes local/loopback connections; remote
-// behavior is unchanged. (Proper CA-validated TLS is Release 1 Task 10 --
-// this preserves today's rejectUnauthorized:false for everything remote.)
-const isLocalDatabase = /^(localhost|127\.0\.0\.1)(:|\/)/.test(
-  connectionString.replace(/^postgres(ql)?:\/\/[^@]*@/, ""),
-);
-
+// TLS posture lives in ./ssl (Release 1 Task 10): local/disposable Postgres
+// (loopback, no SSL support) stays `ssl: false`; every hosted Supabase target
+// is pinned to the `DATABASE_CA_CERT` root with `rejectUnauthorized: true`.
+// The previous `rejectUnauthorized: false` encrypted the link but accepted
+// any certificate — a live MITM gap that's now closed (fail-closed: a remote
+// connection string with no DATABASE_CA_CERT throws rather than downgrade).
+// Shared with scripts/migrate.mjs so the app pool and migrations never drift.
 export const pool = new Pool({
   connectionString,
-  ssl: isLocalDatabase ? false : { rejectUnauthorized: false },
+  ssl: buildSslConfig(connectionString),
 });
 export const db = drizzle(pool, { schema });
 

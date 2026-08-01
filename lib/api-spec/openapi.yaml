@@ -34,6 +34,10 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
+      description: >
+        Process-liveness probe (mobile clients poll this). Zero I/O — returns
+        200/{status:"ok"} as long as the Node process can answer, regardless of
+        database reachability, so a DB blip never looks like a process crash.
       responses:
         "200":
           description: Healthy
@@ -41,6 +45,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Readiness check (database reachable)
+      description: >
+        Runs SELECT 1 against the database with a 2-second budget. Returns
+        200/{status:"ok"} when it answers within budget, 503 otherwise.
+        Distinct from /healthz: Render routes traffic on this (its
+        healthCheckPath), so a DB-down instance is pulled from the load pool
+        while the Node process keeps answering /healthz for mobile.
+      responses:
+        "200":
+          description: Database reachable within the 2s budget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Database not reachable within the 2s budget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 
   /dashboard:
     get:

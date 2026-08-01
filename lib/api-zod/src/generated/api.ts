@@ -9,9 +9,21 @@ import * as zod from 'zod';
 
 
 /**
+ * Process-liveness probe (mobile clients poll this). Zero I/O — returns 200/{status:"ok"} as long as the Node process can answer, regardless of database reachability, so a DB blip never looks like a process crash.
+
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
+  "status": zod.string()
+})
+
+
+/**
+ * Runs SELECT 1 against the database with a 2-second budget. Returns 200/{status:"ok"} when it answers within budget, 503 otherwise. Distinct from /healthz: Render routes traffic on this (its healthCheckPath), so a DB-down instance is pulled from the load pool while the Node process keeps answering /healthz for mobile.
+
+ * @summary Readiness check (database reachable)
+ */
+export const ReadinessCheckResponse = zod.object({
   "status": zod.string()
 })
 
