@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { useGetWizardProgress, usePostWizardEvent } from "@workspace/api-client-react";
+import {
+  useGetWizardProgress,
+  usePostWizardEvent,
+  usePutWizardProgress,
+  usePostFacilityReadinessEvent,
+  RecordReadinessEventRequestEventKey,
+} from "@workspace/api-client-react";
 import { FarmBasics } from "./steps/FarmBasics";
 import { LayoutGrid } from "./steps/LayoutGrid";
 import { VendorAccounts } from "./steps/sensors/VendorAccounts";
@@ -34,6 +40,8 @@ export function Wizard() {
   const [resumed, setResumed] = useState(false);
   const [addedDevices, setAddedDevices] = useState<AddedDevice[]>([]);
   const postEvent = usePostWizardEvent();
+  const putProgress = usePutWizardProgress();
+  const postReadinessEvent = usePostFacilityReadinessEvent();
 
   // Adjust state during render (React's documented pattern for syncing local
   // state from a query result — "You Might Not Need an Effect"), guarded by
@@ -62,6 +70,18 @@ export function Wizard() {
   useEffect(() => {
     if (isLoading) return;
     postEvent.mutate({ data: { step, eventType: "view" } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isLoading]);
+
+  // Persists currentStep so GET /wizard/progress can resume this user later
+  // (WIZ-001 resume) and so FacilityGate (App.tsx) can tell wizard-in-progress
+  // apart from wizard-complete. Same isLoading-guard reasoning as the "view"
+  // telemetry effect above — hook call unconditional, only the effect body
+  // no-ops while loading. Idempotent: re-PUTting the already-resumed step on
+  // first load after a resume is harmless (same value written back).
+  useEffect(() => {
+    if (isLoading) return;
+    putProgress.mutate({ data: { currentStep: step } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
@@ -100,6 +120,7 @@ export function Wizard() {
   // circuit breaker itself is out of Phase 1 scope).
   const skipToDone = () => {
     postEvent.mutate({ data: { step, eventType: "skip" } });
+    postReadinessEvent.mutate({ data: { eventKey: RecordReadinessEventRequestEventKey.sensors_skipped } });
     setStep("done");
   };
 

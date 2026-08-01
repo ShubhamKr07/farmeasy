@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "./lib/supabase";
-import { setBaseUrl, setAuthTokenGetter, useGetMyFacility } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter, useGetWizardProgress } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
@@ -153,19 +153,24 @@ function LoadingScreen() {
 }
 
 /**
- * Facility-existence guard (WIZ-001). Runs once the user is signed in:
- * a brand-new user has no facility row yet (`GET /facilities/me` -> null)
- * and gets routed into the onboarding wizard instead of any dashboard
- * content; an existing user with a facility gets the normal `<Router/>`.
- * `<Wizard/>` has no wouter routes of its own, so this same gate — since it
- * wraps `<Router/>` entirely — also catches any deep link into `/cycles`,
- * `/inventory`, etc. and redirects it back into the wizard until W4
+ * Wizard-completion guard (WIZ-001). Runs once the user is signed in: a
+ * user who hasn't finished the wizard (no wizard_progress row yet, or a row
+ * whose currentStep isn't "done") gets routed into the onboarding wizard
+ * instead of any dashboard content; a user who has finished it
+ * (currentStep === "done") gets the normal <Router/>. Gating on wizard
+ * completion (not facility-existence) is what makes resume/re-entry work:
+ * a user who submits farm_basics (which creates their facility) and then
+ * abandons on a later step must still be routed back into the wizard on
+ * their next sign-in, even though a facility already exists for them.
+ * <Wizard/> has no wouter routes of its own, so this same gate — since it
+ * wraps <Router/> entirely — also catches any deep link into /cycles,
+ * /inventory, etc. and redirects it back into the wizard until W4
  * completes, with no per-route guard duplication needed.
  */
 function FacilityGate() {
-  const { data: facility, isLoading } = useGetMyFacility();
+  const { data: progress, isLoading } = useGetWizardProgress();
   if (isLoading) return <LoadingScreen />;
-  if (!facility) return <Wizard />; // no facility yet -> wizard, no dashboard content
+  if (progress?.currentStep !== "done") return <Wizard />; // wizard incomplete -> wizard, no dashboard content
   return <Router />; // existing dashboard routes
 }
 
