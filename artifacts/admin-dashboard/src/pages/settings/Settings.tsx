@@ -1,17 +1,83 @@
 import React from "react";
 import { supabase } from "@/lib/supabase";
-import { useHealthCheck, getHealthCheckQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useHealthCheck,
+  getHealthCheckQueryKey,
+  useGetFacilityReadiness,
+  usePostFacilityReadinessEvent,
+  getGetFacilityReadinessQueryKey,
+  RecordReadinessEventRequestEventKey,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Settings as SettingsIcon, Wifi, WifiOff, Server, LogOut } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { QuickBooksCard } from "@/pages/onboarding/steps/done/QuickBooksCard";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
+function ReadinessRow({
+  label,
+  state,
+  count,
+  onUndo,
+}: {
+  label: string;
+  state: string;
+  count?: number;
+  onUndo?: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span
+        className={
+          state === "done"
+            ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-[10px]"
+            : state === "skipped"
+              ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border-2 border-border bg-muted"
+              : "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border-2 border-border"
+        }
+      >
+        {state === "done" ? "✓" : null}
+      </span>
+      <div>
+        <p className={state === "done" ? "text-sm line-through text-muted-foreground" : "text-sm"}>
+          {label}
+          {typeof count === "number" ? ` (${count})` : ""}
+        </p>
+        {state === "skipped" && onUndo && (
+          <p className="text-xs text-muted-foreground">
+            skipped —{" "}
+            <button type="button" className="underline" onClick={onUndo}>
+              undo
+            </button>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Settings() {
   const health = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30_000 } });
+  const { data: readiness } = useGetFacilityReadiness();
+  const queryClient = useQueryClient();
+  const postEvent = usePostFacilityReadinessEvent();
+
+  const coreItemsDone = readiness ? readiness.items.slice(0, 4).every((i) => i.state === "done") : false;
+  const sensorsItem = readiness?.items.find((i) => i.key === "sensors_registered");
+  const qboItem = readiness?.items.find((i) => i.key === "quickbooks_connected");
+  const teamItem = readiness?.items.find((i) => i.key === "team_invited");
+
+  const handleUndoSensors = () => {
+    postEvent.mutate(
+      { data: { eventKey: RecordReadinessEventRequestEventKey.sensors_skipped, undo: true } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetFacilityReadinessQueryKey() }) },
+    );
+  };
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -97,6 +163,26 @@ export function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      {coreItemsDone && (
+        <Card className="shadow-sm max-w-md">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Setup</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {sensorsItem && (
+              <ReadinessRow
+                label={sensorsItem.label}
+                state={sensorsItem.state}
+                count={sensorsItem.count}
+                onUndo={sensorsItem.state === "skipped" ? handleUndoSensors : undefined}
+              />
+            )}
+            {qboItem && (qboItem.state !== "done" ? <QuickBooksCard /> : <ReadinessRow label={qboItem.label} state={qboItem.state} />)}
+            {teamItem && <ReadinessRow label={teamItem.label} state={teamItem.state} />}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="shadow-sm border-dashed">
         <CardContent className="p-4 text-sm text-muted-foreground">
