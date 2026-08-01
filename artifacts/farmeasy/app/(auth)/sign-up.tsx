@@ -34,10 +34,15 @@ export default function SignUpPage() {
     setSubmitLoading(true);
     setError(null);
     try {
+      // Auth-only sign-up: no raw_user_meta_data (the client must not carry a
+      // role claim — Task 1's auth trigger strips/ignores it server-side and
+      // always assigns technician) and NO public.users insert. Task 1's
+      // `on_auth_user_created` trigger provisions the profile row server-side,
+      // so the client never writes to public.users anymore. The legacy
+      // duplicate-only INSERT policy / 23505-swallow path is gone with it.
       const { data, error: createError } = await supabase.auth.signUp({
         email: emailAddress,
         password,
-        options: { data: { role: "technician" } },
       });
       if (createError) {
         setError(createError.message ?? "Couldn't create account.");
@@ -47,25 +52,8 @@ export default function SignUpPage() {
         setError("Couldn't create account.");
         return;
       }
-      // Supabase creates the auth.users row above but does NOT create the
-      // matching public.users row — insert it here, mirroring Task 3's
-      // export-script users.insert() (new sign-ups don't go through that
-      // script). The id PK (== auth.users.id) makes this idempotent: a retry
-      // on the same email yields a 23505 unique_violation we swallow below, so
-      // the profile row only ever "takes" once per real sign-up rather than on
-      // every app launch / every button press.
-      const { error: profileError } = await supabase
-        .from("users")
-        .insert({ id: data.user.id, email: emailAddress, role: "technician" });
-      if (profileError && profileError.code !== "23505") {
-        console.error("[SignUp] users insert error:", profileError.message);
-        setError(profileError.message);
-        return;
-      }
-      // Email confirmation step. Task 8 will configure the project's Auth
-      // email template (OTP vs magic-link); assuming OTP here because it's the
-      // closer structural match to the existing code-input screen. See
-      // .superpowers/sdd/task-7-signup-report.md for the assumption.
+      // Email confirmation step. Task 8 configured the project's Auth email
+      // template to OTP; the code-input screen below collects the 6-digit OTP.
       setPendingVerification(true);
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong.");

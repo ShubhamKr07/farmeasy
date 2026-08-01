@@ -17,6 +17,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _clientVersion: string | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -42,6 +43,19 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+/**
+ * Set the mobile client (app) version to advertise on outgoing API requests
+ * as the `X-FarmSmart-Client-Version` header. Initialize it once at app boot
+ * from Expo's application/config version (`expo-application` / `app.json`
+ * `expo.version`). The API server records this in request logs (bounded) so
+ * per-version adoption can be measured for the mobile update promotion gate.
+ *
+ * Pass `null` to clear it (no header is attached on subsequent requests).
+ */
+export function setClientVersion(version: string | null): void {
+  _clientVersion = version && version.trim() !== "" ? version.trim() : null;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -356,6 +370,12 @@ export async function customFetch<T = unknown>(
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
     }
+  }
+
+  // Advertise the mobile client version when configured and no explicit
+  // header has been provided. Lets the API server log per-version adoption.
+  if (_clientVersion && !headers.has("x-farmsmart-client-version")) {
+    headers.set("x-farmsmart-client-version", _clientVersion);
   }
 
   const requestInfo = { method, url: resolveUrl(input) };

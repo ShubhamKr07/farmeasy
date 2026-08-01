@@ -13,7 +13,8 @@ import React, { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { setBaseUrl } from "@workspace/api-client-react";
+import { setBaseUrl, setClientVersion } from "@workspace/api-client-react";
+import Constants from "expo-constants";
 import { useColors } from "@/hooks/useColors";
 import { ThemeOverrideProvider } from "@/context/ThemeOverrideContext";
 import { supabase } from "@/lib/supabase";
@@ -30,6 +31,12 @@ const queryClient = new QueryClient({
 
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
+
+// Advertise the mobile app version on every API request so the API server can
+// log per-version adoption (mobile update promotion gate). `expo-constants`
+// exposes the published app.json `expo.version`; null in bare/unknown builds
+// (setClientVersion handles null by not attaching the header).
+setClientVersion(Constants.expoConfig?.version ?? null);
 
 function AuthGuard({
   session,

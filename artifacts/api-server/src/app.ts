@@ -22,6 +22,19 @@ import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import { logger } from "./lib/logger";
 
+// Bounded client-version extraction for request logging. The mobile app
+// advertises its version via `X-FarmSmart-Client-Version` (see custom-fetch).
+// We record a bounded form so per-version adoption can be measured for the
+// mobile update promotion gate without allowing arbitrary-length / log-
+// injection payloads to bloat or forge logs. Empty/absent -> not logged.
+const MAX_CLIENT_VERSION_LEN = 32;
+function boundedClientVersion(req: Request): string | undefined {
+  const raw = req.headers["x-farmsmart-client-version"];
+  if (!raw) return undefined;
+  const value = String(raw).trim().slice(0, MAX_CLIENT_VERSION_LEN);
+  return value === "" ? undefined : value;
+}
+
 const app: Express = express();
 
 app.use(
@@ -29,10 +42,12 @@ app.use(
     logger,
     serializers: {
       req(req) {
+        const clientVersion = boundedClientVersion(req);
         return {
           id: req.id,
           method: req.method,
           url: req.url?.split("?")[0],
+          ...(clientVersion ? { clientVersion } : {}),
         };
       },
       res(res) {
