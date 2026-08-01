@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, gt, and, asc } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@workspace/db";
 import { inventoryItemsTable } from "@workspace/db";
 
@@ -7,6 +8,77 @@ const router = Router();
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+// ── Zod schemas ───────────────────────────────────────────────────────────────
+
+// current_qty / max_qty are drizzle `numeric` columns — stored as strings, but
+// the API must accept a *finite, non-negative number* and stringify it itself.
+// Rejecting here means "abc", Infinity, and -5 never reach Postgres as an ugly
+// unhandled numeric-parse / CHECK error (they surface as a clean 400 instead).
+const qtySchema = z
+  .number({ invalid_type_error: "currentQty/maxQty must be a number" })
+  .finite("currentQty/maxQty must be a finite number")
+  .nonnegative("currentQty/maxQty must be non-negative");
+
+// ISO 8601 calendar date `YYYY-MM-DD` that parses to a real date. The regex
+// rejects garbage shapes; the refine rejects impossible calendar dates whose
+// digits still match the shape (e.g. "2024-13-01" — Date.parse → NaN).
+const arrivalDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "arrivalDate must be a YYYY-MM-DD date string")
+  .refine((v) => !Number.isNaN(Date.parse(v)), "arrivalDate is not a real date");
+
+// Create: full payload. Cross-field `currentQty <= maxQty` is validated here
+// (all values are present), defaulting an omitted quantity to 0 to match the
+// previous `?? 0` behaviour.
+const CreateInventorySchema = z
+  .object({
+    name: z.string().min(1, "name is required"),
+    brand: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    qrCode: z.string().nullable().optional(),
+    currentQty: qtySchema.optional(),
+    maxQty: qtySchema.optional(),
+    unit: z.string().min(1).optional(),
+    arrivalDate: arrivalDateSchema.nullable().optional(),
+  })
+  .refine((d) => (d.currentQty ?? 0) <= (d.maxQty ?? 0), {
+    message: "currentQty must be less than or equal to maxQty",
+    path: ["currentQty"],
+  });
+
+// Patch: every scalar field optional + `.strict()` (unknown keys rejected).
+// Cross-field `currentQty <= maxQty` is NOT validated here — the request alone
+// doesn't know the stored values — it is validated against the merged,
+// locked-row state inside the PATCH transaction (see below).
+const PatchInventorySchema = z
+  .object({
+    name: z.string().min(1, "name must not be blank").optional(),
+    brand: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    qrCode: z.string().nullable().optional(),
+    currentQty: qtySchema.optional(),
+    maxQty: qtySchema.optional(),
+    unit: z.string().min(1).optional(),
+    arrivalDate: arrivalDateSchema.nullable().optional(),
+  })
+  .strict();
+
+function validate<T>(
+  schema: z.ZodSchema<T>,
+  data: unknown,
+  res: Response,
+): T | null {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    res.status(400).json({
+      error: "Validation failed",
+      details: result.error.flatten(),
+    });
+    return null;
+  }
+  return result.data;
+}
 
 function formatItem(item: typeof inventoryItemsTable.$inferSelect) {
   return {
@@ -58,20 +130,20 @@ router.get("/inventory", async (req: Request, res: Response) => {
 
 router.post("/inventory", async (req: Request, res: Response) => {
   try {
-    const { name, brand, category, qrCode, currentQty, maxQty, unit, arrivalDate } = req.body;
-    if (!name) return res.status(400).json({ error: "name is required" });
+    const body = validate(CreateInventorySchema, req.body, res);
+    if (!body) return;
 
     const [item] = await db
       .insert(inventoryItemsTable)
       .values({
-        name,
-        brand: brand ?? null,
-        category: category ?? null,
-        qrCode: qrCode ?? null,
-        currentQty: String(currentQty ?? 0),
-        maxQty: String(maxQty ?? 0),
-        unit: unit ?? "g",
-        arrivalDate: arrivalDate ?? null,
+        name: body.name,
+        brand: body.brand ?? null,
+        category: body.category ?? null,
+        qrCode: body.qrCode ?? null,
+        currentQty: String(body.currentQty ?? 0),
+        maxQty: String(body.maxQty ?? 0),
+        unit: body.unit ?? "g",
+        arrivalDate: body.arrivalDate ?? null,
       })
       .returning();
 
@@ -85,24 +157,75 @@ router.post("/inventory", async (req: Request, res: Response) => {
 router.patch("/inventory/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params["id"] as string, 10);
-    const { name, brand, category, currentQty, maxQty, unit } = req.body;
+
+    // Strict partial parse: every scalar field optional, unknown keys
+    // rejected. Per-field type/range/date checks happen here; the cross-field
+    // `currentQty <= maxQty` check happens below against the merged state.
+    const body = validate(PatchInventorySchema, req.body, res);
+    if (!body) return;
 
     const updateData: Partial<typeof inventoryItemsTable.$inferInsert> = {};
-    if (name !== undefined) updateData.name = name;
-    if (brand !== undefined) updateData.brand = brand;
-    if (category !== undefined) updateData.category = category;
-    if (currentQty !== undefined) updateData.currentQty = String(currentQty);
-    if (maxQty !== undefined) updateData.maxQty = String(maxQty);
-    if (unit !== undefined) updateData.unit = unit;
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.brand !== undefined) updateData.brand = body.brand;
+    if (body.category !== undefined) updateData.category = body.category;
+    if (body.qrCode !== undefined) updateData.qrCode = body.qrCode;
+    if (body.currentQty !== undefined) updateData.currentQty = String(body.currentQty);
+    if (body.maxQty !== undefined) updateData.maxQty = String(body.maxQty);
+    if (body.unit !== undefined) updateData.unit = body.unit;
+    if (body.arrivalDate !== undefined) updateData.arrivalDate = body.arrivalDate;
 
-    const [item] = await db
-      .update(inventoryItemsTable)
-      .set(updateData)
-      .where(eq(inventoryItemsTable.id, id))
-      .returning();
+    // Empty PATCH: nothing to update. Reject cleanly rather than issuing an
+    // UPDATE with an empty SET clause (a SQL syntax error).
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
 
-    if (!item) return res.status(404).json({ error: "Item not found" });
-    return res.json(formatItem(item));
+    // Validate the PATCH against the COMPLETE merged state, atomically.
+    //
+    // SELECT ... FOR UPDATE locks the row for the duration of this
+    // transaction. A second concurrent PATCH on the same row blocks here until
+    // this transaction commits, so it then reads *this* request's
+    // already-applied change and rejects itself with a clean 400 if the
+    // merged values would violate `currentQty <= maxQty` — instead of blindly
+    // updating its own fields and relying on the DB's CHECK constraint to
+    // throw an unhandled 500. Never read the row outside this transaction.
+    const result = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.id, id))
+        .for("update");
+
+      if (!existing) return { kind: "not_found" as const };
+
+      const mergedCurrent =
+        body.currentQty !== undefined ? body.currentQty : Number(existing.currentQty);
+      const mergedMax =
+        body.maxQty !== undefined ? body.maxQty : Number(existing.maxQty);
+
+      if (mergedCurrent > mergedMax) {
+        return {
+          kind: "invalid" as const,
+          message: "currentQty must be less than or equal to maxQty",
+        };
+      }
+
+      const [updated] = await tx
+        .update(inventoryItemsTable)
+        .set(updateData)
+        .where(eq(inventoryItemsTable.id, id))
+        .returning();
+
+      return { kind: "ok" as const, item: updated };
+    });
+
+    if (result.kind === "not_found") {
+      return res.status(404).json({ error: "Item not found" });
+    }
+    if (result.kind === "invalid") {
+      return res.status(400).json({ error: result.message });
+    }
+    return res.json(formatItem(result.item));
   } catch (err) {
     req.log.error(err);
     return res.status(500).json({ error: "Failed to update inventory item" });
