@@ -25,6 +25,17 @@ cp "$ROOT/supabase/config.toml" "$WORKDIR/supabase/config.toml"
 # 1. Start a disposable local Supabase stack in the isolated workdir.
 pnpm exec supabase --workdir "$WORKDIR" start
 
+# supabaseAuth.ts (artifacts/api-server/src/middlewares/supabaseAuth.ts) reads
+# SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY at module *import* time, not lazily —
+# so any DB-gated test file that imports a route touching that middleware
+# crashes on undefined even though the test harness (createAuthenticatedTestApp)
+# stubs the actual auth check and never calls the real client. Pull the
+# disposable stack's own URL/service-role key so those imports succeed.
+eval "$(pnpm exec supabase --workdir "$WORKDIR" status -o env \
+  --override-name api.url=SUPABASE_URL \
+  --override-name auth.service_role_key=SUPABASE_SERVICE_ROLE_KEY)"
+export SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY
+
 # 2. Replay the full Drizzle migration history into the disposable DB.
 DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @workspace/db run db:migrate
 
@@ -39,4 +50,6 @@ CI=true \
 REQUIRE_TEST_DATABASE=true \
 TEST_DATABASE_URL="$TEST_DATABASE_URL" \
 DATABASE_URL="$TEST_DATABASE_URL" \
+SUPABASE_URL="$SUPABASE_URL" \
+SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
 pnpm --filter @workspace/api-server run test
