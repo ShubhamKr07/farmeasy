@@ -7,7 +7,7 @@ BEGIN;
 TRUNCATE
   sensor_readings, sensors, stock_movements, bad_tray_entries, tasks,
   alerts, shipments, inventory_items, cycle_seed_lots, cycles,
-  seed_lots, growth_profiles, crops, channels, rooms
+  seed_lots, growth_profiles, crops, channels, rooms, facilities, organizations
 RESTART IDENTITY CASCADE;
 
 INSERT INTO crops (id, name, scientific_name, category) VALUES
@@ -71,8 +71,16 @@ VALUES
 
 -- sensors.channel_id/rack_id has a CHECK requiring at least one non-null
 -- (sensors_placement), so a minimal room/channel is seeded for placement.
-INSERT INTO rooms (id, name, sort_order) VALUES
-  (1, 'seeding', 0);
+-- rooms.facility_id is NOT NULL (onboarding-wizard multi-tenancy fix), so a
+-- minimal organization + facility is seeded first purely to satisfy that FK.
+INSERT INTO organizations (id, name) VALUES
+  (1, 'Test Org');
+
+INSERT INTO facilities (id, name, organization_id, facility_name, timezone) VALUES
+  (1, 'Test Farm', 1, 'Test Farm', 'UTC');
+
+INSERT INTO rooms (id, name, sort_order, facility_id) VALUES
+  (1, 'seeding', 0, 1);
 
 INSERT INTO channels (id, room_id, label, position_index) VALUES
   (1, 1, 'Room A', 0);
