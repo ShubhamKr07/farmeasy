@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import { strictEqual } from "node:assert";
 import request from "supertest";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture } from "../helpers/testDatabase";
+import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
 
 /**
  * GET /facility-readiness + POST /facility-readiness/events (onboarding
@@ -52,10 +52,9 @@ describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
         currency: "USD",
       })
       .returning();
-    await db.insert(usersTable).values({
+    await seedTestUser(db, usersTable, {
       id: DEFAULT_TEST_USER.sub,
       email: "test-user@example.com",
-      role: "technician",
       organizationId: org.id,
     });
     return { app: createAuthenticatedTestApp(facilityReadiness.default), db, org, facility };
@@ -94,11 +93,7 @@ describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
   test("rejects a user with no facility yet", async () => {
     const facilityReadiness = await import("../../routes/facility-readiness");
     const { db, usersTable } = await import("@workspace/db");
-    await db.insert(usersTable).values({
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      role: "technician",
-    });
+    await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     const app = createAuthenticatedTestApp(facilityReadiness.default);
 
     const res = await request(app).get("/api/facility-readiness");
@@ -129,10 +124,9 @@ describe("POST /api/facility-readiness/events", { skip: !dbUrl }, () => {
         currency: "USD",
       })
       .returning();
-    await db.insert(usersTable).values({
+    await seedTestUser(db, usersTable, {
       id: DEFAULT_TEST_USER.sub,
       email: "test-user@example.com",
-      role: "technician",
       organizationId: org.id,
     });
     return { app: createAuthenticatedTestApp(facilityReadiness.default), db, org, facility };
@@ -171,11 +165,7 @@ describe("POST /api/facility-readiness/events", { skip: !dbUrl }, () => {
   test("rejects a user with no facility yet", async () => {
     const facilityReadiness = await import("../../routes/facility-readiness");
     const { db, usersTable } = await import("@workspace/db");
-    await db.insert(usersTable).values({
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      role: "technician",
-    });
+    await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     const app = createAuthenticatedTestApp(facilityReadiness.default);
 
     const res = await request(app).post("/api/facility-readiness/events").send({ eventKey: "team_invited" });

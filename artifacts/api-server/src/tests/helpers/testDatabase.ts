@@ -2,6 +2,50 @@ import { after, before, beforeEach } from "node:test";
 import { sql } from "drizzle-orm";
 
 /**
+ * Seeds a matching `auth.users` row for a synthetic test-user id, then
+ * upserts the `public.users` row with the given role/organization.
+ *
+ * `public.users.id` has a foreign key to `auth.users.id`
+ * (00004_create_auth_profiles.sql, `users_id_auth_users_id_fk`) — a plain
+ * `db.insert(usersTable)` with a synthetic id (never real Supabase auth
+ * signup) violates it. Inserting into `auth.users` first also fires
+ * `handle_new_user()` (AFTER INSERT trigger), which auto-creates the
+ * `public.users` row itself (role: technician, no organization) — hence the
+ * upsert below rather than a plain insert, which would otherwise collide
+ * with the trigger's own row. `ON CONFLICT DO NOTHING` on the auth.users
+ * insert makes this safe to call from every test file/setup() that needs a
+ * signed-in test user, even when auth.users already has the row from an
+ * earlier test in the same file (only `public.users` is truncated between
+ * tests, not `auth.users` — see useDatabaseFixture below).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function seedTestUser(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  usersTable: any,
+  user: { id: string; email: string; role?: string; organizationId?: number | null },
+): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (${user.id}, 'authenticated', 'authenticated', ${user.email}, '', now(), '{}'::jsonb, '{}'::jsonb, now(), now())
+    ON CONFLICT (id) DO NOTHING
+  `);
+  await db
+    .insert(usersTable)
+    .values({
+      id: user.id,
+      email: user.email,
+      role: user.role ?? "technician",
+      organizationId: user.organizationId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: usersTable.id,
+      set: { role: user.role ?? "technician", organizationId: user.organizationId ?? null },
+    });
+}
+
+/**
  * TEST_DATABASE_URL gate, mirroring src/tests/metrics/parity.test.ts:
  * hard-fail only when REQUIRE_TEST_DATABASE=true, otherwise return the URL
  * (or undefined) so the caller can skip its suite. Callers wrap their

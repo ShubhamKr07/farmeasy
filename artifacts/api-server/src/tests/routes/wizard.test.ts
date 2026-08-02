@@ -3,7 +3,7 @@ import { strictEqual, ok } from "node:assert";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture } from "../helpers/testDatabase";
+import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
 
 /**
  * GET/PUT /wizard/progress (onboarding wizard Task 4, WIZ-001 resume
@@ -22,11 +22,7 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
   async function setup() {
     const wizard = await import("../../routes/wizard");
     const { db, usersTable, wizardProgressTable } = await import("@workspace/db");
-    await db.insert(usersTable).values({
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      role: "technician",
-    });
+    await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     return { app: createAuthenticatedTestApp(wizard.default), db, wizardProgressTable };
   }
 

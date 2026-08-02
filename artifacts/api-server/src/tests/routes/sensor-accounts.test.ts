@@ -3,7 +3,7 @@ import { strictEqual, ok, doesNotMatch } from "node:assert";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture } from "../helpers/testDatabase";
+import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
 
 /**
  * POST /sensor-accounts + GET /sensor-accounts + POST
@@ -49,10 +49,9 @@ describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
     const sensorAccounts = await import("../../routes/sensor-accounts");
     const { db, organizationsTable, usersTable } = await import("@workspace/db");
     const [org] = await db.insert(organizationsTable).values({ name: "Sunrise Greens" }).returning();
-    await db.insert(usersTable).values({
+    await seedTestUser(db, usersTable, {
       id: DEFAULT_TEST_USER.sub,
       email: "test-user@example.com",
-      role: "technician",
       organizationId: org.id,
     });
     return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
@@ -89,11 +88,7 @@ describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
   test("rejects a user with no facility yet", async () => {
     const sensorAccounts = await import("../../routes/sensor-accounts");
     const { db, usersTable } = await import("@workspace/db");
-    await db.insert(usersTable).values({
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      role: "technician",
-    });
+    await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     const app = createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter());
 
     const res = await request(app)
@@ -118,10 +113,9 @@ describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
     const sensorAccounts = await import("../../routes/sensor-accounts");
     const { db, organizationsTable, usersTable } = await import("@workspace/db");
     const [org] = await db.insert(organizationsTable).values({ name: "Sunrise Greens" }).returning();
-    await db.insert(usersTable).values({
+    await seedTestUser(db, usersTable, {
       id: DEFAULT_TEST_USER.sub,
       email: "test-user@example.com",
-      role: "technician",
       organizationId: org.id,
     });
     return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
@@ -154,11 +148,7 @@ describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
   test("returns an empty list for a user with no facility yet", async () => {
     const sensorAccounts = await import("../../routes/sensor-accounts");
     const { db, usersTable } = await import("@workspace/db");
-    await db.insert(usersTable).values({
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      role: "technician",
-    });
+    await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     const app = createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter());
 
     const res = await request(app).get("/api/sensor-accounts");
@@ -174,10 +164,9 @@ describe("POST /api/sensor-accounts/:id/test-connection", { skip: !dbUrl }, () =
     const sensorAccounts = await import("../../routes/sensor-accounts");
     const { db, organizationsTable, usersTable } = await import("@workspace/db");
     const [org] = await db.insert(organizationsTable).values({ name: "Sunrise Greens" }).returning();
-    await db.insert(usersTable).values({
+    await seedTestUser(db, usersTable, {
       id: DEFAULT_TEST_USER.sub,
       email: "test-user@example.com",
-      role: "technician",
       organizationId: org.id,
     });
     return { app: createAuthenticatedTestApp(sensorAccounts.createSensorAccountsRouter()), db, org };
