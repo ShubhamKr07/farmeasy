@@ -908,6 +908,9 @@ export const ListSensorsResponseItem = zod.object({
   "id": zod.number(),
   "channelId": zod.number().nullish(),
   "rackId": zod.number().nullish(),
+  "roomId": zod.number().nullish(),
+  "facilityWide": zod.boolean().optional(),
+  "sensorAccountId": zod.number().nullish(),
   "type": zod.enum(['temp', 'ph', 'water', 'humidity', 'ec']),
   "label": zod.string(),
   "unit": zod.string().nullish(),
@@ -927,6 +930,20 @@ export const CreateSensorBody = zod.object({
   "type": zod.enum(['temp', 'ph', 'water', 'humidity', 'ec']),
   "label": zod.string(),
   "unit": zod.string().optional()
+})
+
+
+
+
+
+export const BulkCreateSensorsBody = zod.object({
+  "label": zod.string(),
+  "types": zod.array(zod.enum(['temp', 'ph', 'water', 'humidity', 'ec'])).min(1),
+  "channelIds": zod.array(zod.number()).optional(),
+  "rackIds": zod.array(zod.number()).optional(),
+  "roomId": zod.number().optional(),
+  "facilityWide": zod.boolean().optional(),
+  "sensorAccountId": zod.number().nullish()
 })
 
 
@@ -1141,6 +1158,142 @@ export const PostFacilityLogBody = zod.object({
   "logType": zod.enum(['maintenance', 'waste', 'env_check', 'cleaning', 'receiving', 'visitor']),
   "data": zod.record(zod.string(), zod.unknown()),
   "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+
+
+export const createFacilityBodyCurrencyMin = 3;
+export const createFacilityBodyCurrencyMax = 3;
+
+
+
+export const CreateFacilityBody = zod.object({
+  "farmName": zod.string().min(1),
+  "facilityName": zod.string().min(1).optional(),
+  "timezone": zod.string(),
+  "units": zod.enum(['metric', 'imperial']),
+  "currency": zod.string().min(createFacilityBodyCurrencyMin).max(createFacilityBodyCurrencyMax)
+})
+
+
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+export const GetMyFacilityResponse = zod.union([zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "organizationId": zod.number(),
+  "facilityName": zod.string(),
+  "timezone": zod.string(),
+  "units": zod.enum(['metric', 'imperial']),
+  "currency": zod.string()
+}),zod.null()])
+
+
+/**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+export const GetWizardProgressResponse = zod.union([zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown())
+}),zod.null()])
+
+
+/**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const PutWizardProgressBody = zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const PutWizardProgressResponse = zod.object({
+  "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "stepData": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+export const ListSensorAccountsResponseItem = zod.object({
+  "id": zod.number(),
+  "vendor": zod.string(),
+  "authMethod": zod.enum(['api_key', 'oauth', 'username_password']),
+  "status": zod.enum(['connected', 'failed', 'pending_integration']),
+  "maskedFingerprint": zod.string().nullable(),
+  "createdAt": zod.string().optional()
+}).describe('Vendor sensor account, deliberately excluding credentialCiphertext — the handler explicitly selects columns rather than select-all (SEN-002) so credentials can never leak into a response.\n')
+export const ListSensorAccountsResponse = zod.array(ListSensorAccountsResponseItem)
+
+
+/**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+
+
+
+
+export const CreateSensorAccountBody = zod.object({
+  "vendor": zod.string().min(1),
+  "authMethod": zod.enum(['api_key', 'oauth', 'username_password']),
+  "credential": zod.string().min(1).describe('API key, or JSON-stringified username\/password — encrypted before storage, never persisted or returned in plaintext.\n')
+})
+
+
+/**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const TestSensorAccountConnectionParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const TestSensorAccountConnectionResponse = zod.object({
+  "status": zod.enum(['connected', 'failed', 'pending_integration'])
+})
+
+
+/**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const PostWizardEventBody = zod.object({
+  "step": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
+  "eventType": zod.enum(['view', 'save', 'abandon', 'skip'])
+})
+
+
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+export const GetFacilityReadinessResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "state": zod.enum(['pending', 'interim', 'done', 'skipped']),
+  "deepLink": zod.string().nullish(),
+  "count": zod.number().optional()
+})),
+  "completedCount": zod.number()
+}).describe('`completedCount` is derived by filtering `items` for `state === \"done\"` — by construction, not an independently-tracked number — so it can never diverge from the actual number of done items.\n')
+
+
+/**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const PostFacilityReadinessEventBody = zod.object({
+  "eventKey": zod.enum(['labels_downloaded', 'labels_scanned', 'grow_profile_created', 'seeds_added', 'first_cycle_seeded', 'sensors_skipped', 'quickbooks_skipped', 'team_invited']),
+  "undo": zod.boolean().optional()
+})
+
+export const PostFacilityReadinessEventResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 

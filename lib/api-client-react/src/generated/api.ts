@@ -34,14 +34,19 @@ import type {
   AlertStatusUpdate,
   BadTrayEntryInput,
   BadTraysAnalysis,
+  BulkCreateSensorsRequest,
+  BulkCreateSensorsResponse,
   ChannelItem,
   ChannelMonitoringItem,
   ChannelResolved,
   CompleteHarvestRequest,
   CreateChannelInput,
   CreateCycleRequest,
+  CreateFacilityRequest,
+  CreateFacilityResponse,
   CreateManualCheckRequest,
   CreateRackInput,
+  CreateSensorAccountRequest,
   CreateTrayInput,
   Crop,
   CropInput,
@@ -50,8 +55,10 @@ import type {
   DashboardStats,
   DeleteResult,
   ErrorResponse,
+  Facility,
   FacilityLog,
   FacilityLogRequest,
+  FacilityReadinessResponse,
   GrowthProfile,
   HealthStatus,
   InventoryItem,
@@ -70,13 +77,20 @@ import type {
   MetricsResponse,
   MonitoringApiInput,
   MoveFertigationRequest,
+  PostFacilityReadinessEvent200,
+  PostFacilityReadinessEvent201,
+  PostWizardEventRequest,
+  PutWizardProgressRequest,
   RackItem,
   RecommendRequest,
   RecommendResponse,
+  RecordReadinessEventRequest,
   ResolveLayoutQrParams,
   RoomItem,
   SeedLot,
   Sensor,
+  SensorAccount,
+  SensorAccountConnectionResult,
   SensorInput,
   SensorReading,
   SensorReadingInput,
@@ -94,7 +108,8 @@ import type {
   UpdateChannelInput,
   UpdateRackInput,
   UserSettingInput,
-  UserSettingsResponse
+  UserSettingsResponse,
+  WizardProgress
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -3689,6 +3704,71 @@ export const useCreateSensor = <TError = ErrorType<unknown>,
       return useMutation(getCreateSensorMutationOptions(options), queryClient);
     }
 
+export const getBulkCreateSensorsUrl = () => {
+
+
+
+
+  return `/api/sensors/bulk`
+}
+
+export const bulkCreateSensors = async (bulkCreateSensorsRequest?: BulkCreateSensorsRequest, options?: RequestInit): Promise<BulkCreateSensorsResponse> => {
+
+  return customFetch<BulkCreateSensorsResponse>(getBulkCreateSensorsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      bulkCreateSensorsRequest,)
+  }
+);}
+
+
+
+
+export const getBulkCreateSensorsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext> => {
+
+const mutationKey = ['bulkCreateSensors'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bulkCreateSensors>>, {data?: BodyType<BulkCreateSensorsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  bulkCreateSensors(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BulkCreateSensorsMutationResult = NonNullable<Awaited<ReturnType<typeof bulkCreateSensors>>>
+    export type BulkCreateSensorsMutationBody = BodyType<BulkCreateSensorsRequest> | undefined
+    export type BulkCreateSensorsMutationError = ErrorType<unknown>
+
+    export const useBulkCreateSensors = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bulkCreateSensors>>, TError,{data?: BodyType<BulkCreateSensorsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof bulkCreateSensors>>,
+        TError,
+        {data?: BodyType<BulkCreateSensorsRequest>},
+        TContext
+      > => {
+      return useMutation(getBulkCreateSensorsMutationOptions(options), queryClient);
+    }
+
 export const getListSensorReadingsUrl = (params?: ListSensorReadingsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -5085,5 +5165,840 @@ export const usePostFacilityLog = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPostFacilityLogMutationOptions(options), queryClient);
+    }
+
+export const getCreateFacilityUrl = () => {
+
+
+
+
+  return `/api/facilities`
+}
+
+/**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+export const createFacility = async (createFacilityRequest: CreateFacilityRequest, options?: RequestInit): Promise<CreateFacilityResponse> => {
+
+  return customFetch<CreateFacilityResponse>(getCreateFacilityUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createFacilityRequest,)
+  }
+);}
+
+
+
+
+export const getCreateFacilityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext> => {
+
+const mutationKey = ['createFacility'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFacility>>, {data: BodyType<CreateFacilityRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFacility(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFacilityMutationResult = NonNullable<Awaited<ReturnType<typeof createFacility>>>
+    export type CreateFacilityMutationBody = BodyType<CreateFacilityRequest>
+    export type CreateFacilityMutationError = ErrorType<void>
+
+    /**
+ * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+ */
+export const useCreateFacility = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createFacility>>,
+        TError,
+        {data: BodyType<CreateFacilityRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateFacilityMutationOptions(options), queryClient);
+    }
+
+export const getGetMyFacilityUrl = () => {
+
+
+
+
+  return `/api/facilities/me`
+}
+
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+export const getMyFacility = async ( options?: RequestInit): Promise<Facility | null> => {
+
+  return customFetch<Facility | null>(getGetMyFacilityUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyFacilityQueryKey = () => {
+    return [
+    `/api/facilities/me`
+    ] as const;
+    }
+
+
+export const getGetMyFacilityQueryOptions = <TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyFacilityQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyFacility>>> = ({ signal }) => getMyFacility({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetMyFacilityQueryResult = NonNullable<Awaited<ReturnType<typeof getMyFacility>>>
+export type GetMyFacilityQueryError = ErrorType<unknown>
+
+
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyFacility>>,
+          TError,
+          Awaited<ReturnType<typeof getMyFacility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyFacility>>,
+          TError,
+          Awaited<ReturnType<typeof getMyFacility>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Facility-existence check for the signed-in user (wizard gate)
+ */
+
+export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyFacility>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetMyFacilityQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetWizardProgressUrl = () => {
+
+
+
+
+  return `/api/wizard/progress`
+}
+
+/**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+export const getWizardProgress = async ( options?: RequestInit): Promise<WizardProgress | null> => {
+
+  return customFetch<WizardProgress | null>(getGetWizardProgressUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetWizardProgressQueryKey = () => {
+    return [
+    `/api/wizard/progress`
+    ] as const;
+    }
+
+
+export const getGetWizardProgressQueryOptions = <TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetWizardProgressQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWizardProgress>>> = ({ signal }) => getWizardProgress({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetWizardProgressQueryResult = NonNullable<Awaited<ReturnType<typeof getWizardProgress>>>
+export type GetWizardProgressQueryError = ErrorType<unknown>
+
+
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWizardProgress>>,
+          TError,
+          Awaited<ReturnType<typeof getWizardProgress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getWizardProgress>>,
+          TError,
+          Awaited<ReturnType<typeof getWizardProgress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ */
+
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetWizardProgressQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPutWizardProgressUrl = () => {
+
+
+
+
+  return `/api/wizard/progress`
+}
+
+/**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const putWizardProgress = async (putWizardProgressRequest: PutWizardProgressRequest, options?: RequestInit): Promise<WizardProgress> => {
+
+  return customFetch<WizardProgress>(getPutWizardProgressUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      putWizardProgressRequest,)
+  }
+);}
+
+
+
+
+export const getPutWizardProgressMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext> => {
+
+const mutationKey = ['putWizardProgress'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putWizardProgress>>, {data: BodyType<PutWizardProgressRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  putWizardProgress(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutWizardProgressMutationResult = NonNullable<Awaited<ReturnType<typeof putWizardProgress>>>
+    export type PutWizardProgressMutationBody = BodyType<PutWizardProgressRequest>
+    export type PutWizardProgressMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Save the current step's draft data and/or advance currentStep
+ */
+export const usePutWizardProgress = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putWizardProgress>>, TError,{data: BodyType<PutWizardProgressRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putWizardProgress>>,
+        TError,
+        {data: BodyType<PutWizardProgressRequest>},
+        TContext
+      > => {
+      return useMutation(getPutWizardProgressMutationOptions(options), queryClient);
+    }
+
+export const getListSensorAccountsUrl = () => {
+
+
+
+
+  return `/api/sensor-accounts`
+}
+
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+export const listSensorAccounts = async ( options?: RequestInit): Promise<SensorAccount[]> => {
+
+  return customFetch<SensorAccount[]>(getListSensorAccountsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSensorAccountsQueryKey = () => {
+    return [
+    `/api/sensor-accounts`
+    ] as const;
+    }
+
+
+export const getListSensorAccountsQueryOptions = <TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSensorAccountsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSensorAccounts>>> = ({ signal }) => listSensorAccounts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListSensorAccountsQueryResult = NonNullable<Awaited<ReturnType<typeof listSensorAccounts>>>
+export type ListSensorAccountsQueryError = ErrorType<unknown>
+
+
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSensorAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listSensorAccounts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSensorAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listSensorAccounts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the signed-in user's organization's vendor sensor accounts
+ */
+
+export function useListSensorAccounts<TData = Awaited<ReturnType<typeof listSensorAccounts>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSensorAccounts>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListSensorAccountsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateSensorAccountUrl = () => {
+
+
+
+
+  return `/api/sensor-accounts`
+}
+
+/**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+export const createSensorAccount = async (createSensorAccountRequest: CreateSensorAccountRequest, options?: RequestInit): Promise<SensorAccount> => {
+
+  return customFetch<SensorAccount>(getCreateSensorAccountUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createSensorAccountRequest,)
+  }
+);}
+
+
+
+
+export const getCreateSensorAccountMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext> => {
+
+const mutationKey = ['createSensorAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSensorAccount>>, {data: BodyType<CreateSensorAccountRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSensorAccount(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSensorAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createSensorAccount>>>
+    export type CreateSensorAccountMutationBody = BodyType<CreateSensorAccountRequest>
+    export type CreateSensorAccountMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a vendor sensor account, encrypting the credential at rest
+ */
+export const useCreateSensorAccount = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSensorAccount>>, TError,{data: BodyType<CreateSensorAccountRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createSensorAccount>>,
+        TError,
+        {data: BodyType<CreateSensorAccountRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateSensorAccountMutationOptions(options), queryClient);
+    }
+
+export const getTestSensorAccountConnectionUrl = (id: number,) => {
+
+
+
+
+  return `/api/sensor-accounts/${id}/test-connection`
+}
+
+/**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const testSensorAccountConnection = async (id: number, options?: RequestInit): Promise<SensorAccountConnectionResult> => {
+
+  return customFetch<SensorAccountConnectionResult>(getTestSensorAccountConnectionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getTestSensorAccountConnectionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['testSensorAccountConnection'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testSensorAccountConnection>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  testSensorAccountConnection(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestSensorAccountConnectionMutationResult = NonNullable<Awaited<ReturnType<typeof testSensorAccountConnection>>>
+
+    export type TestSensorAccountConnectionMutationError = ErrorType<void>
+
+    /**
+ * @summary Test a vendor sensor account's connection. Falls through to pending_integration when no adapter exists yet for the vendor — never fakes a successful connection (SEN-003).
+
+ */
+export const useTestSensorAccountConnection = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testSensorAccountConnection>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof testSensorAccountConnection>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getTestSensorAccountConnectionMutationOptions(options), queryClient);
+    }
+
+export const getPostWizardEventUrl = () => {
+
+
+
+
+  return `/api/wizard-events`
+}
+
+/**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const postWizardEvent = async (postWizardEventRequest: PostWizardEventRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getPostWizardEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      postWizardEventRequest,)
+  }
+);}
+
+
+
+
+export const getPostWizardEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext> => {
+
+const mutationKey = ['postWizardEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postWizardEvent>>, {data: BodyType<PostWizardEventRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postWizardEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostWizardEventMutationResult = NonNullable<Awaited<ReturnType<typeof postWizardEvent>>>
+    export type PostWizardEventMutationBody = BodyType<PostWizardEventRequest>
+    export type PostWizardEventMutationError = ErrorType<void>
+
+    /**
+ * @summary WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+ */
+export const usePostWizardEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWizardEvent>>, TError,{data: BodyType<PostWizardEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postWizardEvent>>,
+        TError,
+        {data: BodyType<PostWizardEventRequest>},
+        TContext
+      > => {
+      return useMutation(getPostWizardEventMutationOptions(options), queryClient);
+    }
+
+export const getGetFacilityReadinessUrl = () => {
+
+
+
+
+  return `/api/facility-readiness`
+}
+
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+export const getFacilityReadiness = async ( options?: RequestInit): Promise<FacilityReadinessResponse> => {
+
+  return customFetch<FacilityReadinessResponse>(getGetFacilityReadinessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFacilityReadinessQueryKey = () => {
+    return [
+    `/api/facility-readiness`
+    ] as const;
+    }
+
+
+export const getGetFacilityReadinessQueryOptions = <TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFacilityReadinessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFacilityReadiness>>> = ({ signal }) => getFacilityReadiness({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFacilityReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof getFacilityReadiness>>>
+export type GetFacilityReadinessQueryError = ErrorType<void>
+
+
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFacilityReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getFacilityReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFacilityReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getFacilityReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
+
+ */
+
+export function useGetFacilityReadiness<TData = Awaited<ReturnType<typeof getFacilityReadiness>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFacilityReadiness>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetFacilityReadinessQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPostFacilityReadinessEventUrl = () => {
+
+
+
+
+  return `/api/facility-readiness/events`
+}
+
+/**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const postFacilityReadinessEvent = async (recordReadinessEventRequest: RecordReadinessEventRequest, options?: RequestInit): Promise<PostFacilityReadinessEvent200 | PostFacilityReadinessEvent201> => {
+
+  return customFetch<PostFacilityReadinessEvent200 | PostFacilityReadinessEvent201>(getPostFacilityReadinessEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      recordReadinessEventRequest,)
+  }
+);}
+
+
+
+
+export const getPostFacilityReadinessEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext> => {
+
+const mutationKey = ['postFacilityReadinessEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, {data: BodyType<RecordReadinessEventRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postFacilityReadinessEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostFacilityReadinessEventMutationResult = NonNullable<Awaited<ReturnType<typeof postFacilityReadinessEvent>>>
+    export type PostFacilityReadinessEventMutationBody = BodyType<RecordReadinessEventRequest>
+    export type PostFacilityReadinessEventMutationError = ErrorType<void>
+
+    /**
+ * @summary Record (or, with `undo: true`, reverse) a checklist-relevant event. Insert-or-update on (facilityId, eventKey) — a re-fired event refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+
+ */
+export const usePostFacilityReadinessEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postFacilityReadinessEvent>>, TError,{data: BodyType<RecordReadinessEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postFacilityReadinessEvent>>,
+        TError,
+        {data: BodyType<RecordReadinessEventRequest>},
+        TContext
+      > => {
+      return useMutation(getPostFacilityReadinessEventMutationOptions(options), queryClient);
     }
 

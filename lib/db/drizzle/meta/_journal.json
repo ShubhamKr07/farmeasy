@@ -99,6 +99,27 @@
       "when": 1785200100000,
       "tag": "0013_cast_user_id_columns_to_uuid",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785608165787,
+      "tag": "0014_demonic_kree",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785608166787,
+      "tag": "0015_backfill_default_organization",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785608167787,
+      "tag": "0016_enforce_tenancy_not_null_constraints",
+      "breakpoints": true
     }
   ]
 }

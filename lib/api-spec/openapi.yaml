@@ -30,6 +30,14 @@ tags:
     description: Photo upload and signed-URL resolution
   - name: layout
     description: Facility layout management
+  - name: facilities
+    description: Onboarding wizard facility creation and existence check
+  - name: wizard
+    description: Onboarding wizard resume/progress tracking
+  - name: sensor-accounts
+    description: Vendor sensor account credentials and connection testing
+  - name: wizard-events
+    description: WIZ-006 fire-and-forget onboarding wizard step telemetry (view/save/abandon/skip)
 paths:
   /healthz:
     get:
@@ -976,6 +984,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Sensor"
 
+  /sensors/bulk:
+    post:
+      operationId: bulkCreateSensors
+      tags: [sensors]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateSensorsRequest"
+      responses:
+        "201":
+          description: One sensor row created per (type × placement target)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkCreateSensorsResponse"
+
   /sensor-readings:
     get:
       operationId: listSensorReadings
@@ -1276,6 +1301,210 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FacilityLog"
+
+  /facilities:
+    post:
+      operationId: createFacility
+      tags: [facilities]
+      summary: W2 — create organization, facility, and the 3 index-1 rooms in one transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFacilityRequest"
+      responses:
+        "201":
+          description: Facility created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFacilityResponse"
+        "409":
+          description: Signed-in user already belongs to a facility
+
+  /facilities/me:
+    get:
+      operationId: getMyFacility
+      tags: [facilities]
+      summary: Facility-existence check for the signed-in user (wizard gate)
+      responses:
+        "200":
+          description: The signed-in user's facility, or null if they have none yet
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Facility"
+                  - type: "null"
+
+  /wizard/progress:
+    get:
+      operationId: getWizardProgress
+      tags: [wizard]
+      summary: Resume support — the signed-in user's current wizard step + saved draft data
+      responses:
+        "200":
+          description: The signed-in user's wizard progress, or null if the wizard hasn't been started yet
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WizardProgress"
+                  - type: "null"
+    put:
+      operationId: putWizardProgress
+      tags: [wizard]
+      summary: Save the current step's draft data and/or advance currentStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWizardProgressRequest"
+      responses:
+        "200":
+          description: The updated wizard progress row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WizardProgress"
+
+  /sensor-accounts:
+    get:
+      operationId: listSensorAccounts
+      tags: [sensor-accounts]
+      summary: List the signed-in user's organization's vendor sensor accounts
+      responses:
+        "200":
+          description: The organization's sensor accounts (never includes credentials)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SensorAccount"
+    post:
+      operationId: createSensorAccount
+      tags: [sensor-accounts]
+      summary: Create a vendor sensor account, encrypting the credential at rest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSensorAccountRequest"
+      responses:
+        "201":
+          description: Sensor account created (never returns the credential)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorAccount"
+        "409":
+          description: Signed-in user has no facility yet
+
+  /sensor-accounts/{id}/test-connection:
+    post:
+      operationId: testSensorAccountConnection
+      tags: [sensor-accounts]
+      summary: >
+        Test a vendor sensor account's connection. Falls through to
+        pending_integration when no adapter exists yet for the vendor —
+        never fakes a successful connection (SEN-003).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorAccountConnectionResult"
+        "404":
+          description: Sensor account not found
+        "409":
+          description: Signed-in user has no facility yet
+        "429":
+          description: Too many connection tests for this user
+
+  /wizard-events:
+    post:
+      operationId: postWizardEvent
+      tags: [wizard-events]
+      summary: WIZ-006 fire-and-forget step telemetry (view/save/abandon/skip)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostWizardEventRequest"
+      responses:
+        "202":
+          description: Event recorded (no response body)
+        "429":
+          description: Too many telemetry events for this user
+
+  /facility-readiness:
+    get:
+      operationId: getFacilityReadiness
+      tags: [facility-readiness]
+      summary: >
+        Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003).
+        `completedCount` is always exactly the number of `items` whose
+        `state` is "done" — derived from the same array returned in this
+        response, never an independently-maintained number.
+      responses:
+        "200":
+          description: The signed-in user's facility readiness checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilityReadinessResponse"
+        "409":
+          description: Signed-in user has no facility yet
+
+  /facility-readiness/events:
+    post:
+      operationId: postFacilityReadinessEvent
+      tags: [facility-readiness]
+      summary: >
+        Record (or, with `undo: true`, reverse) a checklist-relevant event.
+        Insert-or-update on (facilityId, eventKey) — a re-fired event
+        refreshes `occurredAt` / clears `undoneAt` rather than erroring.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordReadinessEventRequest"
+      responses:
+        "201":
+          description: Event recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "200":
+          description: Event undone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "409":
+          description: Signed-in user has no facility yet
 
 components:
   schemas:
@@ -1791,6 +2020,171 @@ components:
           type: string
       required: [id, logType, data, createdAt]
 
+    CreateFacilityRequest:
+      type: object
+      required: [farmName, timezone, units, currency]
+      properties:
+        farmName: { type: string, minLength: 1 }
+        facilityName: { type: string, minLength: 1 }
+        timezone: { type: string }
+        units: { type: string, enum: [metric, imperial] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+
+    CreateFacilityResponse:
+      type: object
+      properties:
+        facilityId: { type: integer }
+        organizationId: { type: integer }
+      required: [facilityId, organizationId]
+
+    Facility:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        organizationId:
+          type: integer
+        facilityName:
+          type: string
+        timezone:
+          type: string
+        units:
+          type: string
+          enum: [metric, imperial]
+        currency:
+          type: string
+      required: [id, name, organizationId, facilityName, timezone, units, currency]
+
+    WizardProgress:
+      type: object
+      properties:
+        currentStep:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        stepData:
+          type: object
+          additionalProperties: true
+      required: [currentStep, stepData]
+
+    PutWizardProgressRequest:
+      type: object
+      properties:
+        currentStep:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        stepData:
+          type: object
+          additionalProperties: true
+      required: [currentStep]
+
+    PostWizardEventRequest:
+      type: object
+      required: [step, eventType]
+      properties:
+        step:
+          type: string
+          enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
+        eventType:
+          type: string
+          enum: [view, save, abandon, skip]
+
+    CreateSensorAccountRequest:
+      type: object
+      required: [vendor, authMethod, credential]
+      properties:
+        vendor: { type: string, minLength: 1 }
+        authMethod: { type: string, enum: [api_key, oauth, username_password] }
+        credential:
+          type: string
+          minLength: 1
+          description: >
+            API key, or JSON-stringified username/password — encrypted
+            before storage, never persisted or returned in plaintext.
+
+    SensorAccount:
+      type: object
+      description: >
+        Vendor sensor account, deliberately excluding credentialCiphertext —
+        the handler explicitly selects columns rather than select-all
+        (SEN-002) so credentials can never leak into a response.
+      properties:
+        id:
+          type: integer
+        vendor:
+          type: string
+        authMethod:
+          type: string
+          enum: [api_key, oauth, username_password]
+        status:
+          type: string
+          enum: [connected, failed, pending_integration]
+        maskedFingerprint:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, vendor, authMethod, status, maskedFingerprint]
+
+    SensorAccountConnectionResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [connected, failed, pending_integration]
+      required: [status]
+
+    FacilityReadinessItem:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        state:
+          type: string
+          enum: [pending, interim, done, skipped]
+        deepLink:
+          type: ["string", "null"]
+        count:
+          type: integer
+      required: [key, label, state]
+
+    FacilityReadinessResponse:
+      type: object
+      description: >
+        `completedCount` is derived by filtering `items` for `state ===
+        "done"` — by construction, not an independently-tracked number — so
+        it can never diverge from the actual number of done items.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityReadinessItem"
+        completedCount:
+          type: integer
+      required: [items, completedCount]
+
+    RecordReadinessEventRequest:
+      type: object
+      required: [eventKey]
+      properties:
+        eventKey:
+          type: string
+          enum:
+            [
+              labels_downloaded,
+              labels_scanned,
+              grow_profile_created,
+              seeds_added,
+              first_cycle_seeded,
+              sensors_skipped,
+              quickbooks_skipped,
+              team_invited,
+            ]
+        undo:
+          type: boolean
+
     ActionRequiredItem:
       type: object
       properties:
@@ -2284,6 +2678,14 @@ components:
         rackId:
           type: integer
           nullable: true
+        roomId:
+          type: integer
+          nullable: true
+        facilityWide:
+          type: boolean
+        sensorAccountId:
+          type: integer
+          nullable: true
         type:
           type: string
           enum: [temp, ph, water, humidity, ec]
@@ -2318,6 +2720,24 @@ components:
         unit:
           type: string
       required: [type, label]
+
+    BulkCreateSensorsRequest:
+      type: object
+      required: [label, types]
+      properties:
+        label: { type: string }
+        types: { type: array, items: { type: string, enum: [temp, ph, water, humidity, ec] }, minItems: 1 }
+        channelIds: { type: array, items: { type: integer } }
+        rackIds: { type: array, items: { type: integer } }
+        roomId: { type: integer }
+        facilityWide: { type: boolean }
+        sensorAccountId: { type: integer, nullable: true }
+    BulkCreateSensorsResponse:
+      type: object
+      properties:
+        created:
+          type: array
+          items: { $ref: "#/components/schemas/Sensor" }
 
     SensorReading:
       type: object

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "./lib/supabase";
-import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter, useGetWizardProgress } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
@@ -20,6 +20,7 @@ import { Accounting } from "@/pages/accounting/Accounting";
 import { Layout } from "@/pages/layout/Layout";
 import { Profile } from "@/pages/profile/Profile";
 import { Settings } from "@/pages/settings/Settings";
+import { Wizard } from "@/pages/onboarding/Wizard";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 if (apiBaseUrl) setBaseUrl(apiBaseUrl);
@@ -71,12 +72,7 @@ function AuthGate() {
   const [busy, setBusy] = useState(false);
 
   if (loading) {
-    return (
-      <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-        <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
-        <span>Loading…</span>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!session) {
@@ -139,7 +135,43 @@ function AuthGate() {
     );
   }
 
-  return <Router />;
+  return <FacilityGate />;
+}
+
+/**
+ * Shared full-screen loading state (auth-session check, facility-existence
+ * check) — same visual treatment as the original inline `AuthGate` loading
+ * branch, just reusable.
+ */
+function LoadingScreen() {
+  return (
+    <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
+      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
+      <span>Loading…</span>
+    </div>
+  );
+}
+
+/**
+ * Wizard-completion guard (WIZ-001). Runs once the user is signed in: a
+ * user who hasn't finished the wizard (no wizard_progress row yet, or a row
+ * whose currentStep isn't "done") gets routed into the onboarding wizard
+ * instead of any dashboard content; a user who has finished it
+ * (currentStep === "done") gets the normal <Router/>. Gating on wizard
+ * completion (not facility-existence) is what makes resume/re-entry work:
+ * a user who submits farm_basics (which creates their facility) and then
+ * abandons on a later step must still be routed back into the wizard on
+ * their next sign-in, even though a facility already exists for them.
+ * <Wizard/> has no wouter routes of its own, so this same gate — since it
+ * wraps <Router/> entirely — also catches any deep link into /cycles,
+ * /inventory, etc. and redirects it back into the wizard until W4
+ * completes, with no per-route guard duplication needed.
+ */
+function FacilityGate() {
+  const { data: progress, isLoading } = useGetWizardProgress();
+  if (isLoading) return <LoadingScreen />;
+  if (progress?.currentStep !== "done") return <Wizard />; // wizard incomplete -> wizard, no dashboard content
+  return <Router />; // existing dashboard routes
 }
 
 /**

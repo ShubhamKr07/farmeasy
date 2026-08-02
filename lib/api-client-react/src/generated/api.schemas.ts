@@ -333,6 +333,229 @@ export interface FacilityLog {
   createdAt: string;
 }
 
+export type CreateFacilityRequestUnits = typeof CreateFacilityRequestUnits[keyof typeof CreateFacilityRequestUnits];
+
+
+export const CreateFacilityRequestUnits = {
+  metric: 'metric',
+  imperial: 'imperial',
+} as const;
+
+export interface CreateFacilityRequest {
+  /** @minLength 1 */
+  farmName: string;
+  /** @minLength 1 */
+  facilityName?: string;
+  timezone: string;
+  units: CreateFacilityRequestUnits;
+  /**
+     * @minLength 3
+     * @maxLength 3
+     */
+  currency: string;
+}
+
+export interface CreateFacilityResponse {
+  facilityId: number;
+  organizationId: number;
+}
+
+export type FacilityUnits = typeof FacilityUnits[keyof typeof FacilityUnits];
+
+
+export const FacilityUnits = {
+  metric: 'metric',
+  imperial: 'imperial',
+} as const;
+
+export interface Facility {
+  id: number;
+  name: string;
+  organizationId: number;
+  facilityName: string;
+  timezone: string;
+  units: FacilityUnits;
+  currency: string;
+}
+
+export type WizardProgressCurrentStep = typeof WizardProgressCurrentStep[keyof typeof WizardProgressCurrentStep];
+
+
+export const WizardProgressCurrentStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type WizardProgressStepData = { [key: string]: unknown };
+
+export interface WizardProgress {
+  currentStep: WizardProgressCurrentStep;
+  stepData: WizardProgressStepData;
+}
+
+export type PutWizardProgressRequestCurrentStep = typeof PutWizardProgressRequestCurrentStep[keyof typeof PutWizardProgressRequestCurrentStep];
+
+
+export const PutWizardProgressRequestCurrentStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type PutWizardProgressRequestStepData = { [key: string]: unknown };
+
+export interface PutWizardProgressRequest {
+  currentStep: PutWizardProgressRequestCurrentStep;
+  stepData?: PutWizardProgressRequestStepData;
+}
+
+export type PostWizardEventRequestStep = typeof PostWizardEventRequestStep[keyof typeof PostWizardEventRequestStep];
+
+
+export const PostWizardEventRequestStep = {
+  farm_basics: 'farm_basics',
+  layout: 'layout',
+  sensors_accounts: 'sensors_accounts',
+  sensors_devices: 'sensors_devices',
+  sensors_review: 'sensors_review',
+  done: 'done',
+} as const;
+
+export type PostWizardEventRequestEventType = typeof PostWizardEventRequestEventType[keyof typeof PostWizardEventRequestEventType];
+
+
+export const PostWizardEventRequestEventType = {
+  view: 'view',
+  save: 'save',
+  abandon: 'abandon',
+  skip: 'skip',
+} as const;
+
+export interface PostWizardEventRequest {
+  step: PostWizardEventRequestStep;
+  eventType: PostWizardEventRequestEventType;
+}
+
+export type CreateSensorAccountRequestAuthMethod = typeof CreateSensorAccountRequestAuthMethod[keyof typeof CreateSensorAccountRequestAuthMethod];
+
+
+export const CreateSensorAccountRequestAuthMethod = {
+  api_key: 'api_key',
+  oauth: 'oauth',
+  username_password: 'username_password',
+} as const;
+
+export interface CreateSensorAccountRequest {
+  /** @minLength 1 */
+  vendor: string;
+  authMethod: CreateSensorAccountRequestAuthMethod;
+  /**
+     * API key, or JSON-stringified username/password — encrypted before storage, never persisted or returned in plaintext.
+
+     * @minLength 1
+     */
+  credential: string;
+}
+
+export type SensorAccountAuthMethod = typeof SensorAccountAuthMethod[keyof typeof SensorAccountAuthMethod];
+
+
+export const SensorAccountAuthMethod = {
+  api_key: 'api_key',
+  oauth: 'oauth',
+  username_password: 'username_password',
+} as const;
+
+export type SensorAccountStatus = typeof SensorAccountStatus[keyof typeof SensorAccountStatus];
+
+
+export const SensorAccountStatus = {
+  connected: 'connected',
+  failed: 'failed',
+  pending_integration: 'pending_integration',
+} as const;
+
+/**
+ * Vendor sensor account, deliberately excluding credentialCiphertext — the handler explicitly selects columns rather than select-all (SEN-002) so credentials can never leak into a response.
+
+ */
+export interface SensorAccount {
+  id: number;
+  vendor: string;
+  authMethod: SensorAccountAuthMethod;
+  status: SensorAccountStatus;
+  /** @nullable */
+  maskedFingerprint: string | null;
+  createdAt?: string;
+}
+
+export type SensorAccountConnectionResultStatus = typeof SensorAccountConnectionResultStatus[keyof typeof SensorAccountConnectionResultStatus];
+
+
+export const SensorAccountConnectionResultStatus = {
+  connected: 'connected',
+  failed: 'failed',
+  pending_integration: 'pending_integration',
+} as const;
+
+export interface SensorAccountConnectionResult {
+  status: SensorAccountConnectionResultStatus;
+}
+
+export type FacilityReadinessItemState = typeof FacilityReadinessItemState[keyof typeof FacilityReadinessItemState];
+
+
+export const FacilityReadinessItemState = {
+  pending: 'pending',
+  interim: 'interim',
+  done: 'done',
+  skipped: 'skipped',
+} as const;
+
+export interface FacilityReadinessItem {
+  key: string;
+  label: string;
+  state: FacilityReadinessItemState;
+  /** @nullable */
+  deepLink?: string | null;
+  count?: number;
+}
+
+/**
+ * `completedCount` is derived by filtering `items` for `state === "done"` — by construction, not an independently-tracked number — so it can never diverge from the actual number of done items.
+
+ */
+export interface FacilityReadinessResponse {
+  items: FacilityReadinessItem[];
+  completedCount: number;
+}
+
+export type RecordReadinessEventRequestEventKey = typeof RecordReadinessEventRequestEventKey[keyof typeof RecordReadinessEventRequestEventKey];
+
+
+export const RecordReadinessEventRequestEventKey = {
+  labels_downloaded: 'labels_downloaded',
+  labels_scanned: 'labels_scanned',
+  grow_profile_created: 'grow_profile_created',
+  seeds_added: 'seeds_added',
+  first_cycle_seeded: 'first_cycle_seeded',
+  sensors_skipped: 'sensors_skipped',
+  quickbooks_skipped: 'quickbooks_skipped',
+  team_invited: 'team_invited',
+} as const;
+
+export interface RecordReadinessEventRequest {
+  eventKey: RecordReadinessEventRequestEventKey;
+  undo?: boolean;
+}
+
 export type AlertSeverity = typeof AlertSeverity[keyof typeof AlertSeverity];
 
 
@@ -689,6 +912,9 @@ export interface Sensor {
   id: number;
   channelId?: number | null;
   rackId?: number | null;
+  roomId?: number | null;
+  facilityWide?: boolean;
+  sensorAccountId?: number | null;
   type: SensorType;
   label: string;
   unit?: string | null;
@@ -714,6 +940,32 @@ export interface SensorInput {
   type: SensorInputType;
   label: string;
   unit?: string;
+}
+
+export type BulkCreateSensorsRequestTypesItem = typeof BulkCreateSensorsRequestTypesItem[keyof typeof BulkCreateSensorsRequestTypesItem];
+
+
+export const BulkCreateSensorsRequestTypesItem = {
+  temp: 'temp',
+  ph: 'ph',
+  water: 'water',
+  humidity: 'humidity',
+  ec: 'ec',
+} as const;
+
+export interface BulkCreateSensorsRequest {
+  label: string;
+  /** @minItems 1 */
+  types: BulkCreateSensorsRequestTypesItem[];
+  channelIds?: number[];
+  rackIds?: number[];
+  roomId?: number;
+  facilityWide?: boolean;
+  sensorAccountId?: number | null;
+}
+
+export interface BulkCreateSensorsResponse {
+  created?: Sensor[];
 }
 
 export interface SensorReading {
@@ -939,4 +1191,12 @@ export const ListMetricsRange = {
   custom: 'custom',
   all: 'all',
 } as const;
+
+export type PostFacilityReadinessEvent200 = {
+  ok: boolean;
+};
+
+export type PostFacilityReadinessEvent201 = {
+  ok: boolean;
+};
 

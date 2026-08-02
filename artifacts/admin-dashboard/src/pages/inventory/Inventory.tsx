@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   useListInventory,
   useCreateInventoryItem,
@@ -183,6 +183,25 @@ export function Inventory() {
   // these above the loading/error early returns below.
   const { selected, selectable, toggle, reorder, reset } = useMetricSelection("inventory");
   const [range, setRange] = useState<MetricRange>("30d");
+
+  useEffect(() => {
+    // CHK-002: the Farm Readiness card's "Add seeds with QR" deep link is
+    // /inventory?category=Seeds (Task 12's backend, already shipped) — open
+    // the Add Item modal pre-set to that category instead of just navigating
+    // to a blank Inventory page.
+    const params = new URLSearchParams(window.location.search);
+    const category = params.get("category");
+    if (category) {
+      setIsAddModalOpen(true);
+      form.setValue("category", category);
+      params.delete("category");
+      const newSearch = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (newSearch ? `?${newSearch}` : ""));
+    }
+    // Intentionally empty deps — this is a one-time "consume the query param
+    // this page was navigated to with" effect, not a reactive subscription.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Only gate on inventory: dashboard is supplementary (seed-lot/crop counts,
   // seed-lot table) and its own errors/slowness must not blank the whole tab.
