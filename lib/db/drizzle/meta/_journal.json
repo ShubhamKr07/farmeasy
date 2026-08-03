@@ -162,6 +162,20 @@
       "when": 1785780226394,
       "tag": "0022_inventory_item_code_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785781255524,
+      "tag": "0023_seed_lots_facility_scoping",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785781255624,
+      "tag": "0024_seed_lots_qr_code_backfill_and_contract",
+      "breakpoints": true
     }
   ]
 }

@@ -179,22 +179,30 @@ export const growthProfilesTable = pgTable("growth_profiles", {
   ],
 );
 
-export const seedLotsTable = pgTable("seed_lots", {
-  id: serial("id").primaryKey(),
-  qrCode: text("qr_code").notNull().unique(),
-  seedName: text("seed_name").notNull(),
-  supplier: text("supplier"),
-  productLink: text("product_link"),
-  itemNumber: text("item_number"),
-  vendorShort: text("vendor_short"),
-  gpcCode: text("gpc_code"),
-  type: text("type"),
-  success: numeric("success"),
-  growTime: numeric("grow_time"),
-  usedIn: text("used_in"),
-  currentlyGrown: boolean("currently_grown"),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const seedLotsTable = pgTable(
+  "seed_lots",
+  {
+    id: serial("id").primaryKey(),
+    facilityId: integer("facility_id").notNull().references(() => facilitiesTable.id, { onDelete: "cascade" }),
+    qrCode: text("qr_code").notNull(), // .unique() REMOVED — replaced by the per-facility composite below
+    seedName: text("seed_name").notNull(),
+    supplier: text("supplier"),
+    productLink: text("product_link"),
+    itemNumber: text("item_number"),
+    vendorShort: text("vendor_short"),
+    gpcCode: text("gpc_code"),
+    type: text("type"),
+    success: numeric("success"),
+    growTime: numeric("grow_time"),
+    usedIn: text("used_in"),
+    currentlyGrown: boolean("currently_grown"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("seed_lots_facility_id_qr_code_uniq").on(table.facilityId, table.qrCode),
+    index("seed_lots_facility_id_idx").on(table.facilityId),
+  ],
+);
 
 export const cyclesTable = pgTable(
   "cycles",

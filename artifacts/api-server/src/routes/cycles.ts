@@ -357,6 +357,7 @@ router.post("/cycles/:id/fertigation", enforceAuth, async (req, res) => {
       }
     }
 
+    // Compares against this cycle's own stored array, not a fresh seed_lots lookup — no cross-facility ambiguity here (see seedLots.ts for the query that did need rescoping).
     const qrCodes = cycle.seedLotQrCodes ?? [];
     if (body.seedLotQrCode && qrCodes.length > 0 && !qrCodes.includes(body.seedLotQrCode)) {
       return res
