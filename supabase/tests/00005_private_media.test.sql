@@ -68,15 +68,21 @@ insert into auth.users (
 );
 
 -- growth_profile (crop_id deliberately NULL — nullable, not needed).
-insert into growth_profiles (name, seed_name, germination_days, fertigation_days)
-values ('task12-gp', 'task12-seed', 1, 2);
+-- organization_id: MT-M0 (2026-08-03) made this NOT NULL; reuse the seeded
+-- default org (id 1) rather than inserting a new one, matching the pilot-
+-- default-facility pattern used elsewhere in this milestone.
+insert into growth_profiles (name, seed_name, germination_days, fertigation_days, organization_id)
+values ('task12-gp', 'task12-seed', 1, 2, (select id from organizations order by id limit 1));
 
 -- cycle referencing the growth profile.
-insert into cycles (short_id, seed_lot_qr_codes, seed_name, seed_weight_tray, growth_profile_id, seeding_date)
+-- facility_id: MT-M0 (2026-08-03) made this NOT NULL; reuse the seeded
+-- default facility (id 1), same pilot-default pattern as organization_id above.
+insert into cycles (short_id, seed_lot_qr_codes, seed_name, seed_weight_tray, growth_profile_id, seeding_date, facility_id)
 values (
   'task12-cycle', ARRAY['task12-qr'], 'task12-seed', 1.0,
   (select id from growth_profiles where name = 'task12-gp'),
-  '2026-01-01'
+  '2026-01-01',
+  (select id from facilities order by id limit 1)
 );
 
 -- storage.objects: the REAL object names the backfill verifies against.
@@ -135,7 +141,9 @@ insert into bad_tray_entries (cycle_id, photo_urls, issue) values (
 -- already-new bucket-relative key (unchanged) + external CDN URL (unchanged).
 -- Other data fields are present to prove jsonb_set touches ONLY the photoUrls
 -- path and leaves everything else intact.
-insert into facility_logs (log_type, user_id, data, notes) values (
+-- facility_id: MT-M0 (2026-08-03) made this NOT NULL; reuse the seeded
+-- default facility (id 1), same pilot-default pattern used above.
+insert into facility_logs (log_type, user_id, data, notes, facility_id) values (
   'waste',
   '77777777-7777-7777-7777-777777777777',
   jsonb_build_object(
@@ -149,17 +157,19 @@ insert into facility_logs (log_type, user_id, data, notes) values (
     'unit', 'kg',
     'disposalMethod', 'compost'
   ),
-  'fl-rowE-waste-mix'
+  'fl-rowE-waste-mix',
+  (select id from facilities order by id limit 1)
 );
 
 -- facility_logs row F (env_check): a NON-photo log type (no photoUrls key).
 -- The backfill's WHERE (data ? 'photoUrls') excludes it entirely; assert the
 -- whole data blob is untouched.
-insert into facility_logs (log_type, user_id, data, notes) values (
+insert into facility_logs (log_type, user_id, data, notes, facility_id) values (
   'env_check',
   '77777777-7777-7777-7777-777777777777',
   jsonb_build_object('zone', 'zone-A', 'tempC', 21.5),
-  'fl-rowF-envcheck'
+  'fl-rowF-envcheck',
+  (select id from facilities order by id limit 1)
 );
 
 -- ──────────────────────────────────────────────────────────────────────────
