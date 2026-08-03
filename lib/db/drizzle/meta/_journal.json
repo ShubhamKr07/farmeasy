@@ -148,6 +148,20 @@
       "when": 1785778976093,
       "tag": "0020_enforce_tenancy_scoping_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785780226294,
+      "tag": "0021_inventory_item_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785780226394,
+      "tag": "0022_inventory_item_code_backfill",
+      "breakpoints": true
     }
   ]
 }

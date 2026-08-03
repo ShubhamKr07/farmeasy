@@ -185,6 +185,37 @@ describe(
       strictEqual(res.body.maxQty, 0);
     });
 
+    // ── item_code (per-facility short id, Task 5) ──────────────────────────────
+
+    test("assigns a 4-char hex itemCode on create", async () => {
+      const { app } = await setup();
+      const res = await request(app).post("/api/inventory").send({ name: "Coded Seeds" });
+      strictEqual(res.status, 201);
+      // generateShortId() yields a lowercase 4-hex-char string (same shape as
+      // cycles.shortId / shipments.shortId); the handler surfaces it via
+      // formatItem. Not null, exactly 4 hex chars.
+      ok(typeof res.body.itemCode === "string", "itemCode must be a string");
+      ok(/^[0-9a-f]{4}$/.test(res.body.itemCode), `itemCode "${res.body.itemCode}" is not 4 hex chars`);
+    });
+
+    test("assigns distinct itemCodes within the same facility", async () => {
+      const { app } = await setup();
+      // All three resolve to the pilot-default facility (same handler path),
+      // so the composite UNIQUE(facility_id, item_code) + app-layer retry
+      // loop must keep them distinct — a collision re-rolls via
+      // onConflictDoNothing until the insert returns a row.
+      const codes: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const res = await request(app)
+          .post("/api/inventory")
+          .send({ name: `Item ${i}` });
+        strictEqual(res.status, 201, `create ${i} should succeed`);
+        ok(typeof res.body.itemCode === "string", `itemCode ${i} must be a string`);
+        codes.push(res.body.itemCode);
+      }
+      strictEqual(new Set(codes).size, codes.length, `itemCodes must be distinct: ${codes.join(",")}`);
+    });
+
     // ── PATCH validation against merged state ────────────────────────────────
 
     test("rejects PATCH currentQty above stored maxQty", async () => {

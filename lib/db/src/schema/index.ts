@@ -292,10 +292,17 @@ export const inventoryItemsTable = pgTable("inventory_items", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
   facilityId: integer("facility_id").notNull().references(() => facilitiesTable.id, { onDelete: "cascade" }),
+  // Per-facility short business identifier (4-hex-char, same shape as
+  // cycles.shortId / shipments.shortId). Nullable: new rows always get one via
+  // the app-layer retry loop in POST /inventory (onConflictDoNothing); the
+  // composite unique index below scopes uniqueness per facility, so the same
+  // 4-char code can legitimately recur across different facilities.
+  itemCode: text("item_code"),
 },
   (table) => [
     index("inventory_items_facility_id_idx").on(table.facilityId),
     index("inventory_category_idx").on(table.category),
+    uniqueIndex("inventory_items_facility_id_item_code_uniq").on(table.facilityId, table.itemCode),
     check("inventory_qty_range", sql`${table.currentQty} <= ${table.maxQty}`),
   ],
 );
