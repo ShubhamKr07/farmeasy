@@ -95,10 +95,53 @@ export const userRoleEnum = pgEnum("user_role", [
 export const usersTable = pgTable("users", {
   id: uuid("id").primaryKey(), // matches auth.users.id — not generated here, Supabase owns it
   email: text("email").notNull(),
+  // DEPRECATED (MT-M0): superseded by organization_members.role. Not yet
+  // read/written by new code; not yet dropped. See ADR-005.
   role: userRoleEnum("role").notNull().default("technician"),
+  // DEPRECATED (MT-M0): superseded by organization_members.organization_id.
+  // Not yet read/written by new code; not yet dropped. See ADR-005.
   organizationId: integer("organization_id").references(() => organizationsTable.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const orgMemberRoleEnum = pgEnum("org_member_role", [
+  "owner",
+  "admin",
+  "technician",
+]);
+
+export const orgMemberStatusEnum = pgEnum("org_member_status", [
+  "active",
+  "removed",
+]);
+
+// organization_members — the real source of truth for org membership + role
+// (ADR-005 §9.1: owner | admin | technician). users.role / users.organizationId
+// (above) are deprecated by this table but NOT dropped yet — every reader gets
+// repointed in MT-M1/MT-M2 before a later migration drops the old columns
+// (expand-before-contract, same pattern as the rooms.facility_id rollout).
+export const organizationMembersTable = pgTable(
+  "organization_members",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organizationsTable.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    role: orgMemberRoleEnum("role").notNull(),
+    status: orgMemberStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // Exactly one organization per user in v1 (PRD TEN-001: "a user holds
+    // membership in exactly one organization ... multi-org users are out of
+    // scope"). This is the constraint that enforces it at the DB layer.
+    uniqueIndex("organization_members_user_id_uniq").on(table.userId),
+    index("organization_members_organization_id_idx").on(table.organizationId),
+  ],
+);
 
 export const cropsTable = pgTable("crops", {
   id: serial("id").primaryKey(),
