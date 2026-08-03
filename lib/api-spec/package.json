@@ -7,6 +7,6 @@
   },
   "devDependencies": {
     "@tanstack/react-query": "catalog:",
-    "orval": "^8.9.1"
+    "orval": "^8.23.0"
   }
 }
