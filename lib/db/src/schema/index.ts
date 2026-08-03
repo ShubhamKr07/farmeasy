@@ -172,7 +172,12 @@ export const growthProfilesTable = pgTable("growth_profiles", {
   expectedYieldPerTrayKg: numeric("expected_yield_per_tray_kg"),
   seedDensityGramsPerTray: numeric("seed_density_grams_per_tray"),
   trayType: text("tray_type"),
-});
+  organizationId: integer("organization_id").references(() => organizationsTable.id, { onDelete: "cascade" }),
+},
+  (table) => [
+    index("growth_profiles_organization_id_idx").on(table.organizationId),
+  ],
+);
 
 export const seedLotsTable = pgTable("seed_lots", {
   id: serial("id").primaryKey(),
@@ -217,8 +222,10 @@ export const cyclesTable = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
     deletedAt: timestamp("deleted_at"),
+    facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
   },
   (table) => [
+    index("cycles_facility_id_idx").on(table.facilityId),
     index("cycles_status_idx").on(table.status),
     index("cycles_closed_at_idx").on(table.closedAt),
     index("cycles_created_at_idx").on(table.createdAt),
@@ -260,8 +267,10 @@ export const alertsTable = pgTable("alerts", {
   actionNotes: text("action_notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
+  facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
 },
   (table) => [
+    index("alerts_facility_id_idx").on(table.facilityId),
     index("alerts_status_idx").on(table.status),
     uniqueIndex("alerts_current_title_location_uniq")
       .on(table.title, table.location)
@@ -282,8 +291,10 @@ export const inventoryItemsTable = pgTable("inventory_items", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
+  facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
 },
   (table) => [
+    index("inventory_items_facility_id_idx").on(table.facilityId),
     index("inventory_category_idx").on(table.category),
     check("inventory_qty_range", sql`${table.currentQty} <= ${table.maxQty}`),
   ],
@@ -302,8 +313,10 @@ export const shipmentsTable = pgTable("shipments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),
+  facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
 },
   (table) => [
+    index("shipments_facility_id_idx").on(table.facilityId),
     index("shipments_status_idx").on(table.status),
     index("shipments_shipping_date_idx").on(table.shippingDate),
   ],
@@ -515,8 +528,10 @@ export const sensorsTable = pgTable(
     lastValue: numeric("last_value"),
     lastReadAt: timestamp("last_read_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
   },
   (table) => [
+    index("sensors_facility_id_idx").on(table.facilityId),
     index("sensors_channel_id_idx").on(table.channelId),
     index("sensors_rack_id_idx").on(table.rackId),
     index("sensors_room_id_idx").on(table.roomId),
@@ -574,8 +589,10 @@ export const tasksTable = pgTable(
     completedAt: timestamp("completed_at"),
     userId: uuid("user_id").references(() => usersTable.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
   },
   (table) => [
+    index("tasks_facility_id_idx").on(table.facilityId),
     index("tasks_status_idx").on(table.status),
     index("tasks_due_at_idx").on(table.dueAt),
     index("tasks_cycle_id_idx").on(table.cycleId),
@@ -665,8 +682,10 @@ export const accountingConnectionsTable = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    organizationId: integer("organization_id").references(() => organizationsTable.id, { onDelete: "cascade" }),
   },
   (table) => [
+    index("accounting_connections_organization_id_idx").on(table.organizationId),
     uniqueIndex("accounting_connections_user_provider_uniq").on(
       table.userId,
       table.provider,
@@ -740,8 +759,10 @@ export const facilityLogsTable = pgTable(
     data: jsonb("data").notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
   },
   (table) => [
+    index("facility_logs_facility_id_idx").on(table.facilityId),
     index("facility_logs_type_created_at_idx").on(table.logType, table.createdAt),
   ],
 );

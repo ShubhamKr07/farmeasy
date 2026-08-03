@@ -127,6 +127,13 @@
       "when": 1785778481357,
       "tag": "0017_organization_members",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785778974093,
+      "tag": "0018_tenancy_scoping_columns",
+      "breakpoints": true
     }
   ]
 }
