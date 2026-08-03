@@ -9,7 +9,7 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 14 Drizzle migrations should have been
+-- and lib/db/scripts/migrate.mjs). All 17 Drizzle migrations should have been
 -- replayed.
 SELECT has_table(
   'drizzle',
@@ -18,8 +18,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  14,
-  'drizzle.__drizzle_migrations has exactly 14 rows (full migration history replayed)'
+  17,
+  'drizzle.__drizzle_migrations has exactly 17 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -51,16 +51,18 @@ SELECT is(
   'media bucket exists in storage.buckets'
 );
 
--- Supabase's own migration ledger should reflect the five Supabase
--- migrations (00001-00005) applied via `supabase db push --include-all`.
+-- Supabase's own migration ledger should reflect the six Supabase
+-- migrations (00001-00006) applied via `supabase db push --include-all`.
 -- 00004_create_auth_profiles.sql installs the profile-provisioning trigger
 -- and removes the self-UPDATE policy (Task 1). 00005_private_media.sql
 -- backfills legacy photo-URL references and makes the media bucket private
--- (Task 12).
+-- (Task 12). 00006_onboarding_tables_rls.sql enables RLS + revokes direct
+-- grants on the onboarding-wizard tables (organizations, wizard_progress,
+-- sensor_accounts, facility_readiness_events, wizard_events).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  5,
-  'supabase_migrations.schema_migrations has exactly 5 rows (Supabase migrations 00001-00005)'
+  6,
+  'supabase_migrations.schema_migrations has exactly 6 rows (Supabase migrations 00001-00006)'
 );
 
 SELECT * FROM finish();

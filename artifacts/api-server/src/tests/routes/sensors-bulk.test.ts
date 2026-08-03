@@ -2,9 +2,14 @@ import { describe, test } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import request from "supertest";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture } from "../helpers/testDatabase";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  closeDatabasePoolAfterTests,
+} from "../helpers/testDatabase";
 
 const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
 
 describe("POST /api/sensors/bulk", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture(["sensors", "channels", "rooms", "facilities", "organizations"]);

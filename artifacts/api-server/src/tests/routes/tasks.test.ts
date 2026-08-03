@@ -5,7 +5,10 @@ import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
+
+closeDatabasePoolAfterTests();
 
 /**
  * GET /tasks status-filter semantics (Release 1 Task 6).
