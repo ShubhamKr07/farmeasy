@@ -3,7 +3,12 @@ import { strictEqual, ok, doesNotMatch } from "node:assert";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  seedTestUser,
+  closeDatabasePoolAfterTests,
+} from "../helpers/testDatabase";
 
 /**
  * POST /sensor-accounts + GET /sensor-accounts + POST
@@ -41,6 +46,7 @@ import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../hel
  * reach the code under test instead of 409ing up front.
  */
 const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
 
 describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture(["sensor_accounts", "organizations", "users"]);

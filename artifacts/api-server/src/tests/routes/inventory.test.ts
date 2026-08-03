@@ -5,7 +5,10 @@ import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
+
+closeDatabasePoolAfterTests();
 
 /**
  * POST/PATCH /inventory payload validation + concurrency-safe PATCH

@@ -3,7 +3,12 @@ import { strictEqual, ok } from "node:assert";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  seedTestUser,
+  closeDatabasePoolAfterTests,
+} from "../helpers/testDatabase";
 
 /**
  * GET/PUT /wizard/progress (onboarding wizard Task 4, WIZ-001 resume
@@ -15,6 +20,7 @@ import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../hel
  * Gated on TEST_DATABASE_URL, same lazy-import pattern as facilities.test.ts.
  */
 const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
 
 describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture(["wizard_progress", "users"]);

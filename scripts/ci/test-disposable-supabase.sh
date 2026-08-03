@@ -46,10 +46,15 @@ pnpm exec supabase db push --db-url "$TEST_DATABASE_URL" --include-all
 pnpm exec supabase test db --db-url "$TEST_DATABASE_URL" "$ROOT/supabase/tests"
 
 # 5. Run the api-server test suite against the disposable DB.
+# ACCOUNTING_ENCRYPTION_KEY (artifacts/api-server/src/lib/accounting/crypto.ts)
+# is required at call time by encryptToken(), which sensor-accounts.test.ts
+# exercises for real against this disposable DB -- a fixed, non-secret,
+# 32+ char test-only value (never used against any real credential).
 CI=true \
 REQUIRE_TEST_DATABASE=true \
 TEST_DATABASE_URL="$TEST_DATABASE_URL" \
 DATABASE_URL="$TEST_DATABASE_URL" \
 SUPABASE_URL="$SUPABASE_URL" \
 SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+ACCOUNTING_ENCRYPTION_KEY="test-only-disposable-ci-key-not-a-real-secret-32chars" \
 pnpm --filter @workspace/api-server run test

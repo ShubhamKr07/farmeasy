@@ -3,7 +3,12 @@ import { strictEqual, ok } from "node:assert";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  seedTestUser,
+  closeDatabasePoolAfterTests,
+} from "../helpers/testDatabase";
 
 /**
  * POST /facilities + GET /facilities/me (onboarding wizard Task 2, TEN-001/TEN-003).
@@ -28,6 +33,7 @@ import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../hel
  * `seedTestUser` (helpers/testDatabase.ts) to seed both.
  */
 const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
 
 describe("POST /api/facilities", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture(["organizations", "facilities", "rooms", "users"]);

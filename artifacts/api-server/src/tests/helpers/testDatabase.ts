@@ -94,14 +94,17 @@ export interface TestDatabaseHandle {
  * against the disposable Supabase stack: status=done saw 2 rows instead of
  * 1, carried over from an earlier test's insert in the same file.
  *
- * In `after`: close the shared `pool` exported by `@workspace/db` so the
- * node:test process exits instead of hanging on a dangling connection.
+ * Does NOT close the shared `pool` itself — see `closeDatabasePoolAfterTests`
+ * below. A file may call `useDatabaseFixture` from more than one `describe`
+ * block (each with its own truncate-table list); closing the pool inside
+ * this function's own `after()` would tear it down once the FIRST describe
+ * block's tests finish, before any later describe block's `before()`/
+ * `beforeEach()` ever runs its own query against it.
  *
  * Must be called inside a `describe` scope (it registers node:test hooks).
- * Use one fixture per test file — the node:test runner isolates each file in
- * its own process, so this owns that file's single pool. Gate the describe
- * with `{ skip: !handle.url }`; the hooks are also internally guarded, so an
- * unconfigured run is a safe no-op (no error, no hang).
+ * Gate the describe with `{ skip: !handle.url }`; the hooks are also
+ * internally guarded, so an unconfigured run is a safe no-op (no error, no
+ * hang).
  *
  * Table names are interpolated as raw SQL identifiers — pass only trusted,
  * literal table names (never request-derived input). They are double-quoted
@@ -138,12 +141,24 @@ export function useDatabaseFixture(
     await truncateTables();
   });
 
+  return handle;
+}
+
+/**
+ * Closes the shared `@workspace/db` pool so the node:test process exits
+ * instead of hanging on a dangling connection. Call this ONCE per test file,
+ * in a top-level `after()` outside every `describe` block — never inside
+ * one (see `useDatabaseFixture`'s doc comment for why: a describe-scoped
+ * close would fire before a later sibling describe block's own fixture
+ * hooks run, breaking every describe after the first in a multi-describe
+ * file — caught for real running this suite's CI job against the disposable
+ * Supabase stack, where every describe after the first failed with "Cannot
+ * use a pool after calling end").
+ */
+export function closeDatabasePoolAfterTests(): void {
   after(async () => {
-    if (!handle.url) return;
-    // Same cached module as `before` — closes the pool we actually opened.
+    if (!process.env.TEST_DATABASE_URL) return;
     const mod = await import("@workspace/db");
     await mod.pool.end();
   });
-
-  return handle;
 }

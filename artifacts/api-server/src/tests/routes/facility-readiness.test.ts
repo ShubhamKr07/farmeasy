@@ -2,7 +2,12 @@ import { describe, test } from "node:test";
 import { strictEqual } from "node:assert";
 import request from "supertest";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
-import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../helpers/testDatabase";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  seedTestUser,
+  closeDatabasePoolAfterTests,
+} from "../helpers/testDatabase";
 
 /**
  * GET /facility-readiness + POST /facility-readiness/events (onboarding
@@ -28,6 +33,7 @@ import { requireTestDatabaseUrl, useDatabaseFixture, seedTestUser } from "../hel
  * under test instead of 409ing up front.
  */
 const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
 
 describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture([
