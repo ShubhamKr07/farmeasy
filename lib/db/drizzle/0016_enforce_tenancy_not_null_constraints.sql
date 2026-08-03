@@ -3,6 +3,27 @@
 -- rooms.facility_id for the pre-existing seeded rows. Asserting NOT NULL here before
 -- backfill would fail against that existing data -- the exact ordering hazard this
 -- task's migration split exists to avoid (see task-1-report.md).
+--
+-- Staging deploy caught a gap 0015 didn't cover: 0015's rooms backfill reads
+-- `(SELECT id FROM facilities ORDER BY id LIMIT 1)` -- on staging, "facilities"
+-- itself is a brand-new table introduced by this same migration set, so it was
+-- still empty when 0015 ran, even though "rooms" already had real pre-existing
+-- rows from before any facility concept existed. That subquery returned NULL,
+-- so the "backfill" was a no-op, leaving rooms.facility_id NULL and failing the
+-- ALTER TABLE ... SET NOT NULL below. Ensure at least one facility exists
+-- (linked to 0015's default organization) before retrying that same backfill,
+-- so this migration is safe regardless of whether any facility was ever
+-- created before it runs.
+INSERT INTO "facilities" (name, organization_id, facility_name, timezone)
+SELECT 'Default Facility', o.id, 'Default Facility', 'UTC'
+FROM "organizations" o
+WHERE NOT EXISTS (SELECT 1 FROM "facilities")
+ORDER BY o.id
+LIMIT 1;--> statement-breakpoint
+
+UPDATE "rooms" SET facility_id = (SELECT id FROM "facilities" ORDER BY id LIMIT 1)
+  WHERE facility_id IS NULL;--> statement-breakpoint
+
 ALTER TABLE "facilities" ALTER COLUMN "organization_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "facilities" ALTER COLUMN "facility_name" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "facilities" ALTER COLUMN "timezone" SET NOT NULL;--> statement-breakpoint
