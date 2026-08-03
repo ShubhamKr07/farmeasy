@@ -81,7 +81,9 @@ Route handlers call `withTenantScope(ctx, (tx) => tx.select().from(cyclesTable).
 
 ## Lint rule (TEN-004)
 
-A custom ESLint rule banning direct `db.select()/insert()/update()/delete()` calls against the scoped-tables list from anywhere in `artifacts/api-server/src/routes/**` outside `withTenantScope`. Added to the existing `Quality (codegen + typecheck)` CI job (not a new job) — CI fails on any direct scoped-table access outside the helper.
+**Correction from an earlier draft of this document:** this repo has no ESLint at all today (no config, no lint script, no lint step in CI anywhere) — the "add an ESLint rule" framing was a wrong assumption, caught before writing the plan. The repo's actual, established convention for CI-enforced static checks is small hand-written Node scripts under `scripts/ci/*.mjs` (e.g. `check-dependency-audit.mjs`), each wired in as its own step in an existing job.
+
+Design: `scripts/ci/check-tenant-scope.mjs` — scans every file under `artifacts/api-server/src/routes/**/*.ts`, flags any direct `db.select(`/`db.insert(`/`db.update(`/`db.delete(` call against the scoped-tables list (a literal array in the script) outside a `withTenantScope(` call, and exits non-zero listing the offending file:line if any are found. Added as a new step in the existing `Quality (codegen + typecheck)` CI job, right after `Typecheck` — no new CI job to maintain.
 
 ## Migration sequencing landing in MT-M0
 
