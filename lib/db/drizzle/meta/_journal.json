@@ -141,6 +141,13 @@
       "when": 1785778975093,
       "tag": "0019_backfill_tenancy_scoping",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785778976093,
+      "tag": "0020_enforce_tenancy_scoping_not_null",
+      "breakpoints": true
     }
   ]
 }
