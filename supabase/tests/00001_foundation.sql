@@ -66,8 +66,8 @@ SELECT is(
 -- seed_lots, organization_members) (Task 8).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  7,
-  'supabase_migrations.schema_migrations has exactly 7 rows (Supabase migrations 00001-00007)'
+  8,
+  'supabase_migrations.schema_migrations has exactly 8 rows (Supabase migrations 00001-00008)'
 );
 
 SELECT * FROM finish();
