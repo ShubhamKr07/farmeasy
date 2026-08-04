@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { db } from "@workspace/db";
-import { sensorsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { withTenantScope, sensorsTable } from "@workspace/db";
 
 const router = Router();
 
@@ -24,7 +24,9 @@ function formatSensor(s: typeof sensorsTable.$inferSelect) {
 
 router.get("/sensors", async (req: Request, res: Response) => {
   try {
-    const rows = await db.select().from(sensorsTable);
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx.select().from(sensorsTable).where(eq(sensorsTable.facilityId, req.tenant!.facilityId)),
+    );
     return res.json(rows.map(formatSensor));
   } catch (err) {
     req.log.error(err);
@@ -41,16 +43,19 @@ router.post("/sensors", async (req: Request, res: Response) => {
     if (!channelId && !rackId) {
       return res.status(400).json({ error: "channelId or rackId is required" });
     }
-    const [s] = await db
-      .insert(sensorsTable)
-      .values({
-        channelId: channelId ?? null,
-        rackId: rackId ?? null,
-        type,
-        label,
-        unit: unit ?? null,
-      })
-      .returning();
+    const [s] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .insert(sensorsTable)
+        .values({
+          channelId: channelId ?? null,
+          rackId: rackId ?? null,
+          type,
+          label,
+          unit: unit ?? null,
+          facilityId: req.tenant!.facilityId,
+        })
+        .returning(),
+    );
     return res.status(201).json(formatSensor(s));
   } catch (err) {
     req.log.error(err);
@@ -118,10 +123,13 @@ router.post("/sensors/bulk", async (req: Request, res: Response) => {
         sensorAccountId: body.sensorAccountId ?? null,
         type,
         label: body.label,
+        facilityId: req.tenant!.facilityId,
       })),
     );
 
-    const created = await db.insert(sensorsTable).values(rows).returning();
+    const created = await withTenantScope(req.tenant!, (tx) =>
+      tx.insert(sensorsTable).values(rows).returning(),
+    );
     return res.status(201).json({ created: created.map(formatSensor) });
   } catch (err) {
     req.log.error(err);
