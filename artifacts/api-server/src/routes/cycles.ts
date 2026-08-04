@@ -2,13 +2,14 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, ne, desc, and } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@workspace/db";
 import {
+  db,
   cyclesTable,
   growthProfilesTable,
   manualChecksTable,
   sensorStatusTable,
   badTrayEntriesTable,
+  withTenantScope,
 } from "@workspace/db";
 import { calcDaysOverdue, generateShortId, seedingWeight } from "../lib/utils";
 import { signMediaReferences } from "../services/mediaUrls";
@@ -185,19 +186,24 @@ router.get("/cycles", async (req, res) => {
         .json({ error: "History access is restricted to supervisors" });
     }
 
-    const rows = await db
-      .select({ cycle: cyclesTable, profile: growthProfilesTable })
-      .from(cyclesTable)
-      .leftJoin(
-        growthProfilesTable,
-        eq(cyclesTable.growthProfileId, growthProfilesTable.id),
-      )
-      .where(
-        status === "history"
-          ? eq(cyclesTable.status, "completed")
-          : ne(cyclesTable.status, "completed"),
-      )
-      .orderBy(desc(cyclesTable.createdAt));
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ cycle: cyclesTable, profile: growthProfilesTable })
+        .from(cyclesTable)
+        .leftJoin(
+          growthProfilesTable,
+          eq(cyclesTable.growthProfileId, growthProfilesTable.id),
+        )
+        .where(
+          and(
+            eq(cyclesTable.facilityId, req.tenant!.facilityId),
+            status === "history"
+              ? eq(cyclesTable.status, "completed")
+              : ne(cyclesTable.status, "completed"),
+          ),
+        )
+        .orderBy(desc(cyclesTable.createdAt)),
+    );
 
     return res.json(
       rows
@@ -215,11 +221,13 @@ router.post("/cycles", enforceAuth, async (req, res) => {
     const body = validate(CreateCycleSchema, req.body, res);
     if (!body) return;
 
-    const [profile] = await db
-      .select()
-      .from(growthProfilesTable)
-      .where(eq(growthProfilesTable.id, body.growthProfileId))
-      .limit(1);
+    const [profile] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(growthProfilesTable)
+        .where(eq(growthProfilesTable.id, body.growthProfileId))
+        .limit(1),
+    );
     if (!profile) {
       return res.status(400).json({ error: "Growth profile not found" });
     }
@@ -228,24 +236,27 @@ router.post("/cycles", enforceAuth, async (req, res) => {
     let shortId = generateShortId();
     let cycle: typeof cyclesTable.$inferSelect | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
-      [cycle] = await db
-        .insert(cyclesTable)
-        .values({
-          shortId,
-          seedLotQrCodes: body.seedLotQrCodes,
-          seedName: body.seedName,
-          fullTrays: body.fullTrays,
-          halfTrays: body.halfTrays,
-          seedWeightTray: String(body.seedWeightTray),
-          growthProfileId: body.growthProfileId,
-          seedingDate: body.seedingDate,
-          status: "germination",
-          trayPosition: body.trayPosition,
-          germinationStartedAt: new Date(),
-          userId: auth?.userId ?? null,
-        })
-        .onConflictDoNothing({ target: [cyclesTable.shortId] })
-        .returning();
+      [cycle] = await withTenantScope(req.tenant!, (tx) =>
+        tx
+          .insert(cyclesTable)
+          .values({
+            shortId,
+            seedLotQrCodes: body.seedLotQrCodes,
+            seedName: body.seedName,
+            fullTrays: body.fullTrays,
+            halfTrays: body.halfTrays,
+            seedWeightTray: String(body.seedWeightTray),
+            growthProfileId: body.growthProfileId,
+            seedingDate: body.seedingDate,
+            status: "germination",
+            trayPosition: body.trayPosition,
+            germinationStartedAt: new Date(),
+            userId: auth?.userId ?? null,
+            facilityId: req.tenant!.facilityId,
+          })
+          .onConflictDoNothing({ target: [cyclesTable.shortId] })
+          .returning(),
+      );
       if (cycle) break;
       shortId = generateShortId();
     }
@@ -269,6 +280,7 @@ router.post("/cycles", enforceAuth, async (req, res) => {
       if (body.waterLevel !== undefined) sensorUpdate.waterLevelPct = body.waterLevel;
       if (body.nutrientMix !== undefined) sensorUpdate.nutrientMix = body.nutrientMix;
 
+      // Unchanged (sensorStatusTable is out of scope — see Global Constraints):
       const [existing] = await db.select({ id: sensorStatusTable.id }).from(sensorStatusTable).limit(1);
       if (existing) {
         await db.update(sensorStatusTable).set(sensorUpdate).where(eq(sensorStatusTable.id, existing.id));
@@ -289,15 +301,17 @@ router.get("/cycles/:id", async (req, res) => {
     const id = parseParamId(req);
     const role = extractRole(req);
 
-    const rows = await db
-      .select({ cycle: cyclesTable, profile: growthProfilesTable })
-      .from(cyclesTable)
-      .leftJoin(
-        growthProfilesTable,
-        eq(cyclesTable.growthProfileId, growthProfilesTable.id),
-      )
-      .where(eq(cyclesTable.id, id))
-      .limit(1);
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ cycle: cyclesTable, profile: growthProfilesTable })
+        .from(cyclesTable)
+        .leftJoin(
+          growthProfilesTable,
+          eq(cyclesTable.growthProfileId, growthProfilesTable.id),
+        )
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
 
     if (!rows.length || !rows[0].profile) {
       return res.status(404).json({ error: "Cycle not found" });
@@ -309,11 +323,13 @@ router.get("/cycles/:id", async (req, res) => {
         .json({ error: "Access to completed cycle details is restricted to supervisors" });
     }
 
-    const checks = await db
-      .select()
-      .from(manualChecksTable)
-      .where(eq(manualChecksTable.cycleId, id))
-      .orderBy(desc(manualChecksTable.createdAt));
+    const checks = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(manualChecksTable)
+        .where(eq(manualChecksTable.cycleId, id))
+        .orderBy(desc(manualChecksTable.createdAt)),
+    );
 
     return res.json({
       ...formatCycle(rows[0].cycle, rows[0].profile!),
@@ -331,20 +347,24 @@ router.post("/cycles/:id/fertigation", enforceAuth, async (req, res) => {
     const body = validate(FertigationSchema, req.body, res);
     if (body === null) return;
 
-    const [cycle] = await db
-      .select()
-      .from(cyclesTable)
-      .where(eq(cyclesTable.id, id))
-      .limit(1);
+    const [cycle] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(cyclesTable)
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
     if (!cycle) return res.status(404).json({ error: "Cycle not found" });
     if (cycle.status !== "germination")
       return res.status(400).json({ error: "Cycle is not in germination status" });
 
-    const [profile] = await db
-      .select()
-      .from(growthProfilesTable)
-      .where(eq(growthProfilesTable.id, cycle.growthProfileId))
-      .limit(1);
+    const [profile] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(growthProfilesTable)
+        .where(eq(growthProfilesTable.id, cycle.growthProfileId))
+        .limit(1),
+    );
 
     if (profile && cycle.germinationStartedAt) {
       const dueMs = cycle.germinationStartedAt.getTime() + profile.germinationDays * 86_400_000;
@@ -365,11 +385,19 @@ router.post("/cycles/:id/fertigation", enforceAuth, async (req, res) => {
         .json({ error: "QR code does not match any seed lot for this cycle" });
     }
 
-    const [updated] = await db
-      .update(cyclesTable)
-      .set({ status: "fertigation", fertigationStartedAt: new Date() })
-      .where(and(eq(cyclesTable.id, id), eq(cyclesTable.status, "germination")))
-      .returning();
+    const [updated] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(cyclesTable)
+        .set({ status: "fertigation", fertigationStartedAt: new Date() })
+        .where(
+          and(
+            eq(cyclesTable.id, id),
+            eq(cyclesTable.status, "germination"),
+            eq(cyclesTable.facilityId, req.tenant!.facilityId),
+          ),
+        )
+        .returning(),
+    );
 
     if (!updated) {
       return res
@@ -415,20 +443,24 @@ router.post("/cycles/:id/harvest", enforceAuth, async (req, res) => {
     const body = validate(StartHarvestSchema, req.body, res);
     if (body === null) return;
 
-    const [cycle] = await db
-      .select()
-      .from(cyclesTable)
-      .where(eq(cyclesTable.id, id))
-      .limit(1);
+    const [cycle] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(cyclesTable)
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
     if (!cycle) return res.status(404).json({ error: "Cycle not found" });
     if (cycle.status !== "fertigation")
       return res.status(400).json({ error: "Cycle is not in fertigation status" });
 
-    const [profile] = await db
-      .select()
-      .from(growthProfilesTable)
-      .where(eq(growthProfilesTable.id, cycle.growthProfileId))
-      .limit(1);
+    const [profile] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(growthProfilesTable)
+        .where(eq(growthProfilesTable.id, cycle.growthProfileId))
+        .limit(1),
+    );
 
     if (profile && cycle.fertigationStartedAt) {
       const dueMs = cycle.fertigationStartedAt.getTime() + profile.fertigationDays * 86_400_000;
@@ -441,15 +473,23 @@ router.post("/cycles/:id/harvest", enforceAuth, async (req, res) => {
       }
     }
 
-    const [updated] = await db
-      .update(cyclesTable)
-      .set({
-        status: "harvest",
-        harvestStartedAt: new Date(),
-        trayPosition: body.trayQrCode ?? cycle.trayPosition,
-      })
-      .where(and(eq(cyclesTable.id, id), eq(cyclesTable.status, "fertigation")))
-      .returning();
+    const [updated] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(cyclesTable)
+        .set({
+          status: "harvest",
+          harvestStartedAt: new Date(),
+          trayPosition: body.trayQrCode ?? cycle.trayPosition,
+        })
+        .where(
+          and(
+            eq(cyclesTable.id, id),
+            eq(cyclesTable.status, "fertigation"),
+            eq(cyclesTable.facilityId, req.tenant!.facilityId),
+          ),
+        )
+        .returning(),
+    );
 
     if (!updated) {
       return res
@@ -471,24 +511,28 @@ router.post("/cycles/:id/complete-harvest", enforceAuth, async (req, res) => {
     const body = validate(CompleteHarvestSchema, req.body, res);
     if (body === null) return;
 
-    const [cycle] = await db
-      .select()
-      .from(cyclesTable)
-      .where(eq(cyclesTable.id, id))
-      .limit(1);
+    const [cycle] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(cyclesTable)
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
     if (!cycle) return res.status(404).json({ error: "Cycle not found" });
     if (cycle.status !== "harvest")
       return res.status(400).json({ error: "Cycle is not in harvest status" });
 
-    const [profile] = await db
-      .select()
-      .from(growthProfilesTable)
-      .where(eq(growthProfilesTable.id, cycle.growthProfileId))
-      .limit(1);
+    const [profile] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(growthProfilesTable)
+        .where(eq(growthProfilesTable.id, cycle.growthProfileId))
+        .limit(1),
+    );
 
     const auth = getAuth(req);
 
-    const updated = await db.transaction(async (tx) => {
+    const updated = await withTenantScope(req.tenant!, async (tx) => {
       const [row] = await tx
         .update(cyclesTable)
         .set({
@@ -499,7 +543,13 @@ router.post("/cycles/:id/complete-harvest", enforceAuth, async (req, res) => {
           closedAt: new Date(),
           trayPosition: body.trayQrCode ?? cycle.trayPosition,
         })
-        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.status, "harvest")))
+        .where(
+          and(
+            eq(cyclesTable.id, id),
+            eq(cyclesTable.status, "harvest"),
+            eq(cyclesTable.facilityId, req.tenant!.facilityId),
+          ),
+        )
         .returning();
 
       if (!row) return null; // concurrent transition — another request beat us (I2)
@@ -553,11 +603,13 @@ router.get("/cycles/:id/manual-checks", async (req, res) => {
     const id = parseParamId(req);
     const role = extractRole(req);
 
-    const [cycle] = await db
-      .select({ status: cyclesTable.status })
-      .from(cyclesTable)
-      .where(eq(cyclesTable.id, id))
-      .limit(1);
+    const [cycle] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ status: cyclesTable.status })
+        .from(cyclesTable)
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
 
     if (!cycle) {
       return res.status(404).json({ error: "Cycle not found" });
@@ -569,11 +621,13 @@ router.get("/cycles/:id/manual-checks", async (req, res) => {
         .json({ error: "Access to completed cycle audit log is restricted to supervisors" });
     }
 
-    const checks = await db
-      .select()
-      .from(manualChecksTable)
-      .where(eq(manualChecksTable.cycleId, id))
-      .orderBy(desc(manualChecksTable.createdAt));
+    const checks = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(manualChecksTable)
+        .where(eq(manualChecksTable.cycleId, id))
+        .orderBy(desc(manualChecksTable.createdAt)),
+    );
     return res.json(await Promise.all(checks.map(formatCheck)));
   } catch (err) {
     console.error(err);
@@ -589,57 +643,64 @@ router.post("/cycles/:id/manual-checks", enforceAuth, async (req, res) => {
 
     const auth = getAuth(req);
 
-    const [check] = await db
-      .insert(manualChecksTable)
-      .values({
-        cycleId: id,
-        fullTrays: body.fullTrays,
-        halfTrays: body.halfTrays,
-        isBadTrays: body.isBadTrays,
-        issue: body.issue ?? null,
-        notes: body.notes ?? null,
-        photoUrls: body.photoUrls ?? [],
-        userId: auth?.userId ?? null,
-      })
-      .returning();
-
-    if (body.isBadTrays) {
-      // Wastage-aware loss estimate (Phase 7): grounded in this cycle's own
-      // growth profile expected yield, not a flat per-tray guess — affected
-      // trays' share of what this specific crop was actually expected to
-      // produce. expectedYieldPerTrayKg is kg; grams to match
-      // totalYieldThisWeek's unit.
-      const [cycleRow] = await db
-        .select({ growthProfileId: cyclesTable.growthProfileId })
+    const result = await withTenantScope(req.tenant!, async (tx) => {
+      const [cycleRow] = await tx
+        .select({ id: cyclesTable.id, growthProfileId: cyclesTable.growthProfileId })
         .from(cyclesTable)
-        .where(eq(cyclesTable.id, id));
+        .where(and(eq(cyclesTable.id, id), eq(cyclesTable.facilityId, req.tenant!.facilityId)));
 
-      let expectedYieldPerTrayKg = 0;
-      if (cycleRow?.growthProfileId) {
-        const [profile] = await db
-          .select({ expectedYieldPerTrayKg: growthProfilesTable.expectedYieldPerTrayKg })
-          .from(growthProfilesTable)
-          .where(eq(growthProfilesTable.id, cycleRow.growthProfileId));
-        expectedYieldPerTrayKg = Number(profile?.expectedYieldPerTrayKg ?? 0);
+      if (!cycleRow) return null;
+
+      const [check] = await tx
+        .insert(manualChecksTable)
+        .values({
+          cycleId: id,
+          fullTrays: body.fullTrays,
+          halfTrays: body.halfTrays,
+          isBadTrays: body.isBadTrays,
+          issue: body.issue ?? null,
+          notes: body.notes ?? null,
+          photoUrls: body.photoUrls ?? [],
+          userId: auth?.userId ?? null,
+        })
+        .returning();
+
+      if (body.isBadTrays) {
+        // Wastage-aware loss estimate (Phase 7): grounded in this cycle's own
+        // growth profile expected yield, not a flat per-tray guess — affected
+        // trays' share of what this specific crop was actually expected to
+        // produce. expectedYieldPerTrayKg is kg; grams to match
+        // totalYieldThisWeek's unit.
+        let expectedYieldPerTrayKg = 0;
+        if (cycleRow.growthProfileId) {
+          const [profile] = await tx
+            .select({ expectedYieldPerTrayKg: growthProfilesTable.expectedYieldPerTrayKg })
+            .from(growthProfilesTable)
+            .where(eq(growthProfilesTable.id, cycleRow.growthProfileId));
+          expectedYieldPerTrayKg = Number(profile?.expectedYieldPerTrayKg ?? 0);
+        }
+
+        const affectedTrays = (body.fullTrays ?? 0) + (body.halfTrays ?? 0) * 0.5;
+        const lossEstimate = affectedTrays * expectedYieldPerTrayKg * 1000;
+        const severity = affectedTrays >= 5 ? "high" : affectedTrays >= 2 ? "medium" : "low";
+
+        await tx.insert(badTrayEntriesTable).values({
+          cycleId: id,
+          issue: body.issue ?? null,
+          severity,
+          fullTrays: body.fullTrays,
+          halfTrays: body.halfTrays,
+          photoUrls: body.photoUrls ?? [],
+          lossEstimate: String(lossEstimate),
+          userId: auth?.userId ?? null,
+        });
       }
 
-      const affectedTrays = (body.fullTrays ?? 0) + (body.halfTrays ?? 0) * 0.5;
-      const lossEstimate = affectedTrays * expectedYieldPerTrayKg * 1000;
-      const severity = affectedTrays >= 5 ? "high" : affectedTrays >= 2 ? "medium" : "low";
+      return check;
+    });
 
-      await db.insert(badTrayEntriesTable).values({
-        cycleId: id,
-        issue: body.issue ?? null,
-        severity,
-        fullTrays: body.fullTrays,
-        halfTrays: body.halfTrays,
-        photoUrls: body.photoUrls ?? [],
-        lossEstimate: String(lossEstimate),
-        userId: auth?.userId ?? null,
-      });
-    }
-
-    return res.status(201).json(await formatCheck(check));
+    if (!result) return res.status(404).json({ error: "Cycle not found" });
+    return res.status(201).json(await formatCheck(result));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to create manual check" });
