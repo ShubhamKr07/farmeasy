@@ -22,6 +22,31 @@ declare global {
 }
 
 /**
+ * Public probe paths that must never trigger tenant resolution. /healthz is
+ * process-liveness only (zero I/O by design — see routes/health.ts) and
+ * /readyz runs its own bounded SELECT 1; running a membership lookup here
+ * would both add latency to the probe and, when the DB is slow/down, make a
+ * DB blip look like a process problem — exactly what the liveness/readiness
+ * split exists to avoid. These routes carry no authenticated identity in
+ * production anyway (no bearer token), so req.supabaseUser is absent and the
+ * userId guard below would short-circuit regardless — but skipping by path
+ * keeps the probe DB-free even when a caller (or a test double) attaches an
+ * identity, and it stops the resolver's timeout from stacking on top of
+ * /readyz's own 2s budget.
+ */
+const PUBLIC_PROBE_PATHS = new Set(["/api/healthz", "/api/readyz"]);
+
+/**
+ * Hard ceiling on a single membership lookup, in milliseconds. Bounds a
+ * hung/slow query or a pool-connect stall so a DB blip can never pin a
+ * request longer than this — the resolver then leaves req.tenant unset and
+ * lets requireTenantContext (where mounted) surface the missing membership.
+ * Matches the /readyz readiness budget so a tenant lookup can never outlast
+ * the platform's own probe window.
+ */
+const TENANT_LOOKUP_TIMEOUT_MS = 2000;
+
+/**
  * Resolves { organizationId, facilityId, role } from organization_members
  * and attaches it to req.tenant. Never rejects — mirrors
  * supabaseAuthMiddleware's own "attach if present, let the route decide"
@@ -48,40 +73,54 @@ export async function resolveTenantContext(
   _res: Response,
   next: NextFunction,
 ) {
+  // Public liveness/readiness probes must stay DB-free (see health.ts) —
+  // never resolve tenant context for them, even if an identity is attached.
+  if (PUBLIC_PROBE_PATHS.has(req.path)) return next();
+
   const userId = req.supabaseUser?.sub ?? null;
   if (!userId) return next();
 
-  // Defer db import to avoid initialization errors when DATABASE_URL is unset
-  const { eq, and } = await import("drizzle-orm");
-  const { db, organizationMembersTable, facilitiesTable } = await import("@workspace/db");
-
-  // Never reject: a DB error (unreachable, wrong DB, transient) must not
-  // break the request — this mirrors supabaseAuthMiddleware's own
+  // Never reject: a DB error (unreachable, wrong DB, transient, or timeout)
+  // must not break the request — this mirrors supabaseAuthMiddleware's own
   // attach-if-present-then-let-the-route-decide contract (see the doc comment
-  // above). Public, DB-free routes like GET /healthz run through this
-  // middleware in production (mounted globally in app.ts before the public
-  // router) and must stay answering 200 even when the DB is down. Routes that
-  // genuinely need tenant context mount requireTenantContext, which 403s on a
-  // missing req.tenant — the route, not the resolver, decides.
+  // above). Routes that genuinely need tenant context mount
+  // requireTenantContext, which 403s on a missing req.tenant — the route,
+  // not the resolver, decides.
   try {
-    const [membership] = await db
-      .select({
-        organizationId: organizationMembersTable.organizationId,
-        role: organizationMembersTable.role,
-        facilityId: facilitiesTable.id,
-      })
-      .from(organizationMembersTable)
-      .innerJoin(
-        facilitiesTable,
-        eq(facilitiesTable.organizationId, organizationMembersTable.organizationId),
-      )
-      .where(
-        and(
-          eq(organizationMembersTable.userId, userId),
-          eq(organizationMembersTable.status, "active"),
-        ),
-      )
-      .limit(1);
+    // Defer db import to avoid initialization errors when DATABASE_URL is
+    // unset (e.g. unit tests that only exercise requireTenantContext).
+    const dbOperation = async () => {
+      const { eq, and } = await import("drizzle-orm");
+      const { db, organizationMembersTable, facilitiesTable } = await import("@workspace/db");
+
+      const [membership] = await db
+        .select({
+          organizationId: organizationMembersTable.organizationId,
+          role: organizationMembersTable.role,
+          facilityId: facilitiesTable.id,
+        })
+        .from(organizationMembersTable)
+        .innerJoin(
+          facilitiesTable,
+          eq(facilitiesTable.organizationId, organizationMembersTable.organizationId),
+        )
+        .where(
+          and(
+            eq(organizationMembersTable.userId, userId),
+            eq(organizationMembersTable.status, "active"),
+          ),
+        )
+        .limit(1);
+
+      return membership ?? null;
+    };
+
+    // Race the lookup against a hard timeout so a hung query or a
+    // pool-connect stall can never pin the request (or hang the process, as
+    // it did before this bound existed). On timeout the resolver resolves
+    // null → req.tenant stays unset → requireTenantContext (where mounted)
+    // surfaces the missing membership.
+    const membership = await withTimeout(dbOperation(), TENANT_LOOKUP_TIMEOUT_MS);
 
     if (membership) {
       req.tenant = {
@@ -90,13 +129,38 @@ export async function resolveTenantContext(
         role: membership.role,
       };
     }
-  } catch {
-    // DB unavailable or query failed: leave req.tenant unset and proceed.
-    // requireTenantContext (where mounted) is what surfaces a missing
-    // membership to the client; this resolver never turns a DB blip into a
-    // request failure.
+  } catch (error) {
+    // DB unavailable or query failed (import error, connection refused, auth
+    // failure, etc.): leave req.tenant unset and proceed. requireTenantContext
+    // (where mounted) is what surfaces a missing membership to the client;
+    // this resolver never turns a DB blip into a request failure. Logged at
+    // warn (not error) because an unreachable DB in dev/test is expected, and
+    // the message is reduced to the error message (no stack) so it can't spam
+    // stderr on every request when the DB is down.
+    console.warn(
+      "[tenantContext] membership lookup failed; req.tenant unset:",
+      error instanceof Error ? error.message : error,
+    );
   }
   return next();
+}
+
+/**
+ * Race a promise against a timeout. Resolves to the promise's value if it
+ * settles first; resolves to `null` if the timeout fires first. Rejections
+ * from the promise propagate (so the caller's try/catch still handles hard
+ * failures like an unreachable DB). The timer is unref'd so it can never
+ * keep the event loop alive on its own.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /**
