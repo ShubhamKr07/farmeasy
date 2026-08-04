@@ -81,7 +81,7 @@ router.get("/shipments", async (req: Request, res: Response) => {
   try {
     const { cursor, limit, status, client } = parseShipmentListQuery(req);
 
-    // Build the FULL where clause (facility + cursor + status + client) BEFORE the
+    // Build the FULL where clause (cursor + status + client) BEFORE the
     // limit+1, so filtered queries skip non-matching rows server-side rather
     // than truncating them into the limit+1 window. The previous code ran the
     // keyset query first and applied status/client as JS .filter() on the
