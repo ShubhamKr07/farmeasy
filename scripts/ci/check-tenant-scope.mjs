@@ -26,8 +26,30 @@ const SCOPED_TABLES = [
   "organizationMembersTable",
 ];
 
+// Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
+// chain anywhere in the file, even when spread across multiple lines (Drizzle's
+// standard chain style puts `db` at the end of one line and `.select()` /
+// `.from(...)` on subsequent lines).
+//
+// Two deviations from the brief's first-draft pattern, both forced by what the
+// codebase actually looks like (verified empirically against seedLots.ts and a
+// scratch file before trusting this):
+//   1. `\s*\.\s*` around the dot between `db` and the verb. The brief's
+//      `\bdb\.(verb)` required `db.select` to be contiguous, which never holds
+//      for this repo's multi-line style (`const x = await db\n  .select()`).
+//      That literal pattern missed seedLots.ts's GET /seed-lots/lookup entirely
+//      AND failed its own Step 2 scratch-file check.
+//   2. `[^;]*?` (not `[\s\S]*?`) between the call opening and `.from(...)`.
+//      `[^;]` bounds the span to a single statement (every chain ends with
+//      `;`), so a match can't swallow an unrelated later `db.` call in the same
+//      file. The unbounded `[\s\S]*?` produced cross-statement false positives:
+//      e.g. layout.ts's `.from(racksTable)` (non-scoped) spanned forward to a
+//      later `.from(cyclesTable)` and misattributed a violation to the wrong
+//      line. `[^;]` still matches newlines, so genuine multi-line chains within
+//      one statement are still caught.
 const DIRECT_CALL = new RegExp(
-  `\\bdb\\.(select|insert|update|delete)\\([^)]*\\)[^;]*\\.(from|into|table)\\((${SCOPED_TABLES.join("|")})\\)`,
+  `\\bdb\\s*\\.\\s*(select|insert|update|delete)\\([^;]*?\\.(from|into|table)\\((${SCOPED_TABLES.join("|")})\\)`,
+  "g",
 );
 
 // Baseline: known pre-existing direct-access call sites that predate this
@@ -38,13 +60,62 @@ const DIRECT_CALL = new RegExp(
 // Shrink this list as MT-M1 rewires each handler -- an empty list means the
 // check has no more baseline debt. Any NEW violation not in this list still
 // fails CI.
+//
+// Two groups here, both pre-existing debt (nothing in this list was
+// introduced after the check first shipped in MT-M0 Task 10):
+//
+//  (A) Six SINGLE-LINE call sites that the original per-line regex caught.
+//      These are the entries the check has always known about.
+//
+//  (B) TWENTY-SIX MULTI-LINE call sites (18 distinct keys -- some keys, e.g.
+//      cycles.ts's repeated `const [profile] = await db` chain-start, cover
+//      several handlers at once) that the old single-line regex was blind to
+//      and that MT-M1 Task 3's multi-line-aware regex now sees for the first
+//      time. They are the same category of deferred debt as group (A), just
+//      previously invisible; baselining them keeps CI green while MT-M1's
+//      route-sweep tasks (4-8) rewire each handler to withTenantScope and
+//      then delete the now-fixed entries. Files NOT covered by any MT-M1
+//      sweep task (dashboard.ts, facility-readiness.ts's accounting line,
+//      layout.ts) stay baselined as explicitly-tracked deferred debt.
 const BASELINE_VIOLATIONS = new Set([
+  // --- (A) original single-line baselines (pre-date the multi-line fix) ---
   "artifacts/api-server/src/routes/alerts.ts::rows = await db.select().from(alertsTable).orderBy(desc(alertsTable.createdAt));",
   "artifacts/api-server/src/routes/dashboard.ts::const allSensors = await db.select().from(sensorsTable);",
   "artifacts/api-server/src/routes/facility-readiness.ts::const [{ sensorCount }] = await db.select({ sensorCount: count() }).from(sensorsTable);",
   "artifacts/api-server/src/routes/facility-readiness.ts::const [{ cycleCount }] = await db.select({ cycleCount: count() }).from(cyclesTable);",
   "artifacts/api-server/src/routes/growthProfiles.ts::const profiles = await db.select().from(growthProfilesTable);",
   "artifacts/api-server/src/routes/sensors.ts::const rows = await db.select().from(sensorsTable);",
+  // --- (B) multi-line call sites first visible after MT-M1 Task 3's fix ---
+  // alerts.ts (Task 4 rewires + drops these), badTrays.ts (Task 7):
+  "artifacts/api-server/src/routes/alerts.ts::rows = await db",
+  "artifacts/api-server/src/routes/badTrays.ts::const [cycle] = await db",
+  // cycles.ts (Task 6 rewires the whole file -> it then contains
+  // withTenantScope and is skipped entirely, so all four keys clear at once;
+  // each key intentionally covers several handlers sharing the same
+  // chain-start line):
+  "artifacts/api-server/src/routes/cycles.ts::const rows = await db",
+  "artifacts/api-server/src/routes/cycles.ts::const [profile] = await db",
+  "artifacts/api-server/src/routes/cycles.ts::const [cycle] = await db",
+  "artifacts/api-server/src/routes/cycles.ts::const [cycleRow] = await db",
+  // dashboard.ts: NOT in any MT-M1 sweep task -> permanent deferred debt:
+  "artifacts/api-server/src/routes/dashboard.ts::const runningRows = await db",
+  "artifacts/api-server/src/routes/dashboard.ts::const completedRows = await db",
+  "artifacts/api-server/src/routes/dashboard.ts::const activeSeedLotsRows = await db",
+  "artifacts/api-server/src/routes/dashboard.ts::const currentAlerts = await db",
+  // facility-readiness.ts: the accounting lookup below is not in any MT-M1
+  // sweep task -> deferred debt (the two (A) entries above are also here):
+  "artifacts/api-server/src/routes/facility-readiness.ts::const [qboConnection] = await db",
+  // growthProfiles.ts (Task 7), inventory.ts (Task 8):
+  "artifacts/api-server/src/routes/growthProfiles.ts::const existing = await db",
+  "artifacts/api-server/src/routes/inventory.ts::const rows = await db",
+  // layout.ts: NOT in any MT-M1 sweep task -> permanent deferred debt:
+  "artifacts/api-server/src/routes/layout.ts::const activeCycles = await db",
+  "artifacts/api-server/src/routes/layout.ts::const [activeCyclesRow] = await db",
+  // seedLots.ts (Task 8 rewires GET /seed-lots/lookup + drops this entry):
+  "artifacts/api-server/src/routes/seedLots.ts::const [lot] = await db",
+  // shipments.ts (Task 4), tasks.ts (Task 4):
+  "artifacts/api-server/src/routes/shipments.ts::const rows = await db",
+  "artifacts/api-server/src/routes/tasks.ts::const rows = await db",
 ]);
 
 const newViolations = [];
@@ -54,17 +125,27 @@ for await (const file of glob("**/*.ts", { cwd: ROUTES_DIR })) {
   const fullPath = path.join(ROUTES_DIR, file);
   const relPath = path.relative(ROOT, fullPath);
   const content = readFileSync(fullPath, "utf8");
-  const lines = content.split("\n");
-  lines.forEach((line, i) => {
-    if (DIRECT_CALL.test(line) && !content.includes("withTenantScope")) {
-      const key = `${relPath}::${line.trim()}`;
-      if (BASELINE_VIOLATIONS.has(key)) {
-        baselineViolations.push(`${relPath}:${i + 1}: ${line.trim()}`);
-      } else {
-        newViolations.push(`${relPath}:${i + 1}: ${line.trim()}`);
-      }
+
+  // A file that already routes its DB access through withTenantScope is
+  // considered clean regardless of raw db.<verb>( chains it may still
+  // contain — checked once per file, before scanning its matches.
+  if (content.includes("withTenantScope")) continue;
+
+  for (const match of content.matchAll(DIRECT_CALL)) {
+    // Map the match's character offset back to a 1-based line number so the
+    // report stays useful to a human reading the file.
+    const upToMatch = content.slice(0, match.index);
+    const lineNumber = upToMatch.split("\n").length;
+    // Report the specific line the db.<verb>( call starts on, trimmed, so
+    // baseline keys stay stable and readable (not the whole multi-line match).
+    const startLine = content.split("\n")[lineNumber - 1].trim();
+    const key = `${relPath}::${startLine}`;
+    if (BASELINE_VIOLATIONS.has(key)) {
+      baselineViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
+    } else {
+      newViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
     }
-  });
+  }
 }
 
 if (newViolations.length > 0) {
