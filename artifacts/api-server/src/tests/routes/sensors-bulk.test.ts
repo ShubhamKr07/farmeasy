@@ -12,7 +12,15 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("POST /api/sensors/bulk", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["sensors", "channels", "rooms", "facilities", "organizations"]);
+  // Only `sensors`/`channels`/`rooms` are truncated. `facilities`/
+  // `organizations` are shared reference tables the FK graph now fans out
+  // through (TRUNCATE ... CASCADE would destroy every cycles/inventory_items/
+  // alerts/tasks/shipments/... row plus the pilot-default facility other
+  // suites resolve via `ORDER BY id LIMIT 1`). This test creates its own
+  // fresh org+facility+room+channels every setup() and every assertion is
+  // scoped to the returned `channelIds` — never off these tables being
+  // globally empty.
+  const fixture = useDatabaseFixture(["sensors", "channels", "rooms"]);
 
   async function setup() {
     const sensors = await import("../../routes/sensors");

@@ -30,7 +30,20 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["seed_lots", "facilities", "organizations"]);
+  // Only `seed_lots` is truncated. `facilities`/`organizations` are shared
+  // reference tables the FK graph now fans out through (TRUNCATE ... CASCADE
+  // would destroy every cycles/inventory_items/alerts/tasks/shipments/...
+  // row). This means we can no longer manufacture "the lowest facility id in
+  // the table" by truncating first — some other suite's pilot-default
+  // facility may already exist with a lower id than anything we insert here.
+  // Instead: resolve the CURRENT lowest-id facility (whatever it is — the
+  // same query the lookup handler itself runs) and use THAT as facility A,
+  // rather than assuming a freshly-inserted row will win the id race.
+  // Facility B is a brand-new insert, guaranteed a higher (serial) id than
+  // any pre-existing row. This makes the test's premise (lookup resolves to
+  // the lowest-id facility, and must never leak facility B's row) hold
+  // regardless of what other suites have already created.
+  const fixture = useDatabaseFixture(["seed_lots"]);
 
   async function setup() {
     const seedLots = await import("../../routes/seedLots");
@@ -38,26 +51,16 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
       "@workspace/db"
     );
 
+    const [facilityA] = await db
+      .select()
+      .from(facilitiesTable)
+      .orderBy(facilitiesTable.id)
+      .limit(1);
+    ok(facilityA, "expected at least one pre-existing facility (seeded by migrations)");
+
     const [org] = await db
       .insert(organizationsTable)
-      .values({ name: "Sunrise Greens" })
-      .returning();
-
-    // Insert Facility A BEFORE Facility B so A has the lower serial id — the
-    // lookup handler resolves the pilot-default facility via
-    // `SELECT id FROM facilities ORDER BY id LIMIT 1`, so A is what the
-    // lookup scopes to. TRUNCATE ... RESTART IDENTITY in the fixture makes
-    // this ordering deterministic across tests.
-    const [facilityA] = await db
-      .insert(facilitiesTable)
-      .values({
-        name: "Sunrise Greens",
-        organizationId: org.id,
-        facilityName: "Sunrise Greens",
-        timezone: "UTC",
-        units: "metric",
-        currency: "USD",
-      })
+      .values({ name: "North Field Org" })
       .returning();
     const [facilityB] = await db
       .insert(facilitiesTable)
@@ -70,6 +73,7 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
         currency: "USD",
       })
       .returning();
+    ok(facilityB.id > facilityA.id, "facility B must get a strictly higher id than facility A");
 
     return {
       app: createAuthenticatedTestApp(seedLots.default),

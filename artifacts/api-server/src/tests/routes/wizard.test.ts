@@ -23,7 +23,13 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["wizard_progress", "users"]);
+  // Only `wizard_progress` is truncated. `users` is a shared reference table
+  // a dozen other tables now foreign-key into (facility_logs, sensor_accounts,
+  // recommender_queries, ...); truncating it here would cascade into all of
+  // them. Every query in this file is scoped to `DEFAULT_TEST_USER.sub` and
+  // `seedTestUser`'s upsert already resets that one user's row per call —
+  // never relies on the whole `users` table being empty.
+  const fixture = useDatabaseFixture(["wizard_progress"]);
 
   async function setup() {
     const wizard = await import("../../routes/wizard");
