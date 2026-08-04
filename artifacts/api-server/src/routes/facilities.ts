@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { organizationsTable, facilitiesTable, roomsTable, usersTable } from "@workspace/db";
+import { organizationsTable, facilitiesTable, roomsTable, usersTable, organizationMembersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
 
@@ -87,6 +87,12 @@ router.post("/facilities", async (req: Request, res: Response) => {
         .update(usersTable)
         .set({ organizationId: org.id })
         .where(eq(usersTable.id, userId!));
+      await tx.insert(organizationMembersTable).values({
+        organizationId: org.id,
+        userId: userId!,
+        role: "owner",
+        status: "active",
+      });
       return { facilityId: facility.id, organizationId: org.id };
     });
 

@@ -5,6 +5,7 @@ import express, {
   type NextFunction,
   type Router,
 } from "express";
+import { resolveTenantContext } from "../../middlewares/tenantContext";
 
 /**
  * Identity the harness injects on every request when a test passes no
@@ -49,6 +50,7 @@ export function createAuthenticatedTestApp(
     req.supabaseUser = user;
     next();
   });
+  app.use(resolveTenantContext);
   app.use("/api", router);
   return app;
 }

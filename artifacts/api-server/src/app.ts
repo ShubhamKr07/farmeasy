@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { supabaseAuthMiddleware, getAuth } from "./middlewares/supabaseAuth";
+import { resolveTenantContext } from "./middlewares/tenantContext";
 import router from "./routes";
 import healthRouter from "./routes/health";
 import dashboardRouter from "./routes/dashboard";
@@ -92,6 +93,7 @@ app.use(cors(buildCorsOptions()));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(supabaseAuthMiddleware);
+app.use(resolveTenantContext);
 
 function requireSignedIn(req: Request, res: Response, next: NextFunction) {
   const { userId } = getAuth(req);
