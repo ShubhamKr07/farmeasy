@@ -2,7 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { eq, gt, and, asc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { inventoryItemsTable } from "@workspace/db";
+import { inventoryItemsTable, facilitiesTable } from "@workspace/db";
+import { generateShortId } from "../lib/utils";
 
 const router = Router();
 
@@ -87,6 +88,7 @@ function formatItem(item: typeof inventoryItemsTable.$inferSelect) {
     brand: item.brand ?? null,
     category: item.category ?? null,
     qrCode: item.qrCode ?? null,
+    itemCode: item.itemCode,
     currentQty: Number(item.currentQty),
     maxQty: Number(item.maxQty),
     unit: item.unit,
@@ -133,19 +135,44 @@ router.post("/inventory", async (req: Request, res: Response) => {
     const body = validate(CreateInventorySchema, req.body, res);
     if (!body) return;
 
-    const [item] = await db
-      .insert(inventoryItemsTable)
-      .values({
-        name: body.name,
-        brand: body.brand ?? null,
-        category: body.category ?? null,
-        qrCode: body.qrCode ?? null,
-        currentQty: String(body.currentQty ?? 0),
-        maxQty: String(body.maxQty ?? 0),
-        unit: body.unit ?? "g",
-        arrivalDate: body.arrivalDate ?? null,
-      })
-      .returning();
+    // Facility resolution is session-context wiring deferred to a later
+    // milestone (MT-M1) -- this pilot-default lookup unblocks typecheck for
+    // this one handler now that inventory_items.facilityId is NOT NULL.
+    const [defaultFacility] = await db
+      .select({ id: facilitiesTable.id })
+      .from(facilitiesTable)
+      .orderBy(facilitiesTable.id)
+      .limit(1);
+    if (!defaultFacility) {
+      return res.status(500).json({ error: "No facility configured" });
+    }
+    const facilityId = defaultFacility.id;
+
+    let itemCode = generateShortId();
+    let item: typeof inventoryItemsTable.$inferSelect | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      [item] = await db
+        .insert(inventoryItemsTable)
+        .values({
+          name: body.name,
+          brand: body.brand ?? null,
+          category: body.category ?? null,
+          qrCode: body.qrCode ?? null,
+          currentQty: String(body.currentQty ?? 0),
+          maxQty: String(body.maxQty ?? 0),
+          unit: body.unit ?? "g",
+          arrivalDate: body.arrivalDate ?? null,
+          facilityId,
+          itemCode,
+        })
+        .onConflictDoNothing({ target: [inventoryItemsTable.facilityId, inventoryItemsTable.itemCode] })
+        .returning();
+      if (item) break;
+      itemCode = generateShortId();
+    }
+    if (!item) {
+      return res.status(500).json({ error: "Failed to generate a unique item code" });
+    }
 
     return res.status(201).json(formatItem(item));
   } catch (err) {

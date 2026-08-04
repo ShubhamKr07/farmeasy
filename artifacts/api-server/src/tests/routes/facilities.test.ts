@@ -36,7 +36,15 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("POST /api/facilities", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["organizations", "facilities", "rooms", "users"]);
+  // Only `rooms` is truncated. `organizations`/`facilities`/`users` are shared
+  // reference tables the FK graph now fans out through (TRUNCATE ... CASCADE
+  // would destroy every cycles/inventory_items/alerts/tasks/shipments/... row
+  // — plus the pilot-default facility other suites resolve via
+  // `ORDER BY id LIMIT 1`). This suite's own POST always creates a fresh
+  // org+facility, and every assertion is keyed off the signed-in test user's
+  // own `organizationId` (reset to null by seedTestUser each setup) or the
+  // returned facilityId — never off these tables being globally empty.
+  const fixture = useDatabaseFixture(["rooms"]);
 
   async function setup() {
     const facilities = await import("../../routes/facilities");
@@ -68,7 +76,9 @@ describe("POST /api/facilities", { skip: !dbUrl }, () => {
 });
 
 describe("GET /api/facilities/me", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["organizations", "facilities", "rooms", "users"]);
+  // See the POST describe above: only `rooms` is truncated; the org/facility/
+  // user tables are shared reference data that must survive across suites.
+  const fixture = useDatabaseFixture(["rooms"]);
 
   async function setup() {
     const facilities = await import("../../routes/facilities");

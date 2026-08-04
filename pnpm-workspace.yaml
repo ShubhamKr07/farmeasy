@@ -177,12 +177,13 @@ overrides:
   js-yaml: "^3.15.0"
   "js-yaml@>=4.0.0": "^4.3.0"
   shell-quote: "1.9.0"
-  fast-uri: "3.1.4"
+  fast-uri: "3.1.5"
   postcss: "8.5.18"
   uuid: "11.1.1"
   qs: "6.15.2"
   "@babel/core": "7.29.7"
   body-parser: "2.3.0"
+  ip-address: "10.3.1"
 
 auditConfig:
   ignoreGhsas:

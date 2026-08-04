@@ -49,7 +49,14 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["sensor_accounts", "organizations", "users"]);
+  // Only `sensor_accounts` is truncated. `organizations`/`users` are shared
+  // reference tables the FK graph now fans out through (TRUNCATE ... CASCADE
+  // would destroy every cycles/inventory_items/alerts/tasks/shipments/... row
+  // plus the pilot-default facility other suites resolve via `ORDER BY id
+  // LIMIT 1`). Every setup() here creates its own fresh org, and every
+  // assertion is scoped to that org's own id — never off these tables being
+  // globally empty.
+  const fixture = useDatabaseFixture(["sensor_accounts"]);
 
   async function setup() {
     const sensorAccounts = await import("../../routes/sensor-accounts");
@@ -113,7 +120,8 @@ describe("POST /api/sensor-accounts", { skip: !dbUrl }, () => {
 });
 
 describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["sensor_accounts", "organizations", "users"]);
+  // See the POST describe above: only `sensor_accounts` is truncated.
+  const fixture = useDatabaseFixture(["sensor_accounts"]);
 
   async function setup() {
     const sensorAccounts = await import("../../routes/sensor-accounts");
@@ -164,7 +172,8 @@ describe("GET /api/sensor-accounts", { skip: !dbUrl }, () => {
 });
 
 describe("POST /api/sensor-accounts/:id/test-connection", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["sensor_accounts", "organizations", "users"]);
+  // See the POST describe above: only `sensor_accounts` is truncated.
+  const fixture = useDatabaseFixture(["sensor_accounts"]);
 
   async function setup() {
     const sensorAccounts = await import("../../routes/sensor-accounts");

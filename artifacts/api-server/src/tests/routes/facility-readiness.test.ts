@@ -36,12 +36,15 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture([
-    "facility_readiness_events",
-    "facilities",
-    "organizations",
-    "users",
-  ]);
+  // Only `facility_readiness_events` is truncated. `facilities`/`organizations`/
+  // `users` are shared reference tables the FK graph now fans out through
+  // (TRUNCATE ... CASCADE would destroy every cycles/inventory_items/alerts/
+  // tasks/shipments/... row plus the pilot-default facility other suites
+  // resolve via `ORDER BY id LIMIT 1`). Every setup() here creates its own
+  // fresh org+facility and every assertion is keyed off that returned id or
+  // the signed-in test user's own organizationId (reset per-call by
+  // seedTestUser) — never off these tables being globally empty.
+  const fixture = useDatabaseFixture(["facility_readiness_events"]);
 
   async function setup() {
     const facilityReadiness = await import("../../routes/facility-readiness");
@@ -108,12 +111,10 @@ describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
 });
 
 describe("POST /api/facility-readiness/events", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture([
-    "facility_readiness_events",
-    "facilities",
-    "organizations",
-    "users",
-  ]);
+  // See the GET describe above: only `facility_readiness_events` is
+  // truncated; the org/facility/user tables are shared reference data that
+  // must survive across suites.
+  const fixture = useDatabaseFixture(["facility_readiness_events"]);
 
   async function setup() {
     const facilityReadiness = await import("../../routes/facility-readiness");

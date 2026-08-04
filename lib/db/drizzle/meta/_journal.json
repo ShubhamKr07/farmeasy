@@ -120,6 +120,62 @@
       "when": 1785608167787,
       "tag": "0016_enforce_tenancy_not_null_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785778481357,
+      "tag": "0017_organization_members",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785778974093,
+      "tag": "0018_tenancy_scoping_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785778975093,
+      "tag": "0019_backfill_tenancy_scoping",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785778976093,
+      "tag": "0020_enforce_tenancy_scoping_not_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785780226294,
+      "tag": "0021_inventory_item_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785780226394,
+      "tag": "0022_inventory_item_code_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785781255524,
+      "tag": "0023_seed_lots_facility_scoping",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785781255624,
+      "tag": "0024_seed_lots_qr_code_backfill_and_contract",
+      "breakpoints": true
     }
   ]
 }
