@@ -46,6 +46,78 @@ export async function seedTestUser(
 }
 
 /**
+ * Seeds a full tenant context for a synthetic test-user id: the `auth.users`
+ * + `public.users` rows (via seedTestUser), an `organizations` row, a
+ * `facilities` row linked to that org, and an `organization_members` row
+ * (status: active) linking the user to the org. This is exactly what
+ * resolveTenantContext (middlewares/tenantContext.ts) joins on to populate
+ * `req.tenant` { organizationId, facilityId, role }, which the
+ * withTenantScope-rewired routes (alerts/tasks/shipments) require.
+ *
+ * Returns the created { organizationId, facilityId } so the caller can scope
+ * its own fixture inserts to the same facilityId the request will be filtered
+ * by (the route's eq(table.facilityId, req.tenant!.facilityId)).
+ *
+ * `organizations`/`facilities`/`organization_members` are shared reference
+ * tables (never truncated by these suites' fixtures — see useDatabaseFixture),
+ * so each call creates its own fresh rows and assertions key off the returned
+ * ids rather than off the tables being globally empty. The
+ * `organization_members.user_id` unique index means a second call for the
+ * same userId (e.g. across describe blocks) upserts the membership onto the
+ * new org — never a duplicate, never a stale-org leak.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function seedTenantContext(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema: {
+    usersTable: any;
+    organizationsTable: any;
+    facilitiesTable: any;
+    organizationMembersTable: any;
+  },
+  user: { id: string; email: string; role?: string },
+  options: { farmName?: string; facilityName?: string; timezone?: string; memberRole?: "owner" | "admin" | "technician" } = {},
+): Promise<{ organizationId: number; facilityId: number }> {
+  await seedTestUser(db, schema.usersTable, { ...user, organizationId: null });
+
+  const [org] = await db
+    .insert(schema.organizationsTable)
+    .values({ name: options.farmName ?? "Test Farm" })
+    .returning();
+
+  const [facility] = await db
+    .insert(schema.facilitiesTable)
+    .values({
+      name: options.farmName ?? "Test Farm",
+      organizationId: org.id,
+      facilityName: options.facilityName ?? "Main Facility",
+      timezone: options.timezone ?? "UTC",
+    })
+    .returning();
+
+  await db
+    .insert(schema.organizationMembersTable)
+    .values({
+      organizationId: org.id,
+      userId: user.id,
+      role: options.memberRole ?? "technician",
+      status: "active",
+    })
+    .onConflictDoUpdate({
+      target: schema.organizationMembersTable.userId,
+      set: {
+        organizationId: org.id,
+        role: options.memberRole ?? "technician",
+        status: "active",
+      },
+    });
+
+  return { organizationId: org.id, facilityId: facility.id };
+}
+
+/**
  * TEST_DATABASE_URL gate, mirroring src/tests/metrics/parity.test.ts:
  * hard-fail only when REQUIRE_TEST_DATABASE=true, otherwise return the URL
  * (or undefined) so the caller can skip its suite. Callers wrap their

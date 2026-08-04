@@ -1,10 +1,11 @@
 import { describe, test } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import request from "supertest";
-import { createAuthenticatedTestApp } from "../helpers/testApp";
+import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  seedTenantContext,
   closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
 
@@ -43,11 +44,24 @@ describe(
       // against TEST_DATABASE_URL, set by the fixture's `before` hook). Safe
       // because this only runs inside a non-skipped describe.
       const tasks = await import("../../routes/tasks");
-      const { db, tasksTable } = await import("@workspace/db");
+      const {
+        db,
+        tasksTable,
+        usersTable,
+        organizationsTable,
+        facilitiesTable,
+        organizationMembersTable,
+      } = await import("@workspace/db");
+      const { facilityId } = await seedTenantContext(
+        db,
+        { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+        { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      );
       return {
         app: createAuthenticatedTestApp(tasks.default),
         db,
         tasksTable,
+        facilityId,
       };
     }
 
@@ -67,8 +81,11 @@ describe(
     };
 
     test("default (no status) returns only open tasks", async () => {
-      const { app, db, tasksTable } = await setup();
-      await db.insert(tasksTable).values([{ ...PENDING }, { ...DONE }]);
+      const { app, db, tasksTable, facilityId } = await setup();
+      await db.insert(tasksTable).values([
+        { ...PENDING, facilityId },
+        { ...DONE, facilityId },
+      ]);
 
       const res = await request(app).get("/api/tasks");
 
@@ -81,8 +98,11 @@ describe(
     });
 
     test("status=done returns the completed task", async () => {
-      const { app, db, tasksTable } = await setup();
-      await db.insert(tasksTable).values([{ ...PENDING }, { ...DONE }]);
+      const { app, db, tasksTable, facilityId } = await setup();
+      await db.insert(tasksTable).values([
+        { ...PENDING, facilityId },
+        { ...DONE, facilityId },
+      ]);
 
       const res = await request(app).get("/api/tasks").query({ status: "done" });
 
@@ -96,8 +116,11 @@ describe(
     });
 
     test("status=pending returns only pending tasks", async () => {
-      const { app, db, tasksTable } = await setup();
-      await db.insert(tasksTable).values([{ ...PENDING }, { ...DONE }]);
+      const { app, db, tasksTable, facilityId } = await setup();
+      await db.insert(tasksTable).values([
+        { ...PENDING, facilityId },
+        { ...DONE, facilityId },
+      ]);
 
       const res = await request(app)
         .get("/api/tasks")
@@ -109,16 +132,17 @@ describe(
     });
 
     test("status=in_progress filters by status (no false isNull clause)", async () => {
-      const { app, db, tasksTable } = await setup();
+      const { app, db, tasksTable, facilityId } = await setup();
       await db.insert(tasksTable).values([
-        { ...PENDING },
-        { ...DONE },
+        { ...PENDING, facilityId },
+        { ...DONE, facilityId },
         {
           type: "transplant" as const,
           status: "in_progress" as const,
           assignee: null,
           dueAt: null,
           completedAt: null,
+          facilityId,
         },
       ]);
 
@@ -132,8 +156,11 @@ describe(
     });
 
     test("invalid status falls back to open-tasks default", async () => {
-      const { app, db, tasksTable } = await setup();
-      await db.insert(tasksTable).values([{ ...PENDING }, { ...DONE }]);
+      const { app, db, tasksTable, facilityId } = await setup();
+      await db.insert(tasksTable).values([
+        { ...PENDING, facilityId },
+        { ...DONE, facilityId },
+      ]);
 
       const res = await request(app)
         .get("/api/tasks")

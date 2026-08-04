@@ -8,6 +8,19 @@ export interface TenantContext {
 }
 
 /**
+ * The transaction-callback signature drizzle's `db.transaction` accepts.
+ * Mirrored explicitly (instead of `Parameters<typeof db.transaction>[0]`)
+ * because extracting the parameter tuple collapses the generic: the resulting
+ * type is a non-generic function returning `Promise<unknown>`, so callers lose
+ * the return-type inference they rely on (`const rows = await withTenantScope(
+ * ..., (tx) => tx.select()...)` would widen `rows` to `unknown`). Keeping `T`
+ * on the callback parameter lets TypeScript infer it from each call site.
+ */
+type TransactionCallback<T> = (
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+) => Promise<T>;
+
+/**
  * Wraps a scoped query in a transaction that sets transaction-local session
  * variables for RLS policies to key on (app.org_id, app.facility_id). This
  * is the ONLY sanctioned way route handlers touch a tenant-scoped table --
@@ -26,7 +39,7 @@ export interface TenantContext {
  */
 export async function withTenantScope<T>(
   ctx: TenantContext,
-  fn: Parameters<typeof db.transaction>[0],
+  fn: TransactionCallback<T>,
 ): Promise<T> {
   if (!ctx || !ctx.organizationId) {
     throw new Error("withTenantScope called without a resolvable organization context");
@@ -43,5 +56,5 @@ export async function withTenantScope<T>(
       await tx.execute(sql`SELECT set_config('app.facility_id', ${ctx.facilityId.toString()}, true)`);
     }
     return fn(tx);
-  }) as Promise<T>;
+  });
 }

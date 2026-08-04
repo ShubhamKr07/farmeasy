@@ -56,11 +56,26 @@ describe(
       // against TEST_DATABASE_URL, set by the fixture's `before` hook). Safe
       // because this only runs inside a non-skipped describe.
       const inventory = await import("../../routes/inventory");
-      const { db, inventoryItemsTable } = await import("@workspace/db");
+      const {
+        db,
+        inventoryItemsTable,
+        usersTable,
+        organizationsTable,
+        facilitiesTable,
+        organizationMembersTable,
+      } = await import("@workspace/db");
+      const { seedTenantContext } = await import("../helpers/testDatabase");
+      const { DEFAULT_TEST_USER } = await import("../helpers/testApp");
+      const { facilityId } = await seedTenantContext(
+        db,
+        { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+        { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      );
       return {
         app: createAuthenticatedTestApp(inventory.default),
         db,
         inventoryItemsTable,
+        facilityId,
       };
     }
 
@@ -70,6 +85,7 @@ describe(
     async function seed(
       db: Setup["db"],
       table: Setup["inventoryItemsTable"],
+      facilityId: number,
       overrides: { name?: string; currentQty?: string; maxQty?: string } = {},
     ): Promise<number> {
       const [row] = await db
@@ -79,6 +95,7 @@ describe(
           currentQty: overrides.currentQty ?? "5",
           maxQty: overrides.maxQty ?? "10",
           unit: "g",
+          facilityId,
         })
         .returning();
       return row.id;
@@ -219,8 +236,8 @@ describe(
     // ── PATCH validation against merged state ────────────────────────────────
 
     test("rejects PATCH currentQty above stored maxQty", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable, { currentQty: "5", maxQty: "8" });
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId, { currentQty: "5", maxQty: "8" });
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ currentQty: 9 }); // 9 > stored 8
@@ -228,8 +245,8 @@ describe(
     });
 
     test("rejects PATCH maxQty below stored currentQty", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable, { currentQty: "5", maxQty: "8" });
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId, { currentQty: "5", maxQty: "8" });
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ maxQty: 4 }); // stored 5 > 4
@@ -237,15 +254,15 @@ describe(
     });
 
     test("rejects empty PATCH", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable);
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId);
       const res = await request(app).patch(`/api/inventory/${id}`).send({});
       strictEqual(res.status, 400);
     });
 
     test("rejects PATCH with an unknown key (strict)", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable);
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId);
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ bogus: true });
@@ -253,8 +270,8 @@ describe(
     });
 
     test("rejects PATCH non-numeric currentQty", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable);
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId);
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ currentQty: "abc" });
@@ -270,8 +287,8 @@ describe(
     });
 
     test("PATCH currentQty within stored maxQty succeeds (happy path)", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable, { currentQty: "5", maxQty: "10" });
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId, { currentQty: "5", maxQty: "10" });
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ currentQty: 7 }); // 7 <= stored 10
@@ -281,8 +298,8 @@ describe(
     });
 
     test("PATCH can raise maxQty to allow a later currentQty (merged ok)", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
-      const id = await seed(db, inventoryItemsTable, { currentQty: "5", maxQty: "8" });
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
+      const id = await seed(db, inventoryItemsTable, facilityId, { currentQty: "5", maxQty: "8" });
       const res = await request(app)
         .patch(`/api/inventory/${id}`)
         .send({ maxQty: 12 }); // stored 5 <= 12
@@ -294,13 +311,13 @@ describe(
     // ── Concurrency ──────────────────────────────────────────────────────────
 
     test("two concurrent valid-but-jointly-invalid patches: exactly one wins", async () => {
-      const { app, db, inventoryItemsTable } = await setup();
+      const { app, db, inventoryItemsTable, facilityId } = await setup();
       // Stored state at request-send time: currentQty=5, maxQty=10. Each
       // request is individually valid against THAT state:
       //   {currentQty: 9} -> 9 <= 10 ok
       //   {maxQty: 8}     -> 5 <= 8  ok
       // but jointly 9 > 8 violates currentQty <= maxQty.
-      const id = await seed(db, inventoryItemsTable, {
+      const id = await seed(db, inventoryItemsTable, facilityId, {
         currentQty: "5",
         maxQty: "10",
       });

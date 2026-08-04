@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, gt, desc, asc, ilike } from "drizzle-orm";
-import { db } from "@workspace/db";
-import { shipmentsTable } from "@workspace/db";
+import { withTenantScope, shipmentsTable } from "@workspace/db";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -82,7 +81,7 @@ router.get("/shipments", async (req: Request, res: Response) => {
   try {
     const { cursor, limit, status, client } = parseShipmentListQuery(req);
 
-    // Build the FULL where clause (cursor + status + client) BEFORE the
+    // Build the FULL where clause (facility + cursor + status + client) BEFORE the
     // limit+1, so filtered queries skip non-matching rows server-side rather
     // than truncating them into the limit+1 window. The previous code ran the
     // keyset query first and applied status/client as JS .filter() on the
@@ -91,19 +90,21 @@ router.get("/shipments", async (req: Request, res: Response) => {
     // limit+1 window), so they silently vanished — and hasMore/nextCursor were
     // computed from the wrong (post-filter, already-truncated) set, breaking
     // pagination for any filtered query.
-    const conditions = [];
+    const conditions = [eq(shipmentsTable.facilityId, req.tenant!.facilityId)];
     if (cursor !== undefined) conditions.push(gt(shipmentsTable.id, cursor));
     if (status) conditions.push(eq(shipmentsTable.status, status));
     if (client) {
       conditions.push(ilike(shipmentsTable.client, `%${escapeClientPattern(client)}%`));
     }
 
-    const rows = await db
-      .select()
-      .from(shipmentsTable)
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(asc(shipmentsTable.id))
-      .limit(limit + 1);
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(shipmentsTable)
+        .where(and(...conditions))
+        .orderBy(asc(shipmentsTable.id))
+        .limit(limit + 1),
+    );
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
@@ -129,19 +130,22 @@ router.post("/shipments", async (req: Request, res: Response) => {
     let shortId = generateShortId();
     let shipment: typeof shipmentsTable.$inferSelect | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
-      [shipment] = await db
-        .insert(shipmentsTable)
-        .values({
-          shortId,
-          client,
-          productDescription: productDescription ?? null,
-          yieldSoldKg: yieldSoldKg ? String(yieldSoldKg) : null,
-          revenueUsd: revenueUsd ? String(revenueUsd) : null,
-          shippingDate: shippingDate ?? null,
-          status: status ?? "pending",
-        })
-        .onConflictDoNothing({ target: [shipmentsTable.shortId] })
-        .returning();
+      [shipment] = await withTenantScope(req.tenant!, (tx) =>
+        tx
+          .insert(shipmentsTable)
+          .values({
+            shortId,
+            client,
+            productDescription: productDescription ?? null,
+            yieldSoldKg: yieldSoldKg ? String(yieldSoldKg) : null,
+            revenueUsd: revenueUsd ? String(revenueUsd) : null,
+            shippingDate: shippingDate ?? null,
+            status: status ?? "pending",
+            facilityId: req.tenant!.facilityId,
+          })
+          .onConflictDoNothing({ target: [shipmentsTable.shortId] })
+          .returning(),
+      );
       if (shipment) break;
       shortId = generateShortId();
     }
@@ -166,11 +170,13 @@ router.patch("/shipments/:id/status", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const [shipment] = await db
-      .update(shipmentsTable)
-      .set({ status })
-      .where(eq(shipmentsTable.id, id))
-      .returning();
+    const [shipment] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(shipmentsTable)
+        .set({ status })
+        .where(and(eq(shipmentsTable.id, id), eq(shipmentsTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
 
     if (!shipment) return res.status(404).json({ error: "Shipment not found" });
     return res.json(formatShipment(shipment));
@@ -198,11 +204,13 @@ router.patch("/shipments/:id", async (req: Request, res: Response) => {
       updateData.status = status;
     }
 
-    const [shipment] = await db
-      .update(shipmentsTable)
-      .set(updateData)
-      .where(eq(shipmentsTable.id, id))
-      .returning();
+    const [shipment] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(shipmentsTable)
+        .set(updateData)
+        .where(and(eq(shipmentsTable.id, id), eq(shipmentsTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
 
     if (!shipment) return res.status(404).json({ error: "Shipment not found" });
     return res.json(formatShipment(shipment));
@@ -215,10 +223,12 @@ router.patch("/shipments/:id", async (req: Request, res: Response) => {
 router.delete("/shipments/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params["id"] as string, 10);
-    const [shipment] = await db
-      .delete(shipmentsTable)
-      .where(eq(shipmentsTable.id, id))
-      .returning();
+    const [shipment] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .delete(shipmentsTable)
+        .where(and(eq(shipmentsTable.id, id), eq(shipmentsTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
 
     if (!shipment) return res.status(404).json({ error: "Shipment not found" });
     return res.json({ ok: true, id });
