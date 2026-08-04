@@ -2056,7 +2056,7 @@ const BASELINE_VIOLATIONS = new Set([
 ]);
 ```
 
-Note: `alerts.ts`, `growthProfiles.ts`, `sensors.ts` baseline entries above are now ALSO stale (Tasks 4, 5, 7 fixed those exact lines) — remove all three, plus `seedLots.ts`'s if present. `dashboard.ts` and `facility-readiness.ts`'s entries are genuinely still open (neither file is in this plan's scope) — leave those two.
+Note: `alerts.ts`, `growthProfiles.ts`, `sensors.ts` baseline entries above are now ALSO stale (Tasks 4, 5, 7 fixed those exact lines) — remove all three, plus `seedLots.ts`'s if present. `dashboard.ts`, `facility-readiness.ts`, and `layout.ts`'s entries are genuinely still open (none of the three is in this plan's scope) — leave all three. (`layout.ts` was discovered by Task 3's own hardened multi-line detection, not anticipated when this note was originally written; it's the same category of pre-existing, out-of-scope debt as the other two, confirmed by Task 3's review.)
 
 #### Wire `requireTenantContext` for `inventoryRouter`
 
