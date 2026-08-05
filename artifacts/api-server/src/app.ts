@@ -115,7 +115,7 @@ app.use("/api", requireSignedIn, dashboardRouter);
 app.use("/api", requireSignedIn, requireTenantContext, alertsRouter);
 app.use("/api", requireSignedIn, inventoryRouter);
 app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
-app.use("/api", requireSignedIn, badTraysRouter);
+app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
 app.use("/api", requireSignedIn, requireTenantContext, cyclesRouter);
 app.use("/api", requireSignedIn, layoutRouter);
 app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
