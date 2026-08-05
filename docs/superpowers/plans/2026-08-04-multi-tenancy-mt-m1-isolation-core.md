@@ -3894,7 +3894,7 @@ This was masked until now because:
 
 ### Task 16, part 2: RLS GUC-placeholder poisoning under connection pooling
 
-**Found running Task 15 (isolation suite against staging), folded into Task 16 per explicit decision — deeper and more consequential than part 1, needs its own careful fix, not a quick inline patch.**
+**Found running Task 15 (isolation suite against staging), folded into Task 16 per explicit decision. FIXED — migration `00013_tenancy_policies_nullif_guc_cast.sql` applied and verified against staging (confirmed via direct psql probe: `NULLIF(current_setting(...), '')::int` no longer throws). This section is now historical record of the investigation, not an open item.**
 
 **Files:**
 - Fix: new migration (`supabase/migrations/0001{N}_...`) altering the 11 policies in `supabase/migrations/00007_tenancy_rls_policies.sql`.
@@ -3937,11 +3937,43 @@ alter policy "tenant isolation by facility" on public.cycles
 
 **What this task should do:**
 
-1. Write a new migration altering all 11 policies (use `ALTER POLICY ... USING (...)`, not drop/recreate, to preserve policy identity/ordering).
-2. Bump `supabase/tests/00001_foundation.sql`'s migration-count assertion.
-3. Apply to staging, re-run the Task 14 isolation suite (`cross-tenant.test.ts`) against it — this was blocked by exactly this bug during Task 15's first attempt (`invalid input syntax for type integer: ""` on an `organization_members` INSERT, where 00007's own bare-cast policy is evaluated as an additional permissive policy alongside 00011's `current_user`-scoped one — Postgres evaluates ALL applicable permissive policies for a command, not just the first one that would pass, so one throwing policy aborts the whole statement even if another would have separately permitted it).
-4. Confirm the full isolation suite passes cleanly, twice in a row, against staging.
+1. ~~Write a new migration altering all 11 policies~~ DONE — `00013_tenancy_policies_nullif_guc_cast.sql` (used `ALTER POLICY ... USING (...)`, preserving policy identity/ordering).
+2. ~~Bump `supabase/tests/00001_foundation.sql`'s migration-count assertion~~ DONE.
+3. ~~Apply to staging, re-run the Task 14 isolation suite against it~~ DONE — confirmed the GUC-cast error is gone (the isolation suite got past it; a separate, unrelated bug — part 3 below — is what's blocking full-green now).
+4. Confirm the full isolation suite passes cleanly, twice in a row, against staging — blocked on part 3's fix below, not on this bug anymore.
 5. Consider (not required, but worth deciding explicitly): whether `withTenantScope` itself should proactively guard against this (e.g. documenting the risk inline) even after the RLS-side fix, since any FUTURE tenant-scoped table added without going through the same defensive pattern would reintroduce this exact class of bug.
+
+### Task 16, part 3: metrics dispatch never uses withTenantScope — RLS silently zeroes every dashboard query
+
+**Found immediately after part 2's fix, same Task 15 verification pass. NOT YET FIXED — folded into Task 16 per explicit "keep investigating first" decision.**
+
+**Files:**
+- `artifacts/api-server/src/routes/metrics.ts` (the `GET /metrics` dispatch loop)
+- `artifacts/api-server/src/lib/metrics/templates.ts` (5 affected functions: `scalarAgg`, `groupBy`, `timeBucket`, `ratio`, `tableTemplate` — `customTemplate`/`quickbooksTemplate` themselves don't query directly, they dispatch further)
+- `artifacts/api-server/src/lib/metrics/custom.ts` (all 11 hand-written functions)
+- `lib/db/src/scope.ts` (`withTenantScope` — the mechanism these need to start using)
+
+**Confirmed NOT affected:** `lib/accounting/quickbooks-reports.ts` (`runQuickbooksQuery`) — doesn't import `@workspace/db` at all, calls the QuickBooks external API directly, no local RLS-protected table involved.
+
+**The bug, confirmed empirically (not theoretical):**
+
+With part 2's GUC-cast fix applied and the isolation suite's own fixture-truncation bug (see below) also fixed, 10 of 11 `cross-tenant.test.ts` tests pass cleanly. The 11th (`GET /api/metrics`) fails: org A's own `GET /api/metrics?tab=overview&keys=ov.tasks.open` returns `{"ov.tasks.open":{"value":0}}` — no error, just silently wrong (org A seeded exactly one non-done task, expected `value >= 1`).
+
+Root cause: `templates.ts`/`custom.ts` import `db` directly from `@workspace/db` and call `db.execute(sql.raw(q))` — never through `withTenantScope`'s transaction (`tx`). Their OWN tenant scoping is entirely via an explicit `:facilityId`/`:organizationId` placeholder substituted with a literal number (`substitutePlaceholders`, `tz.ts`) — correct application-level scoping, but this never calls `set_config`, so `app.facility_id`/`app.org_id` are never set for these queries' connection. `00007`'s RLS policies are STILL active on every one of these tables regardless (defense-in-depth, applied automatically by Postgres) and require `app.facility_id`/`app.org_id` to be set to a real value to admit any row. Since metrics queries never set it, and part 2's fix now correctly evaluates the missing/placeholder GUC to NULL (not a thrown error), the RLS comparison is always `col = NULL` → NULL → **false for every row** — every metrics/dashboard query silently returns zero rows under real RLS enforcement, independent of whether its own explicit literal-substitution scoping was correct.
+
+This is a **silent, wrong-answer** failure mode (unlike part 2, which was a thrown error) — a real production correctness bug once a non-BYPASSRLS role is live: the entire `/api/metrics` dashboard would silently show zeros for every tenant, not an error a user or monitoring would necessarily notice quickly.
+
+**Why this wasn't caught earlier:** Tasks 11/12's own reviews verified the generic templates' and custom queries' facility/organization scoping logic (positional argument correctness, per-function SQL correctness) exhaustively — but always against a database connection with BYPASSRLS (disposable-stack default, or the pre-rotation staging connection), where RLS is a no-op regardless of whether `app.facility_id` is set. Nothing in Tasks 11/12's verification ever ran under a real, enforced-RLS role — that only happened here, in Task 15.
+
+**Recommended fix (not yet implemented — needs care before applying):**
+
+Thread a transaction handle through the dispatch chain so these queries run inside the same transaction that sets `app.org_id`/`app.facility_id`, instead of importing the bare `db` singleton:
+
+1. In `routes/metrics.ts`, wrap the entire `Promise.all(valid.map(...))` dispatch in one `withTenantScope(req.tenant!, async (tx) => { ... })` call.
+2. Every `TEMPLATES[...]` function (7 in `templates.ts`) and every `CUSTOM_QUERIES[...]` function (11 in `custom.ts`) needs an additional `tx` parameter (or its bare `db.execute` calls need to become `tx.execute`) so they execute against the SAME transaction-scoped connection, not the module-level `db` singleton.
+3. Note: `Promise.all` over multiple queries against the SAME transaction/connection will not gain parallel speedup either way (a single Postgres connection processes one query at a time regardless of JS-level concurrency) — this is a correctness fix, not a performance regression, but worth calling out explicitly in the implementer's dispatch so nobody "fixes" the now-serialized behavior back to something unscoped.
+4. Verify via the SAME `cross-tenant.test.ts` `GET /api/metrics` test — it should return `value >= 1` for org A and exactly `0` for org B once fixed, both for the right reason (real data, not an RLS-caused empty result masquerading as a legitimate zero).
+5. Re-check `custom.ts`'s existing task-12-era review findings (the `ovYieldExpectedVsActual` leak fixed post-Task-12, the 10 functions reviewed in Task 12 itself) still hold once queries move from `db` to `tx` — the SQL text itself doesn't change, only which connection/transaction executes it, so this should be a mechanical threading change, not a query-logic change.
 
 ---
 

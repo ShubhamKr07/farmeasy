@@ -7,7 +7,6 @@ import { randomUUID } from "node:crypto";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
-  useDatabaseFixture,
   seedTestUser,
   closeDatabasePoolAfterTests,
   getAdminDb,
@@ -32,18 +31,17 @@ combinedRouter.use(inventoryRouter);
 combinedRouter.use(growthProfilesRouter);
 combinedRouter.use(metricsRouter);
 
-describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
-  // Every table this milestone scopes, plus the bootstrap tables the two
-  // orgs themselves are created into -- a full-suite truncate is safe here
-  // (this is the ONLY test file in the isolation/ directory, no cross-file
-  // pollution risk per MT-M0's Task 13 finding).
-  const fixture = useDatabaseFixture([
-    "organizations", "facilities", "rooms", "users", "organization_members",
-    "cycles", "inventory_items", "alerts", "tasks", "shipments",
-    "facility_logs", "sensors", "growth_profiles", "seed_lots",
-    "manual_checks", "bad_tray_entries",
-  ]);
+// Every table this milestone scopes, plus the bootstrap tables the two orgs
+// themselves are created into -- a full-suite truncate is safe here (this is
+// the ONLY test file in the isolation/ directory, no cross-file pollution
+// risk per MT-M0's Task 13 finding).
+const FIXTURE_TABLES =
+  "organizations, facilities, rooms, users, organization_members, " +
+  "cycles, inventory_items, alerts, tasks, shipments, " +
+  "facility_logs, sensors, growth_profiles, seed_lots, " +
+  "manual_checks, bad_tray_entries";
 
+describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   let orgA: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number };
   let orgB: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number };
   let seededAlertId: number;
@@ -53,7 +51,21 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   let seededGrowthProfileId: number;
 
   before(async () => {
+    if (!dbUrl) return;
+    process.env.DATABASE_URL = dbUrl;
     const { db, usersTable } = await import("@workspace/db");
+
+    // ONE truncate for the whole suite, not per-test: this suite seeds org
+    // A/B and their resources ONCE here, then reads/asserts against that
+    // same data across many tests below. useDatabaseFixture's beforeEach
+    // (re-truncating before EVERY test) would wipe this seeded data out
+    // between test cases -- caught for real running this exact suite: every
+    // test after the first found orgA/orgB's own facilities/rooms/
+    // memberships gone, since beforeEach nuked them right before each test
+    // ran.
+    await (getAdminDb() ?? db).execute(
+      (await import("drizzle-orm")).sql.raw(`TRUNCATE ${FIXTURE_TABLES} RESTART IDENTITY CASCADE`),
+    );
 
     async function provisionOrg(email: string) {
       const userId = randomUUID();

@@ -80,11 +80,15 @@ SELECT is(
 -- organization_members -- the CRITICAL fix for resolveTenantContext's own
 -- bootstrap lookup, which 00008's auth.uid()-based policy could never
 -- satisfy for this backend's connection (found running the TEN-007
--- isolation suite, Task 15, against staging).
+-- isolation suite, Task 15, against staging). 00013 alters those same 11
+-- policies to wrap current_setting(...) in NULLIF before casting to int --
+-- the placeholder GUC's empty-string resting state (once ever referenced on
+-- a pooled backend) otherwise throws instead of evaluating to false (Task 16
+-- part 2).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  12,
-  'supabase_migrations.schema_migrations has exactly 12 rows (Supabase migrations 00001-00012)'
+  13,
+  'supabase_migrations.schema_migrations has exactly 13 rows (Supabase migrations 00001-00013)'
 );
 
 SELECT * FROM finish();
