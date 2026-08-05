@@ -3872,6 +3872,21 @@ git commit -m "docs: record MT-M1 TEN-007 staging isolation run, meeting the mil
 
 ### Task 16: Test-suite isolation audit — shared synthetic test user
 
+**FIXED and verified.** Audited every file in the list below for the
+`organization_members`-accumulation dependency: only `facilities.test.ts`
+was actually at risk — grepped every other rewired route
+(`alerts`/`tasks`/`shipments`/`inventory`/`sensor-accounts`/`wizard`/
+`recommend`/`facility-readiness`) and confirmed none of them touch
+`organization_members` at all; `facilities.ts` is the only route that
+plain-inserts into it (a real user gets exactly one membership, created
+once — no upsert), matching `facilities.test.ts`'s own test flow. Fixed
+by having both of its describe blocks' `setup()` delete any pre-existing
+`organization_members` row for the shared user before running (option (b)
+below). Verified empirically against staging: seeded a stale row via
+`tasks.test.ts`, confirmed it existed, then ran `facilities.test.ts` in a
+**separate process** against the same persistent database — all 4 tests
+passed cleanly. `pnpm --filter @workspace/api-server run typecheck` clean.
+
 **Files:**
 - Investigate: `artifacts/api-server/src/tests/routes/facilities.test.ts`, `facility-readiness.test.ts`, `inventory.test.ts`, `sensor-accounts.test.ts`, `recommend.test.ts`, `seedLots.test.ts`, `sensors-bulk.test.ts`, `wizard.test.ts`, `shipments.test.ts`, `tasks.test.ts` — every file using `DEFAULT_TEST_USER.sub`/`seedTenantContext`/`seedTestUser` (`testApp.ts`'s single hardcoded synthetic id, `00000000-0000-4000-8000-000000000001`).
 
