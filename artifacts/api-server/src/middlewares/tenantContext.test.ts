@@ -5,7 +5,7 @@ import { requireTenantContext } from "./tenantContext";
 import type { Request, Response } from "express";
 
 describe("requireTenantContext", () => {
-  test("403s when req.tenant is unset", () => {
+  test("400s when req.tenant is unset", () => {
     const req = {} as Request;
     let statusCode: number | undefined;
     let body: unknown;
@@ -23,9 +23,9 @@ describe("requireTenantContext", () => {
     requireTenantContext(req, res, () => {
       nextCalled = true;
     });
-    strictEqual(statusCode, 403);
+    strictEqual(statusCode, 400);
     strictEqual(nextCalled, false);
-    strictEqual((body as { error: string }).error, "No facility membership found");
+    strictEqual((body as { error: string }).error, "Missing or invalid X-Facility-Id");
   });
 
   test("calls next() when req.tenant is set", () => {
