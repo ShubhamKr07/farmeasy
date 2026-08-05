@@ -43,16 +43,16 @@ Routes needing a facility (anything currently gated by `requireTenantContext`) 4
 - `routes/wizard.ts` + a new Drizzle migration — thread `facilityId` through `GET`/`PUT /wizard/progress`, per the schema change above.
 - Route-handler audit — sweep every MT-M1-rewired handler (the plan doc's own flagged risk: "every one of these handlers needs re-auditing to confirm none of them cache, hardcode, or otherwise assume single-facility behavior beyond just reading the field") for anything beyond a plain `req.tenant.facilityId` read.
 
-**Frontend (both apps):**
-- `lib/api-client-react/src/custom-fetch.ts` + a new `setFacilityId()` export — the one place the header gets attached, alongside the existing auth-token attachment.
-- Facility-switcher component: web header dropdown (`admin-dashboard`), mobile profile-sheet equivalent (`farmeasy`) — both persisted (localStorage / SecureStore) and restored at boot, both hidden entirely when the org has exactly one facility.
-- "Add facility" entry point on both platforms, launching the same wizard component with `facilityId: null`.
+**Frontend:**
+- `lib/api-client-react/src/custom-fetch.ts` + a new `setFacilityId()` export — the one place the header gets attached, alongside the existing auth-token attachment. Shared by both apps.
+- Facility-switcher component, both apps: web header dropdown (`admin-dashboard`), mobile profile-sheet equivalent (`farmeasy`, `HamburgerMenu.tsx`) — both persisted (localStorage / AsyncStorage) and restored at boot, both hidden entirely when the org has exactly one facility. Both read-and-switch only — see §3a.
+- "Add facility" entry point — **web only** (`admin-dashboard`), launching the existing wizard component with `facilityId: null`. Not built on mobile (§3a).
 
 ## 5. Data flow
 
-User switches facility (or app boots and restores the persisted selection) → `setFacilityId(id)` → every subsequent API call carries `X-Facility-Id: id` → `resolveTenantContext` re-validates real membership on every single request (never trusts the client's prior validation) → `req.tenant` reflects the switch → existing `withTenantScope`-wrapped routes behave exactly as they do today, just scoped to a different facility.
+User switches facility (or app boots and restores the persisted selection) → `setFacilityId(id)` → every subsequent API call carries `X-Facility-Id: id` → `resolveTenantContext` re-validates real membership on every single request (never trusts the client's prior validation) → `req.tenant` reflects the switch → existing `withTenantScope`-wrapped routes behave exactly as they do today, just scoped to a different facility. Identical on mobile — switching there is a pure client-side selection change, no separate auth step (§3a).
 
-"Add facility": user taps the entry point → wizard opens with no `facilityId` yet → W2's `POST /facilities` succeeds → the in-progress `wizard_progress` row (previously keyed on `facilityId: null`) gets stamped with the real new facility id → W3/W3.5 proceed exactly like first-time onboarding, just for this new facility → on completion, the switcher's facility list includes it and the checklist shows its own independent progress.
+"Add facility" (web only): user taps the entry point → wizard opens with no `facilityId` yet → W2's `POST /facilities` succeeds → the in-progress `wizard_progress` row (previously keyed on `facilityId: null`) gets stamped with the real new facility id → W3/W3.5 proceed exactly like first-time onboarding, just for this new facility → on completion, the switcher's facility list (both platforms) includes it and the checklist shows its own independent progress.
 
 ## 6. Error handling
 
@@ -66,16 +66,13 @@ Extends `cross-tenant.test.ts`'s existing cross-*organization* pattern one level
 
 TEN-009 (org rollup stubs), TEN-010 rev. B (team invites, roles, the technician mobile-only enforcement), TEN-012 (public sign-up), TEN-013 (demo mode) — each its own future sub-project. Role-based restriction on who can add a facility (TEN-010's territory). Per-facility membership assignment (Q24 explicitly defaults this to "all org members see all facilities" for v1 — a future RBAC initiative's scope, not this one).
 
-## 3a. Mobile "Add facility" authentication bridge
+## 3a. Mobile scope correction: switcher only, no wizard, no add-facility
 
-**Constraint (confirmed during planning, not covered above): technicians sign in on mobile only.** `farmeasy` already has its own independent Supabase Auth session (`app/(auth)/sign-in.tsx`) — a technician has no separate way to authenticate on the web dashboard, so simply opening the wizard's URL in the phone's system browser and expecting a fresh login there does not work. `farmeasy` already ships `expo-web-browser`, so "Add facility" opens the wizard in an **in-app browser** (`WebBrowser.openBrowserAsync`, not the OAuth-redirect variant — the user stays inside this browser through the whole W2→W3→W3.5 flow and closes it manually when the wizard reaches Done), pre-authenticated via a one-time session handoff:
+**Corrected during planning — supersedes the "both platforms get an add-facility entry point" line in §4 below.** Technicians authenticate on mobile only (`farmeasy` has its own independent Supabase Auth session; there is no separate web login for a technician). By design, `farmeasy` never creates facilities and never runs the onboarding wizard — the wizard (`Wizard.tsx`, W2→W4) stays exactly what it is today: a web-only, `admin-dashboard`-only flow. A facility a technician can switch to on mobile must already exist (created by an owner/admin on web).
 
-1. Mobile already holds a live Supabase session (`supabase.auth.getSession()` — same call `_layout.tsx` and `custom-fetch.ts`'s auth-token getter already use).
-2. `WebBrowser.openBrowserAsync` opens `<dashboardUrl>/mobile-bridge#access_token=<...>&refresh_token=<...>`, tokens carried in the URL **fragment**, not a query string — a fragment is never transmitted to the server or captured in access logs (the same reason Supabase's own OAuth implicit flow uses one).
-3. A new unauthenticated route in `admin-dashboard`, `/mobile-bridge`, renders outside the normal `AuthGate` session check. On mount it reads `window.location.hash`, calls `supabase.auth.setSession({ access_token, refresh_token })`, immediately clears the hash from history (`window.history.replaceState`) so the tokens never persist in browser history, then does a client-side redirect into the app with a one-shot "start add-facility" signal (a `sessionStorage` flag consumed once by the switcher's own state, forcing `FacilityGate` to render the wizard for a brand-new facility rather than the active one).
-4. The rest of the flow is identical to first-time web onboarding: `Wizard.tsx` runs unmodified, `wizard_progress` gets a `(userId, facilityId: null)` row until W2's `POST /facilities` stamps it.
+**"Switching facility" on mobile is not a re-authentication event** — it's the same per-request re-validation the architecture already does for every facility-scoped call (§3: `resolveTenantContext` re-validates `X-Facility-Id` against real `organization_members`/`facilities` rows on every request, never trusting a cached value). Mobile's job is: fetch `GET /facilities` (the org's real, existing facility list — same endpoint the web switcher uses), let the technician pick one, persist the selection, and send `X-Facility-Id` on every subsequent call. If a technician is later removed from a facility's org (or the org itself), the very next request 400s — there is no separate "check access" step to build.
 
-No new backend endpoint is needed for the handoff itself — `/mobile-bridge` is a frontend-only route that calls the Supabase JS SDK directly, the same SDK call every other sign-in path already uses.
+**Mobile scope for TEN-008 is therefore: the facility switcher UI only** (profile sheet — `HamburgerMenu.tsx`), reading and switching among facilities that already exist. No "Add facility" entry point on mobile, no wizard hand-off, no in-app browser, no session bridge.
 
 ## 9. Risks and gaps
 
