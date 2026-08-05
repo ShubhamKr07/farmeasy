@@ -18,7 +18,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function ovYieldExpectedVsActual() {
+async function ovYieldExpectedVsActual(facilityId: number, timezone: string) {
   const q = substitutePlaceholders(`
     SELECT gp.crop_id::text AS label,
            COALESCE(SUM(gp.expected_yield_per_tray_kg * (cycles.full_trays + cycles.half_trays * 0.5)), 0) AS expected,
@@ -28,7 +28,7 @@ async function ovYieldExpectedVsActual() {
     WHERE ${andWhere(softDelete("cycles"), "cycles.status='completed'")}
     GROUP BY gp.crop_id
     ORDER BY actual DESC
-  `);
+  `, facilityId, timezone);
   const res = await db.execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({
     label: String(r.label ?? "(unknown)"),
@@ -192,16 +192,16 @@ async function invMovDaysRemaining() {
   return { value: dailyRate > 0 ? num(row.current_qty) / dailyRate : 0 };
 }
 
-export const CUSTOM_QUERIES: Record<string, () => Promise<unknown>> = {
+export const CUSTOM_QUERIES: Record<string, (facilityId: number, timezone: string) => Promise<unknown>> = {
   "ov.yield.expectedVsActual": ovYieldExpectedVsActual,
-  "ov.cap.utilByRoom": ovCapUtilByRoom,
-  "ov.cap.trayMix": ovCapTrayMix,
-  "ov.cycles.completionRate": ovCyclesCompletionRate,
-  "ov.bad.rate": ovBadRate,
-  "sh.rev.growth": shRevGrowth,
-  "sh.econ.wasteRate": shEconWasteRate,
-  "inv.mov.turnover": invMovTurnover,
-  "inv.mov.daysRemaining": invMovDaysRemaining,
-  "ov.cap.rackOccupancy": ovCapRackOccupancy,
-  "ov.sensor.uptime": ovSensorUptime,
+  "ov.cap.utilByRoom": () => ovCapUtilByRoom(),
+  "ov.cap.trayMix": () => ovCapTrayMix(),
+  "ov.cycles.completionRate": () => ovCyclesCompletionRate(),
+  "ov.bad.rate": () => ovBadRate(),
+  "sh.rev.growth": () => shRevGrowth(),
+  "sh.econ.wasteRate": () => shEconWasteRate(),
+  "inv.mov.turnover": () => invMovTurnover(),
+  "inv.mov.daysRemaining": () => invMovDaysRemaining(),
+  "ov.cap.rackOccupancy": () => ovCapRackOccupancy(),
+  "ov.sensor.uptime": () => ovSensorUptime(),
 };

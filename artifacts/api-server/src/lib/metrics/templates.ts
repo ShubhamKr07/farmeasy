@@ -52,6 +52,7 @@ export async function scalarAgg(p: ScalarAggParams, facilityId: number, timezone
   const q = substitutePlaceholders(
     `SELECT ${aggExpr(p.measure, p.agg)} AS value FROM ${p.table} ${join} WHERE ${where}`,
     facilityId,
+    timezone,
   );
   const res = await db.execute(sql.raw(q));
   return { value: num((res.rows[0] as Row)?.value) };
@@ -67,16 +68,16 @@ export async function groupBy(p: GroupByParams, facilityId: number, timezone: st
     `SELECT COALESCE(${p.dim}::text, '(unknown)') AS label, ${aggExpr(p.measure, p.agg)} AS value
      FROM ${p.table} ${join} WHERE ${where} GROUP BY ${p.dim} ${order} ${limit}`,
     facilityId,
+    timezone,
   );
   const res = await db.execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
 }
 
 export async function timeBucket(p: TimeBucketParams, facilityId: number, timezone: string, range?: string): Promise<{ label: string; value: number }[]> {
-  void timezone;
   const { unit, count } = bucketRange(p.bucket, range);
-  const start = `${dateTrunc(unit, facilityNow())} - interval '${count - 1} ${unit}s'`;
-  const end = dateTrunc(unit, facilityNow());
+  const start = `${dateTrunc(unit, facilityNow(timezone))} - interval '${count - 1} ${unit}s'`;
+  const end = dateTrunc(unit, facilityNow(timezone));
   const intervalStep = `interval '1 ${unit}'`;
   const join = p.sensorType
     ? `${p.table} t JOIN sensors s ON s.id = t.sensor_id AND s.type = '${p.sensorType}'`
@@ -93,6 +94,7 @@ export async function timeBucket(p: TimeBucketParams, facilityId: number, timezo
      LEFT JOIN ${join} ON ${dateTrunc(unit, dateCol)} = gs.d ${p.where ? `AND ${p.where}` : ""}
      GROUP BY gs.d ORDER BY gs.d`,
     facilityId,
+    timezone,
   );
   const res = await db.execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
@@ -108,6 +110,7 @@ export async function ratio(p: RatioParams, facilityId: number, timezone: string
               COALESCE(${sumOrCount(p.denMeasure)}, 0) AS den
        FROM ${p.numTable} WHERE ${where} GROUP BY ${p.dim} ORDER BY num DESC`,
       facilityId,
+      timezone,
     );
     const res = await db.execute(sql.raw(q));
     return (res.rows as Row[]).map((r) => ({
@@ -121,6 +124,7 @@ export async function ratio(p: RatioParams, facilityId: number, timezone: string
     `SELECT COALESCE((SELECT ${sumOrCount(p.numMeasure)} FROM ${p.numTable} WHERE ${numW}), 0) AS num,
             COALESCE((SELECT ${sumOrCount(p.denMeasure)} FROM ${p.denTable} WHERE ${denW}), 0) AS den`,
     facilityId,
+    timezone,
   );
   const res = await db.execute(sql.raw(q));
   const row = res.rows[0] as Row;
@@ -136,16 +140,17 @@ export async function tableTemplate(p: TableParams, facilityId: number, timezone
   const q = substitutePlaceholders(
     `SELECT ${p.cols} FROM ${p.table} ${p.join ? `JOIN ${p.join}` : ""} WHERE ${where} ${order} ${limit}`,
     facilityId,
+    timezone,
   );
   const res = await db.execute(sql.raw(q));
   return res.rows as Row[];
 }
 
 export async function customTemplate(p: CustomParams, facilityId: number, timezone: string, range?: string): Promise<unknown> {
-  void facilityId; void timezone; void range;
+  void range;
   const fn = CUSTOM_QUERIES[p.key];
   if (!fn) throw new Error(`no custom query registered for key: ${p.key}`);
-  return fn();
+  return fn(facilityId, timezone);
 }
 
 export async function quickbooksTemplate(

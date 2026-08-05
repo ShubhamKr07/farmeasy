@@ -64,18 +64,18 @@ export function dateTrunc(unit: string, colExpr: string): string {
 }
 
 /** Facility-local "now" as a zoneless timestamp, for window bounds. */
-export function facilityNow(): string {
-  return `now() AT TIME ZONE '${FACILITY_TIMEZONE}'`;
+export function facilityNow(timezone: string): string {
+  return `now() AT TIME ZONE '${timezone}'`;
 }
 
 /**
  * WHERE fragment restricting `<colExpr>` to the last `days` days (facility-local).
  * Returns "" for unbounded (all-time).
  */
-export function rangeWindow(colExpr: string, range: string | undefined): string {
+export function rangeWindow(colExpr: string, range: string | undefined, timezone: string): string {
   const days = rangeToDays(range);
   if (days == null) return "";
-  return `${colExpr} >= (${facilityNow()}) - interval '${days} days'`;
+  return `${colExpr} >= (${facilityNow(timezone)}) - interval '${days} days'`;
 }
 
 export function rangeToDays(range: string | undefined): number | null {
@@ -106,11 +106,11 @@ export function execRaw(query: string) {
  *   :weekStart  -> facility now - 7 days
  *   :monthStart -> facility now - 30 days
  */
-export function substitutePlaceholders(q: string, facilityId: number): string {
+export function substitutePlaceholders(q: string, facilityId: number, timezone: string): string {
   return q
     .replace(/:cutover/g, `'${BAD_TRAYS_CUTOVER_DATE}'`)
-    .replace(/:weekStart/g, `(${facilityNow()} - interval '7 days')`)
-    .replace(/:monthStart/g, `(${facilityNow()} - interval '30 days')`)
+    .replace(/:weekStart/g, `(${facilityNow(timezone)} - interval '7 days')`)
+    .replace(/:monthStart/g, `(${facilityNow(timezone)} - interval '30 days')`)
     .replace(/:facilityId/g, String(Number(facilityId)));
 }
 
