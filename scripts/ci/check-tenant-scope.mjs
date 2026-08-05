@@ -114,9 +114,8 @@ const BASELINE_VIOLATIONS = new Set([
   // layout.ts: NOT in any MT-M1 sweep task -> permanent deferred debt:
   "artifacts/api-server/src/routes/layout.ts::const activeCycles = await db",
   "artifacts/api-server/src/routes/layout.ts::const [activeCyclesRow] = await db",
-  // shipments.ts (Task 4), tasks.ts (Task 4):
+  // shipments.ts (Task 4):
   "artifacts/api-server/src/routes/shipments.ts::const rows = await db",
-  "artifacts/api-server/src/tasks.ts::const rows = await db",
 ]);
 
 const newViolations = [];
