@@ -17,6 +17,7 @@ import {
   facilityNow,
   rangeToDays,
   softDelete,
+  facilityScope,
   andWhere,
   substitutePlaceholders,
   sumOrCount,
@@ -44,30 +45,35 @@ function aggExpr(measure: string, agg?: string): string {
   return `${a.toUpperCase()}(${measure})`;
 }
 
-export async function scalarAgg(p: ScalarAggParams, range?: string): Promise<{ value: number }> {
-  const where = andWhere(softDelete(p.table), p.where, rangeWindowFor(p.table, p, range));
+export async function scalarAgg(p: ScalarAggParams, facilityId: number, timezone: string, range?: string): Promise<{ value: number }> {
+  void timezone;
+  const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where, rangeWindowFor(p.table, p, range));
   const join = p.join ? `JOIN ${p.join}` : "";
   const q = substitutePlaceholders(
     `SELECT ${aggExpr(p.measure, p.agg)} AS value FROM ${p.table} ${join} WHERE ${where}`,
+    facilityId,
   );
   const res = await db.execute(sql.raw(q));
   return { value: num((res.rows[0] as Row)?.value) };
 }
 
-export async function groupBy(p: GroupByParams, range?: string): Promise<{ label: string; value: number }[]> {
-  const where = andWhere(softDelete(p.table), p.where, rangeWindowFor(p.table, p, range));
+export async function groupBy(p: GroupByParams, facilityId: number, timezone: string, range?: string): Promise<{ label: string; value: number }[]> {
+  void timezone;
+  const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where, rangeWindowFor(p.table, p, range));
   const order = p.order ? `ORDER BY value ${p.order.toUpperCase()}` : "ORDER BY value DESC";
   const limit = p.limit ? `LIMIT ${p.limit}` : "";
   const join = p.join ? `JOIN ${p.join}` : "";
   const q = substitutePlaceholders(
     `SELECT COALESCE(${p.dim}::text, '(unknown)') AS label, ${aggExpr(p.measure, p.agg)} AS value
      FROM ${p.table} ${join} WHERE ${where} GROUP BY ${p.dim} ${order} ${limit}`,
+    facilityId,
   );
   const res = await db.execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
 }
 
-export async function timeBucket(p: TimeBucketParams, range?: string): Promise<{ label: string; value: number }[]> {
+export async function timeBucket(p: TimeBucketParams, facilityId: number, timezone: string, range?: string): Promise<{ label: string; value: number }[]> {
+  void timezone;
   const { unit, count } = bucketRange(p.bucket, range);
   const start = `${dateTrunc(unit, facilityNow())} - interval '${count - 1} ${unit}s'`;
   const end = dateTrunc(unit, facilityNow());
@@ -79,26 +85,29 @@ export async function timeBucket(p: TimeBucketParams, range?: string): Promise<{
   const measureExpr = p.measure === "*"
     ? "*"
     : p.sensorType ? `t.${p.measure}` : `${p.table}.${p.measure}`;
-  const where = andWhere(softDelete(p.table), p.where);
+  const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where);
   const q = substitutePlaceholders(
     `SELECT to_char(gs.d, '${labelFmt(unit)}') AS label,
             COALESCE(${sumOrCount(measureExpr)}, 0) AS value
      FROM generate_series(${start}, ${end}, ${intervalStep}) AS gs(d)
      LEFT JOIN ${join} ON ${dateTrunc(unit, dateCol)} = gs.d ${p.where ? `AND ${p.where}` : ""}
      GROUP BY gs.d ORDER BY gs.d`,
+    facilityId,
   );
   const res = await db.execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
 }
 
-export async function ratio(p: RatioParams, range?: string): Promise<{ value: number } | { label: string; value: number }[]> {
+export async function ratio(p: RatioParams, facilityId: number, timezone: string, range?: string): Promise<{ value: number } | { label: string; value: number }[]> {
+  void timezone; void range;
   if (p.dim) {
-    const where = andWhere(softDelete(p.numTable), p.numWhere);
+    const where = andWhere(softDelete(p.numTable), facilityScope(p.numTable), p.numWhere);
     const q = substitutePlaceholders(
       `SELECT COALESCE(${p.dim}::text, '(unknown)') AS label,
               COALESCE(${sumOrCount(p.numMeasure)}, 0) AS num,
               COALESCE(${sumOrCount(p.denMeasure)}, 0) AS den
        FROM ${p.numTable} WHERE ${where} GROUP BY ${p.dim} ORDER BY num DESC`,
+      facilityId,
     );
     const res = await db.execute(sql.raw(q));
     return (res.rows as Row[]).map((r) => ({
@@ -106,11 +115,12 @@ export async function ratio(p: RatioParams, range?: string): Promise<{ value: nu
       value: num(r.den) !== 0 ? num(r.num) / num(r.den) : 0,
     }));
   }
-  const numW = andWhere(softDelete(p.numTable), p.numWhere);
-  const denW = andWhere(softDelete(p.denTable), p.denWhere);
+  const numW = andWhere(softDelete(p.numTable), facilityScope(p.numTable), p.numWhere);
+  const denW = andWhere(softDelete(p.denTable), facilityScope(p.denTable), p.denWhere);
   const q = substitutePlaceholders(
     `SELECT COALESCE((SELECT ${sumOrCount(p.numMeasure)} FROM ${p.numTable} WHERE ${numW}), 0) AS num,
             COALESCE((SELECT ${sumOrCount(p.denMeasure)} FROM ${p.denTable} WHERE ${denW}), 0) AS den`,
+    facilityId,
   );
   const res = await db.execute(sql.raw(q));
   const row = res.rows[0] as Row;
@@ -118,20 +128,21 @@ export async function ratio(p: RatioParams, range?: string): Promise<{ value: nu
   return { value: den !== 0 ? num(row.num) / den : 0 };
 }
 
-export async function tableTemplate(p: TableParams, range?: string): Promise<Row[]> {
-  void range;
-  const where = andWhere(softDelete(p.table), p.where);
+export async function tableTemplate(p: TableParams, facilityId: number, timezone: string, range?: string): Promise<Row[]> {
+  void timezone; void range;
+  const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where);
   const order = p.order ? `ORDER BY 1 ${p.order.toUpperCase()}` : "";
   const limit = p.limit ? `LIMIT ${p.limit}` : "";
   const q = substitutePlaceholders(
     `SELECT ${p.cols} FROM ${p.table} ${p.join ? `JOIN ${p.join}` : ""} WHERE ${where} ${order} ${limit}`,
+    facilityId,
   );
   const res = await db.execute(sql.raw(q));
   return res.rows as Row[];
 }
 
-export async function customTemplate(p: CustomParams, range?: string): Promise<unknown> {
-  void range;
+export async function customTemplate(p: CustomParams, facilityId: number, timezone: string, range?: string): Promise<unknown> {
+  void facilityId; void timezone; void range;
   const fn = CUSTOM_QUERIES[p.key];
   if (!fn) throw new Error(`no custom query registered for key: ${p.key}`);
   return fn();
@@ -139,10 +150,13 @@ export async function customTemplate(p: CustomParams, range?: string): Promise<u
 
 export async function quickbooksTemplate(
   p: QuickbooksParams,
-  _range?: string,
+  facilityId: number,
+  timezone: string,
+  range?: string,
   userId?: string,
   organizationId?: number,
 ): Promise<unknown> {
+  void facilityId; void timezone; void range;
   if (!userId) throw new Error("quickbooks template requires an authenticated user");
   if (organizationId === undefined) throw new Error("quickbooks template requires an organization id");
   return runQuickbooksQuery(p.key, userId, organizationId);
@@ -175,7 +189,7 @@ function labelFmt(unit: string): string {
   return "HH24:MI";
 }
 
-export const TEMPLATES: Record<TemplateName, (p: any, range?: string, userId?: string, organizationId?: number) => Promise<unknown>> = {
+export const TEMPLATES: Record<TemplateName, (p: any, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number) => Promise<unknown>> = {
   scalarAgg,
   groupBy,
   timeBucket,

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
-import { db } from "@workspace/db";
+import { db, facilitiesTable } from "@workspace/db";
 import { METRICS_BY_ID, metricsForTab, type MetricTab, type TemplateName } from "@workspace/metrics";
 import { TEMPLATES } from "../lib/metrics/templates";
 import { isConnected as isQuickbooksConnected } from "../lib/accounting/quickbooks";
@@ -21,6 +21,10 @@ router.get("/metrics", async (req: Request, res: Response) => {
   const range = (req.query.range as string | undefined) ?? "all";
   const keys = keysParam.split(",").map((k) => k.trim()).filter(Boolean);
   const { userId } = getAuth(req);
+  const facilityId = req.tenant!.facilityId;
+
+  const [facilityRow] = await db.select({ timezone: facilitiesTable.timezone }).from(facilitiesTable).where(eq(facilitiesTable.id, facilityId));
+  const timezone = facilityRow?.timezone ?? "UTC";
 
   if (keys.length === 0) {
     return res.json({});
@@ -43,7 +47,7 @@ router.get("/metrics", async (req: Request, res: Response) => {
     const entries = await Promise.all(
       valid.map(async (v) => {
         try {
-          const data = await TEMPLATES[v.template](v.params, range, userId ?? undefined, req.tenant!.organizationId);
+          const data = await TEMPLATES[v.template](v.params, facilityId, timezone, range, userId ?? undefined, req.tenant!.organizationId);
           return [v.id, data] as const;
         } catch (err) {
           // One failing metric shouldn't 500 the whole batch; report per-key.
