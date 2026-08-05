@@ -76,11 +76,15 @@ SELECT is(
 -- scoped INSERT policy on organization_members so POST /facilities can
 -- insert the owner membership row in the same transaction that creates the
 -- organization itself (app.org_id can't be set to an org id that doesn't
--- exist yet).
+-- exist yet). 00012 adds an additive current_user-scoped SELECT policy on
+-- organization_members -- the CRITICAL fix for resolveTenantContext's own
+-- bootstrap lookup, which 00008's auth.uid()-based policy could never
+-- satisfy for this backend's connection (found running the TEN-007
+-- isolation suite, Task 15, against staging).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  11,
-  'supabase_migrations.schema_migrations has exactly 11 rows (Supabase migrations 00001-00011)'
+  12,
+  'supabase_migrations.schema_migrations has exactly 12 rows (Supabase migrations 00001-00012)'
 );
 
 SELECT * FROM finish();

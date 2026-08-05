@@ -3892,6 +3892,57 @@ This was masked until now because:
 
 **Not required:** re-litigating whether `organization_members` SHOULD be a shared/non-truncated table — that convention is otherwise working correctly for every OTHER file; this task only needs to remove `facilities.test.ts`'s (and any similarly-affected file's) implicit dependency on being first.
 
+### Task 16, part 2: RLS GUC-placeholder poisoning under connection pooling
+
+**Found running Task 15 (isolation suite against staging), folded into Task 16 per explicit decision — deeper and more consequential than part 1, needs its own careful fix, not a quick inline patch.**
+
+**Files:**
+- Fix: new migration (`supabase/migrations/0001{N}_...`) altering the 11 policies in `supabase/migrations/00007_tenancy_rls_policies.sql`.
+- Verify: `artifacts/api-server/src/tests/isolation/cross-tenant.test.ts` (Task 14) passing cleanly against a real, non-BYPASSRLS role (staging) is the actual proof this is fixed.
+
+**The bug, confirmed empirically (not theoretical):**
+
+`00007_tenancy_rls_policies.sql`'s 11 tenant-isolation policies all use the same bare-cast pattern:
+
+```sql
+using (facility_id = current_setting('app.facility_id', true)::int)
+-- or
+using (organization_id = current_setting('app.org_id', true)::int)
+```
+
+`withTenantScope` (`lib/db/src/scope.ts`) sets these via `set_config('app.org_id'/'app.facility_id', value, true)` — `true` (is_local) means transaction-scoped, correctly reverting when the transaction ends. The bug: Postgres's custom (non-extension) GUCs work as **placeholders** — the first time any code ever calls `set_config` for a given custom name on a given physical backend connection, Postgres permanently creates that placeholder for the lifetime of the backend process. After that point, `current_setting(name, true)` (missing_ok) no longer returns NULL when nothing is currently set locally — it returns an **empty string**, because the placeholder now exists but has no active local value. Casting `''::int` **throws** `invalid input syntax for type integer: ""` rather than evaluating to NULL/false.
+
+Confirmed directly against staging:
+```sql
+-- on a psql session that had never touched app.org_id, first query:
+SELECT current_setting('app.org_id', true) IS NULL;  -- returned false (already poisoned from a prior session on the same pooled backend)
+SELECT current_setting('app.org_id', true)::int;      -- ERROR: invalid input syntax for type integer: ""
+SELECT NULLIF(current_setting('app.org_id', true), '')::int IS NULL;  -- true — this form is safe
+```
+
+**Why this is a pooling issue, not a one-off:** Supabase's transaction-mode pooler (Supavisor, port 6543 — this app's actual connection mode per ADR-003/004) multiplexes many unrelated logical requests onto a smaller set of physical backend connections. Once **any** request has ever run `withTenantScope` on a given physical backend (setting `app.org_id`/`app.facility_id` even once, even if that transaction later rolled back), that backend's placeholder for the GUC exists permanently. Every later query on that same backend that does NOT itself call `set_config` — including `resolveTenantContext`'s own bootstrap lookup, and any of the 11 RLS-policy evaluations for a request that legitimately has no tenant context yet — can throw this error instead of cleanly denying access. Under real production traffic with a connection pool cycling through many different tenants and request types, this is not rare or one-off; it is a standing, unpredictable reliability hazard (not a silent security bypass — the failure mode is a thrown error, i.e. fail-closed/noisy, not a wrongly-permitted row).
+
+**Confirmed NOT affected:** `lib/db/src/tz.ts` (the metrics dispatch layer's `facilityScope`/`substitutePlaceholders` helpers) has zero references to `current_setting` at all — it threads `facilityId` as a plain JS parameter from `req.tenant.facilityId` (resolved by `resolveTenantContext`), interpolated directly into SQL strings, never through a Postgres GUC. Only the 11 RLS policies in `00007` use this pattern.
+
+**The fix (confirmed working, not yet applied):**
+
+```sql
+alter policy "tenant isolation by facility" on public.cycles
+  using (facility_id = nullif(current_setting('app.facility_id', true), '')::int);
+-- repeat for all 11 policies (7 facility_id-scoped tables, 4 organization_id-scoped),
+-- exact policy names and table list in 00007_tenancy_rls_policies.sql
+```
+
+`NULLIF(x, '')` converts the empty-string placeholder resting-state to a real NULL before the cast, so the comparison evaluates to NULL (→ false, correctly denying access) instead of throwing. Verified directly against staging (see the `SELECT NULLIF(...)::int IS NULL` probe above) — this exact pattern resolves the error cleanly.
+
+**What this task should do:**
+
+1. Write a new migration altering all 11 policies (use `ALTER POLICY ... USING (...)`, not drop/recreate, to preserve policy identity/ordering).
+2. Bump `supabase/tests/00001_foundation.sql`'s migration-count assertion.
+3. Apply to staging, re-run the Task 14 isolation suite (`cross-tenant.test.ts`) against it — this was blocked by exactly this bug during Task 15's first attempt (`invalid input syntax for type integer: ""` on an `organization_members` INSERT, where 00007's own bare-cast policy is evaluated as an additional permissive policy alongside 00011's `current_user`-scoped one — Postgres evaluates ALL applicable permissive policies for a command, not just the first one that would pass, so one throwing policy aborts the whole statement even if another would have separately permitted it).
+4. Confirm the full isolation suite passes cleanly, twice in a row, against staging.
+5. Consider (not required, but worth deciding explicitly): whether `withTenantScope` itself should proactively guard against this (e.g. documenting the risk inline) even after the RLS-side fix, since any FUTURE tenant-scoped table added without going through the same defensive pattern would reintroduce this exact class of bug.
+
 ---
 
 ## Exit criteria (from the PRD, unchanged)
