@@ -12,7 +12,7 @@
  * Run:  pnpm --filter @workspace/scripts run seed-demo
  */
 
-import { db, cyclesTable, growthProfilesTable, seedLotsTable } from "@workspace/db";
+import { db, cyclesTable, growthProfilesTable, seedLotsTable, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 function daysAgo(n: number): Date {
@@ -35,7 +35,23 @@ async function getProfile(id: number) {
   return p;
 }
 
-async function seedLots() {
+/**
+ * seed_lots/cycles both gained a NOT NULL facilityId column in the tenancy-
+ * scoping migrations (0018-0025) -- this dev-only demo-seeding script (never
+ * run in CI, never exposed to real request traffic, so no RLS/
+ * withTenantScope concerns apply) just needs any real facility to tag its
+ * rows with. Takes the first one that exists; run the API server and
+ * complete onboarding once before this script if none exist yet.
+ */
+async function getFacilityId(): Promise<number> {
+  const [facility] = await db.select({ id: facilitiesTable.id }).from(facilitiesTable).limit(1);
+  if (!facility) {
+    throw new Error("No facility exists yet. Complete onboarding (POST /facilities) before running this script.");
+  }
+  return facility.id;
+}
+
+async function seedLots(facilityId: number) {
   const lots = [
     { qrCode: "QR-SUNFL-001", seedName: "Sunflower" },
     { qrCode: "QR-BROCL-001", seedName: "Broccoli" },
@@ -62,13 +78,14 @@ async function seedLots() {
       console.log(`  skip (already exists): ${lot.qrCode}`);
       continue;
     }
-    await db.insert(seedLotsTable).values(lot);
+    await db.insert(seedLotsTable).values({ ...lot, facilityId });
     console.log(`  inserted: ${lot.qrCode} → ${lot.seedName}`);
   }
 }
 
 async function main() {
-  await seedLots();
+  const facilityId = await getFacilityId();
+  await seedLots(facilityId);
 
   // Verify profiles exist
   const allProfiles = await db.select().from(growthProfilesTable);
@@ -91,7 +108,9 @@ async function main() {
 
   type CycleInsert = typeof cyclesTable.$inferInsert;
 
-  const cycles: CycleInsert[] = [
+  // facilityId added uniformly via the .map() below (same value for every
+  // demo cycle) rather than repeating it in each of the 10 literals.
+  const cyclesWithoutFacility: Omit<CycleInsert, "facilityId">[] = [
     // ── 3 SEEDING (fresh germination) ────────────────────────────────────────
     {
       shortId: "d001",
@@ -254,6 +273,7 @@ async function main() {
       createdAt: daysAgo(30),
     },
   ];
+  const cycles: CycleInsert[] = cyclesWithoutFacility.map((c) => ({ ...c, facilityId }));
 
   console.log(`Seeding ${cycles.length} demo cycles…`);
 

@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, desc } from "drizzle-orm";
-import { db } from "@workspace/db";
-import { alertsTable } from "@workspace/db";
+import { withTenantScope, alertsTable } from "@workspace/db";
 
 const router = Router();
 
@@ -25,16 +24,17 @@ router.get("/alerts", async (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
 
-    let rows;
-    if (status && ["current", "resolved", "dismissed"].includes(status)) {
-      rows = await db
-        .select()
-        .from(alertsTable)
-        .where(eq(alertsTable.status, status as "current" | "resolved" | "dismissed"))
-        .orderBy(desc(alertsTable.createdAt));
-    } else {
-      rows = await db.select().from(alertsTable).orderBy(desc(alertsTable.createdAt));
-    }
+    const rows = await withTenantScope(req.tenant!, (tx) => {
+      const facilityCond = eq(alertsTable.facilityId, req.tenant!.facilityId);
+      if (status && ["current", "resolved", "dismissed"].includes(status)) {
+        return tx
+          .select()
+          .from(alertsTable)
+          .where(and(facilityCond, eq(alertsTable.status, status as "current" | "resolved" | "dismissed")))
+          .orderBy(desc(alertsTable.createdAt));
+      }
+      return tx.select().from(alertsTable).where(facilityCond).orderBy(desc(alertsTable.createdAt));
+    });
 
     const result = rows.map(formatAlert);
     return res.json(limit ? result.slice(0, limit) : result);
@@ -49,16 +49,19 @@ router.post("/alerts", async (req: Request, res: Response) => {
     const { title, description, location, severity } = req.body;
     if (!title) return res.status(400).json({ error: "title is required" });
 
-    const [alert] = await db
-      .insert(alertsTable)
-      .values({
-        title,
-        description: description ?? null,
-        location: location ?? null,
-        severity: severity ?? "warning",
-        status: "current",
-      })
-      .returning();
+    const [alert] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .insert(alertsTable)
+        .values({
+          title,
+          description: description ?? null,
+          location: location ?? null,
+          severity: severity ?? "warning",
+          status: "current",
+          facilityId: req.tenant!.facilityId,
+        })
+        .returning(),
+    );
 
     return res.status(201).json(formatAlert(alert));
   } catch (err) {
@@ -76,14 +79,13 @@ router.patch("/alerts/:id", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "status must be resolved or dismissed" });
     }
 
-    const [alert] = await db
-      .update(alertsTable)
-      .set({
-        status,
-        resolvedAt: new Date(),
-      })
-      .where(eq(alertsTable.id, id))
-      .returning();
+    const [alert] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(alertsTable)
+        .set({ status, resolvedAt: new Date() })
+        .where(and(eq(alertsTable.id, id), eq(alertsTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
 
     if (!alert) return res.status(404).json({ error: "Alert not found" });
     return res.json(formatAlert(alert));
@@ -100,16 +102,19 @@ router.post("/alerts/:id/action", async (req: Request, res: Response) => {
 
     if (!actionType) return res.status(400).json({ error: "actionType is required" });
 
-    const [alert] = await db
-      .update(alertsTable)
-      .set({
-        status: "resolved",
-        actionType,
-        actionNotes: notes ?? null,
-        resolvedAt: new Date(),
-      })
-      .where(and(eq(alertsTable.id, id), eq(alertsTable.status, "current")))
-      .returning();
+    const [alert] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(alertsTable)
+        .set({ status: "resolved", actionType, actionNotes: notes ?? null, resolvedAt: new Date() })
+        .where(
+          and(
+            eq(alertsTable.id, id),
+            eq(alertsTable.status, "current"),
+            eq(alertsTable.facilityId, req.tenant!.facilityId),
+          ),
+        )
+        .returning(),
+    );
 
     if (!alert) return res.status(404).json({ error: "Alert not found or already resolved" });
     return res.json(formatAlert(alert));

@@ -1,8 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { getAuth } from "../middlewares/supabaseAuth";
 import { z } from "zod";
-import { db } from "@workspace/db";
-import { facilityLogsTable } from "@workspace/db";
+import { withTenantScope, facilityLogsTable } from "@workspace/db";
 import { signMediaReferences } from "../services/mediaUrls";
 
 const router = Router();
@@ -106,15 +105,18 @@ router.post("/facility-logs", async (req: Request, res: Response) => {
   }
 
   try {
-    const [log] = await db
-      .insert(facilityLogsTable)
-      .values({
-        logType,
-        userId: userId,
-        data: parsedData.data,
-        notes: notes ?? null,
-      })
-      .returning();
+    const [log] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .insert(facilityLogsTable)
+        .values({
+          logType,
+          userId: userId,
+          data: parsedData.data,
+          notes: notes ?? null,
+          facilityId: req.tenant!.facilityId,
+        })
+        .returning(),
+    );
 
     // Task 11 Step 4: only waste/cleaning/receiving logs carry a `photoUrls`
     // array inside their jsonb `data` blob; maintenance/env_check/visitor do

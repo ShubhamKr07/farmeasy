@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { supabaseAuthMiddleware, getAuth } from "./middlewares/supabaseAuth";
+import { resolveTenantContext, requireTenantContext } from "./middlewares/tenantContext";
 import router from "./routes";
 import healthRouter from "./routes/health";
 import dashboardRouter from "./routes/dashboard";
@@ -92,6 +93,7 @@ app.use(cors(buildCorsOptions()));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(supabaseAuthMiddleware);
+app.use(resolveTenantContext);
 
 function requireSignedIn(req: Request, res: Response, next: NextFunction) {
   const { userId } = getAuth(req);
@@ -110,21 +112,21 @@ app.use("/api", accountingPublicRouter);
 // Everything else requires a signed-in Clerk session (S1/S2). Per-route
 // `enforceAuth` handlers in cycles/media remain as defense-in-depth.
 app.use("/api", requireSignedIn, dashboardRouter);
-app.use("/api", requireSignedIn, alertsRouter);
-app.use("/api", requireSignedIn, inventoryRouter);
-app.use("/api", requireSignedIn, shipmentsRouter);
-app.use("/api", requireSignedIn, badTraysRouter);
-app.use("/api", requireSignedIn, cyclesRouter);
+app.use("/api", requireSignedIn, requireTenantContext, alertsRouter);
+app.use("/api", requireSignedIn, requireTenantContext, inventoryRouter);
+app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
+app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
+app.use("/api", requireSignedIn, requireTenantContext, cyclesRouter);
 app.use("/api", requireSignedIn, layoutRouter);
-app.use("/api", requireSignedIn, sensorsRouter);
+app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
 app.use("/api", requireSignedIn, sensorReadingsRouter);
-app.use("/api", requireSignedIn, tasksRouter);
+app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
 app.use("/api", requireSignedIn, cropsRouter);
-app.use("/api", requireSignedIn, metricsRouter);
+app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
 app.use("/api", requireSignedIn, userSettingsRouter);
-app.use("/api", requireSignedIn, accountingRouter);
+app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
 app.use("/api", requireSignedIn, recommendRouter);
-app.use("/api", requireSignedIn, facilityLogsRouter);
+app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
 app.use("/api", requireSignedIn, sensorAccountsRouter);

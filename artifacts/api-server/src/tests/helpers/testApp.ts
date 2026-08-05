@@ -5,6 +5,16 @@ import express, {
   type NextFunction,
   type Router,
 } from "express";
+import pino from "pino";
+import { resolveTenantContext } from "../../middlewares/tenantContext";
+
+// This harness never mounts pino-http (app.ts does), so req.log was
+// undefined -- invisible while every route's catch block only ran on
+// expected 4xx paths, but a real pino instance is needed so an unexpected
+// error's own req.log.error(err) call surfaces the error instead of itself
+// throwing "Cannot read properties of undefined (reading 'error')" and
+// masking whatever actually failed.
+const testLogger = pino({ level: "error" });
 
 /**
  * Identity the harness injects on every request when a test passes no
@@ -47,8 +57,10 @@ export function createAuthenticatedTestApp(
   // from a verified token.
   app.use((req: Request, _res: Response, next: NextFunction) => {
     req.supabaseUser = user;
+    req.log = testLogger;
     next();
   });
+  app.use(resolveTenantContext);
   app.use("/api", router);
   return app;
 }

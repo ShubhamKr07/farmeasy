@@ -1,5 +1,11 @@
 import { after, before, beforeEach } from "node:test";
 import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import { buildSslConfig } from "@workspace/db/ssl";
+import * as schema from "@workspace/db/schema";
+
+const { Pool } = pg;
 
 /**
  * Seeds a matching `auth.users` row for a synthetic test-user id, then
@@ -26,12 +32,35 @@ export async function seedTestUser(
   usersTable: any,
   user: { id: string; email: string; role?: string; organizationId?: number | null },
 ): Promise<void> {
-  await db.execute(sql`
-    INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-    VALUES (${user.id}, 'authenticated', 'authenticated', ${user.email}, '', now(), '{}'::jsonb, '{}'::jsonb, now(), now())
-    ON CONFLICT (id) DO NOTHING
-  `);
-  await db
+  // Writing directly to auth.users (Supabase Auth's own schema, normally
+  // populated only via real signup) needs the same elevated access as
+  // truncation — a least-privilege app role has no business writing there in
+  // production, so this test shortcut uses the admin connection when one is
+  // configured (see getAdminPool's doc comment above useDatabaseFixture).
+  const admin = getAdminPool();
+  if (admin) {
+    await admin.query(
+      `INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+       VALUES ($1, 'authenticated', 'authenticated', $2, '', now(), '{}'::jsonb, '{}'::jsonb, now(), now())
+       ON CONFLICT (id) DO NOTHING`,
+      [user.id, user.email],
+    );
+  } else {
+    await db.execute(sql`
+      INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+      VALUES (${user.id}, 'authenticated', 'authenticated', ${user.email}, '', now(), '{}'::jsonb, '{}'::jsonb, now(), now())
+      ON CONFLICT (id) DO NOTHING
+    `);
+  }
+  // Real signup always goes through the handle_new_user() SECURITY DEFINER
+  // trigger (00004) -- it runs as the trigger's owner regardless of caller,
+  // never through the app's own connection. This upsert's INSERT branch
+  // (when no row exists yet -- e.g. right after truncating public.users, or
+  // a genuinely first-time synthetic id) is purely this test helper standing
+  // in for that trigger, so it needs the same admin routing as the
+  // auth.users insert above; the UPDATE branch (00009) is what a real
+  // farmsmart_app connection is actually expected to do.
+  await (getAdminDb() ?? db)
     .insert(usersTable)
     .values({
       id: user.id,
@@ -43,6 +72,98 @@ export async function seedTestUser(
       target: usersTable.id,
       set: { role: user.role ?? "technician", organizationId: user.organizationId ?? null },
     });
+}
+
+/**
+ * Seeds a full tenant context for a synthetic test-user id: the `auth.users`
+ * + `public.users` rows (via seedTestUser), an `organizations` row, a
+ * `facilities` row linked to that org, and an `organization_members` row
+ * (status: active) linking the user to the org. This is exactly what
+ * resolveTenantContext (middlewares/tenantContext.ts) joins on to populate
+ * `req.tenant` { organizationId, facilityId, role }, which the
+ * withTenantScope-rewired routes (alerts/tasks/shipments) require.
+ *
+ * Returns the created { organizationId, facilityId } so the caller can scope
+ * its own fixture inserts to the same facilityId the request will be filtered
+ * by (the route's eq(table.facilityId, req.tenant!.facilityId)).
+ *
+ * `organizations`/`facilities`/`organization_members` are shared reference
+ * tables (never truncated by these suites' fixtures — see useDatabaseFixture),
+ * so each call creates its own fresh rows and assertions key off the returned
+ * ids rather than off the tables being globally empty. The
+ * `organization_members.user_id` unique index means a second call for the
+ * same userId (e.g. across describe blocks) upserts the membership onto the
+ * new org — never a duplicate, never a stale-org leak.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function seedTenantContext(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schema: {
+    usersTable: any;
+    organizationsTable: any;
+    facilitiesTable: any;
+    organizationMembersTable: any;
+  },
+  user: { id: string; email: string; role?: string },
+  options: { farmName?: string; facilityName?: string; timezone?: string; memberRole?: "owner" | "admin" | "technician" } = {},
+): Promise<{ organizationId: number; facilityId: number }> {
+  await seedTestUser(db, schema.usersTable, { ...user, organizationId: null });
+
+  const [org] = await db
+    .insert(schema.organizationsTable)
+    .values({ name: options.farmName ?? "Test Farm" })
+    .returning();
+
+  const [facility] = await db
+    .insert(schema.facilitiesTable)
+    .values({
+      name: options.farmName ?? "Test Farm",
+      organizationId: org.id,
+      facilityName: options.facilityName ?? "Main Facility",
+      timezone: options.timezone ?? "UTC",
+    })
+    .returning();
+
+  // Real app code (facilities.ts POST /facilities) only ever plain-INSERTs a
+  // membership row once per user -- farmsmart_app's RLS policy (00011) is
+  // INSERT-only, matching that. This helper's onConflictDoUpdate exists
+  // purely so a test file can call seedTenantContext multiple times for the
+  // SAME synthetic user across different test cases (upserting onto a new
+  // org each time) -- that UPDATE path has no real-app equivalent, so route
+  // it through the admin connection like the other test-only elevated needs
+  // above, rather than adding a farmsmart_app UPDATE policy production would
+  // never use.
+  const memberRole = options.memberRole ?? "technician";
+  const admin = getAdminPool();
+  if (admin) {
+    await admin.query(
+      `INSERT INTO organization_members (organization_id, user_id, role, status)
+       VALUES ($1, $2, $3, 'active')
+       ON CONFLICT (user_id) DO UPDATE SET organization_id = $1, role = $3, status = 'active'`,
+      [org.id, user.id, memberRole],
+    );
+    return { organizationId: org.id, facilityId: facility.id };
+  }
+  await db
+    .insert(schema.organizationMembersTable)
+    .values({
+      organizationId: org.id,
+      userId: user.id,
+      role: memberRole,
+      status: "active",
+    })
+    .onConflictDoUpdate({
+      target: schema.organizationMembersTable.userId,
+      set: {
+        organizationId: org.id,
+        role: memberRole,
+        status: "active",
+      },
+    });
+
+  return { organizationId: org.id, facilityId: facility.id };
 }
 
 /**
@@ -61,6 +182,55 @@ export function requireTestDatabaseUrl(): string | undefined {
     );
   }
   return url;
+}
+
+/**
+ * `TRUNCATE ... RESTART IDENTITY` requires ownership of the table/sequence,
+ * not just DML grants — a least-privilege app role (e.g. MT-M1's
+ * `farmsmart_app`, which only gets SELECT/INSERT/UPDATE/DELETE) can never
+ * satisfy it. Rather than granting the app role ownership (which would
+ * bypass its own privilege checks and defeat the point of verifying it),
+ * `TEST_ADMIN_DATABASE_URL` lets the truncate step run over a *separate*
+ * elevated connection while the app-under-test and every other query in this
+ * file keep using `TEST_DATABASE_URL`/`handle.db` as before. Unset in every
+ * existing CI/local run (disposable stack's connection is already
+ * superuser), so this is a no-op there — `truncateTables` falls back to
+ * `handle.db` exactly as before.
+ */
+let adminPool: pg.Pool | undefined;
+
+function getAdminPool(): pg.Pool | undefined {
+  const adminUrl = process.env.TEST_ADMIN_DATABASE_URL;
+  if (!adminUrl) return undefined;
+  if (!adminPool) {
+    adminPool = new Pool({ connectionString: adminUrl, ssl: buildSslConfig(adminUrl) });
+  }
+  return adminPool;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let adminDb: any;
+
+/**
+ * A drizzle instance over the same admin connection as getAdminPool, for
+ * test files that seed tenant-scoped table rows directly (not through a real
+ * HTTP request against a withTenantScope-wired route) -- those direct
+ * inserts never have app.facility_id/app.org_id set, so 00007's tenant-
+ * isolation policies reject them under farmsmart_app. Real app code never
+ * hits this path (it always goes through withTenantScope), so bypassing RLS
+ * for this fixture-seeding is safe and matches the same test-only-need
+ * pattern as truncateTables/seedTestUser/seedTenantContext above. Returns
+ * undefined when TEST_ADMIN_DATABASE_URL is unset (every existing CI/local
+ * run) -- callers do `(getAdminDb() ?? db).insert(...)`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getAdminDb(): any {
+  const pool = getAdminPool();
+  if (!pool) return undefined;
+  if (!adminDb) {
+    adminDb = drizzle(pool, { schema });
+  }
+  return adminDb;
 }
 
 export interface TestDatabaseHandle {
@@ -121,9 +291,14 @@ export function useDatabaseFixture(
   const truncateTables = async () => {
     if (tables.length === 0) return;
     const list = tables.map((t) => `"${t.replace(/"/g, '""')}"`).join(", ");
-    await handle.db.execute(
-      sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`),
-    );
+    const admin = getAdminPool();
+    if (admin) {
+      await admin.query(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
+    } else {
+      await handle.db.execute(
+        sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`),
+      );
+    }
   };
 
   before(async () => {
@@ -160,5 +335,9 @@ export function closeDatabasePoolAfterTests(): void {
     if (!process.env.TEST_DATABASE_URL) return;
     const mod = await import("@workspace/db");
     await mod.pool.end();
+    if (adminPool) {
+      await adminPool.end();
+      adminPool = undefined;
+    }
   });
 }

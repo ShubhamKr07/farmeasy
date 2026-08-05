@@ -1,11 +1,13 @@
 import { describe, test } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import request from "supertest";
-import { createAuthenticatedTestApp } from "../helpers/testApp";
+import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  seedTenantContext,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 closeDatabasePoolAfterTests();
@@ -48,31 +50,44 @@ describe(
       // against TEST_DATABASE_URL, set by the fixture's `before` hook). Safe
       // because this only runs inside a non-skipped describe.
       const shipments = await import("../../routes/shipments");
-      const { db, shipmentsTable } = await import("@workspace/db");
+      const {
+        db,
+        shipmentsTable,
+        usersTable,
+        organizationsTable,
+        facilitiesTable,
+        organizationMembersTable,
+      } = await import("@workspace/db");
+      const { facilityId } = await seedTenantContext(
+        db,
+        { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+        { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      );
       return {
         app: createAuthenticatedTestApp(shipments.default),
         db,
         shipmentsTable,
+        facilityId,
       };
     }
 
     /** Minimal insert rows — shortId is unique per insert (serial id is the cursor). */
-    function shipment(shortId: string, client: string, status: "pending" | "in_progress" | "complete") {
-      return { shortId, client, status };
+    function shipment(shortId: string, client: string, status: "pending" | "in_progress" | "complete", facilityId: number) {
+      return { shortId, client, status, facilityId };
     }
 
     test("status filter returns matches appearing after non-matches beyond the window", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // Non-matches first (ids 1-3), then the matching complete rows (ids 4-5).
       // With limit=2 the limit+1 window is 3 rows; the OLD code fetched ids
       // 1-3 (all pending), `.filter(status=complete)` dropped every one, and
       // returned []. The matches (ids 4-5) never left the DB.
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-PND-1", "Acme", "pending"),
-        shipment("SHP-PND-2", "Acme", "pending"),
-        shipment("SHP-PND-3", "Acme", "pending"),
-        shipment("SHP-CMP-1", "Acme", "complete"),
-        shipment("SHP-CMP-2", "Acme", "complete"),
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-PND-1", "Acme", "pending", facilityId),
+        shipment("SHP-PND-2", "Acme", "pending", facilityId),
+        shipment("SHP-PND-3", "Acme", "pending", facilityId),
+        shipment("SHP-CMP-1", "Acme", "complete", facilityId),
+        shipment("SHP-CMP-2", "Acme", "complete", facilityId),
       ]);
 
       const res = await request(app)
@@ -95,18 +110,18 @@ describe(
     });
 
     test("status filter paginates correctly across multiple filtered pages", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // 4 non-matching pending rows (ids 1-4), then 4 matching complete rows
       // (ids 5-8). With limit=2 we expect two pages of complete rows.
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-PND-1", "Acme", "pending"),
-        shipment("SHP-PND-2", "Acme", "pending"),
-        shipment("SHP-PND-3", "Acme", "pending"),
-        shipment("SHP-PND-4", "Acme", "pending"),
-        shipment("SHP-CMP-1", "Acme", "complete"),
-        shipment("SHP-CMP-2", "Acme", "complete"),
-        shipment("SHP-CMP-3", "Acme", "complete"),
-        shipment("SHP-CMP-4", "Acme", "complete"),
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-PND-1", "Acme", "pending", facilityId),
+        shipment("SHP-PND-2", "Acme", "pending", facilityId),
+        shipment("SHP-PND-3", "Acme", "pending", facilityId),
+        shipment("SHP-PND-4", "Acme", "pending", facilityId),
+        shipment("SHP-CMP-1", "Acme", "complete", facilityId),
+        shipment("SHP-CMP-2", "Acme", "complete", facilityId),
+        shipment("SHP-CMP-3", "Acme", "complete", facilityId),
+        shipment("SHP-CMP-4", "Acme", "complete", facilityId),
       ]);
 
       // Page 1: limit+1 = 3 matched rows fetched (ids 5,6,7) → hasMore.
@@ -137,14 +152,14 @@ describe(
     });
 
     test("client filter is a case-insensitive substring returning matches after non-matches", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // Non-matching clients first (ids 1-3), then matching "Globex" rows (4-5).
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-A-1", "Acme Corp", "pending"),
-        shipment("SHP-A-2", "Acme Corp", "pending"),
-        shipment("SHP-A-3", "Acme Corp", "pending"),
-        shipment("SHP-G-1", "Globex Inc", "complete"),
-        shipment("SHP-G-2", "Globex Inc", "complete"),
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-A-1", "Acme Corp", "pending", facilityId),
+        shipment("SHP-A-2", "Acme Corp", "pending", facilityId),
+        shipment("SHP-A-3", "Acme Corp", "pending", facilityId),
+        shipment("SHP-G-1", "Globex Inc", "complete", facilityId),
+        shipment("SHP-G-2", "Globex Inc", "complete", facilityId),
       ]);
 
       // Lowercase query against mixed-case stored value → case-insensitive.
@@ -163,17 +178,17 @@ describe(
     });
 
     test("client filter escapes LIKE metacharacters — % matches a literal %, not everything", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // Rows with no literal % first (ids 1-3), then rows that DO contain a
       // literal % (ids 4-5). Searching for client="%" must return only the two
       // rows containing a literal %, NOT every row (the unescaped `%%%` would
       // match all five).
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-N1", "Acme", "pending"),
-        shipment("SHP-N2", "Beta", "pending"),
-        shipment("SHP-N3", "Gamma", "pending"),
-        shipment("SHP-P1", "100% Pure", "complete"),
-        shipment("SHP-P2", "Discount 50%", "complete"),
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-N1", "Acme", "pending", facilityId),
+        shipment("SHP-N2", "Beta", "pending", facilityId),
+        shipment("SHP-N3", "Gamma", "pending", facilityId),
+        shipment("SHP-P1", "100% Pure", "complete", facilityId),
+        shipment("SHP-P2", "Discount 50%", "complete", facilityId),
       ]);
 
       const res = await request(app)
@@ -191,14 +206,14 @@ describe(
     });
 
     test("client filter escapes the underscore wildcard as a literal", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // "AB Farm" contains "B Farm" (one char + " Farm"? no — test the literal
       // underscore). Searching "_" must match only rows with a literal _, not
       // every single-char-then-anything row.
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-U1", "Acme", "pending"),
-        shipment("SHP-U2", "Beta", "pending"),
-        shipment("SHP-U3", "Test_Farm", "complete"),
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-U1", "Acme", "pending", facilityId),
+        shipment("SHP-U2", "Beta", "pending", facilityId),
+        shipment("SHP-U3", "Test_Farm", "complete", facilityId),
       ]);
 
       const res = await request(app)
@@ -213,16 +228,16 @@ describe(
     });
 
     test("combined status + client filter before the limit window", async () => {
-      const { app, db, shipmentsTable } = await setup();
+      const { app, db, shipmentsTable, facilityId } = await setup();
       // Non-matches (wrong client, pending) first, then matching rows
       // (Globex + complete) at the tail beyond the limit+1 window.
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-X1", "Acme", "pending"),
-        shipment("SHP-X2", "Acme", "pending"),
-        shipment("SHP-X3", "Globex", "pending"), // right client, wrong status
-        shipment("SHP-X4", "Acme", "complete"), // right status, wrong client
-        shipment("SHP-X5", "Globex", "complete"), // matches BOTH
-        shipment("SHP-X6", "Globex", "complete"), // matches BOTH
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-X1", "Acme", "pending", facilityId),
+        shipment("SHP-X2", "Acme", "pending", facilityId),
+        shipment("SHP-X3", "Globex", "pending", facilityId), // right client, wrong status
+        shipment("SHP-X4", "Acme", "complete", facilityId), // right status, wrong client
+        shipment("SHP-X5", "Globex", "complete", facilityId), // matches BOTH
+        shipment("SHP-X6", "Globex", "complete", facilityId), // matches BOTH
       ]);
 
       const res = await request(app)
@@ -237,10 +252,10 @@ describe(
     });
 
     test("no filter + no cursor/limit keeps the legacy flat-array shape", async () => {
-      const { app, db, shipmentsTable } = await setup();
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-1", "Acme", "pending"),
-        shipment("SHP-2", "Acme", "complete"),
+      const { app, db, shipmentsTable, facilityId } = await setup();
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-1", "Acme", "pending", facilityId),
+        shipment("SHP-2", "Acme", "complete", facilityId),
       ]);
 
       const res = await request(app).get("/api/shipments");
@@ -255,10 +270,10 @@ describe(
     });
 
     test("invalid status is ignored (no filter applied)", async () => {
-      const { app, db, shipmentsTable } = await setup();
-      await db.insert(shipmentsTable).values([
-        shipment("SHP-1", "Acme", "pending"),
-        shipment("SHP-2", "Acme", "complete"),
+      const { app, db, shipmentsTable, facilityId } = await setup();
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
+        shipment("SHP-1", "Acme", "pending", facilityId),
+        shipment("SHP-2", "Acme", "complete", facilityId),
       ]);
 
       const res = await request(app)

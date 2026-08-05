@@ -176,6 +176,13 @@
       "when": 1785781255624,
       "tag": "0024_seed_lots_qr_code_backfill_and_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785781256624,
+      "tag": "0025_backfill_organization_members",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { eq, desc } from "drizzle-orm";
-import { db } from "@workspace/db";
-import { manualChecksTable, cyclesTable, alertsTable } from "@workspace/db";
+import { eq, and, desc } from "drizzle-orm";
+import { withTenantScope, manualChecksTable, cyclesTable, alertsTable } from "@workspace/db";
 import { signMediaReferences } from "../services/mediaUrls";
 
 const router = Router();
@@ -11,23 +10,25 @@ const HIGH_SEVERITY_THRESHOLD = 5;
 
 router.get("/bad-trays", async (req: Request, res: Response) => {
   try {
-    const checks = await db
-      .select({
-        id: manualChecksTable.id,
-        cycleId: manualChecksTable.cycleId,
-        fullTrays: manualChecksTable.fullTrays,
-        halfTrays: manualChecksTable.halfTrays,
-        issue: manualChecksTable.issue,
-        notes: manualChecksTable.notes,
-        createdAt: manualChecksTable.createdAt,
-        shortId: cyclesTable.shortId,
-        seedName: cyclesTable.seedName,
-        trayPosition: cyclesTable.trayPosition,
-      })
-      .from(manualChecksTable)
-      .innerJoin(cyclesTable, eq(manualChecksTable.cycleId, cyclesTable.id))
-      .where(eq(manualChecksTable.isBadTrays, true))
-      .orderBy(desc(manualChecksTable.createdAt));
+    const checks = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({
+          id: manualChecksTable.id,
+          cycleId: manualChecksTable.cycleId,
+          fullTrays: manualChecksTable.fullTrays,
+          halfTrays: manualChecksTable.halfTrays,
+          issue: manualChecksTable.issue,
+          notes: manualChecksTable.notes,
+          createdAt: manualChecksTable.createdAt,
+          shortId: cyclesTable.shortId,
+          seedName: cyclesTable.seedName,
+          trayPosition: cyclesTable.trayPosition,
+        })
+        .from(manualChecksTable)
+        .innerJoin(cyclesTable, eq(manualChecksTable.cycleId, cyclesTable.id))
+        .where(and(eq(manualChecksTable.isBadTrays, true), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .orderBy(desc(manualChecksTable.createdAt)),
+    );
 
     const totalBadTrays = checks.reduce(
       (sum, c) => sum + c.fullTrays + Math.ceil(c.halfTrays * 0.5),
@@ -81,43 +82,50 @@ router.post("/bad-trays/manual-checks", async (req: Request, res: Response) => {
     if (!cycleId) return res.status(400).json({ error: "cycleId is required" });
     if (!issue) return res.status(400).json({ error: "issue is required" });
 
-    const [cycle] = await db
-      .select({ id: cyclesTable.id, shortId: cyclesTable.shortId, trayPosition: cyclesTable.trayPosition })
-      .from(cyclesTable)
-      .where(eq(cyclesTable.id, cycleId))
-      .limit(1);
+    const [cycle] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ id: cyclesTable.id, shortId: cyclesTable.shortId, trayPosition: cyclesTable.trayPosition })
+        .from(cyclesTable)
+        .where(and(eq(cyclesTable.id, cycleId), eq(cyclesTable.facilityId, req.tenant!.facilityId)))
+        .limit(1),
+    );
 
     if (!cycle) return res.status(404).json({ error: "Cycle not found" });
 
     const totalTrays = (fullTrays ?? 1) + (halfTrays ?? 0);
 
-    const [check] = await db
-      .insert(manualChecksTable)
-      .values({
-        cycleId,
-        fullTrays: fullTrays ?? 1,
-        halfTrays: halfTrays ?? 0,
-        isBadTrays: true,
-        issue,
-        notes: notes ?? null,
-        photoUrls: [],
-      })
-      .returning();
-
-    if (totalTrays >= HIGH_SEVERITY_THRESHOLD) {
-      const location = cycle.trayPosition ?? `Cycle ${cycle.shortId}`;
-      const alertTitle = `High Bad Tray Count: ${issue}`;
-      await db
-        .insert(alertsTable)
+    const [check] = await withTenantScope(req.tenant!, async (tx) => {
+      const [row] = await tx
+        .insert(manualChecksTable)
         .values({
-          title: alertTitle,
-          description: `${totalTrays} bad trays reported in ${location} due to "${issue}". Manual check logged for cycle ${cycle.shortId}.`,
-          severity: "critical",
-          location,
-          status: "current",
+          cycleId,
+          fullTrays: fullTrays ?? 1,
+          halfTrays: halfTrays ?? 0,
+          isBadTrays: true,
+          issue,
+          notes: notes ?? null,
+          photoUrls: [],
         })
-        .onConflictDoNothing();
-    }
+        .returning();
+
+      if (totalTrays >= HIGH_SEVERITY_THRESHOLD) {
+        const location = cycle.trayPosition ?? `Cycle ${cycle.shortId}`;
+        const alertTitle = `High Bad Tray Count: ${issue}`;
+        await tx
+          .insert(alertsTable)
+          .values({
+            title: alertTitle,
+            description: `${totalTrays} bad trays reported in ${location} due to "${issue}". Manual check logged for cycle ${cycle.shortId}.`,
+            severity: "critical",
+            location,
+            status: "current",
+            facilityId: req.tenant!.facilityId,
+          })
+          .onConflictDoNothing();
+      }
+
+      return [row];
+    });
 
     return res.status(201).json({
       id: check.id,

@@ -9,8 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 25 Drizzle migrations should have been
--- replayed.
+-- and lib/db/scripts/migrate.mjs). All 26 Drizzle migrations should have been
+-- replayed (0025_backfill_organization_members.sql, MT-M1 Task 1, is the most
+-- recent addition).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -18,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  25,
-  'drizzle.__drizzle_migrations has exactly 25 rows (full migration history replayed)'
+  26,
+  'drizzle.__drizzle_migrations has exactly 26 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -63,11 +64,32 @@ SELECT is(
 -- adds tenant-isolation policies keyed on app.facility_id / app.org_id on
 -- the scoped tables (cycles, inventory_items, alerts, tasks, shipments,
 -- facility_logs, sensors, growth_profiles, accounting_connections,
--- seed_lots, organization_members) (Task 8).
+-- seed_lots, organization_members) (Task 8). 00008 adds an additive
+-- auth.uid()-scoped own-row policy on organization_members. 00009 adds
+-- additive current_user-scoped SELECT/UPDATE policies on public.users so the
+-- api-server backend's own non-BYPASSRLS role (farmsmart_app, MT-M1 Task 13)
+-- can read/update user rows without auth.uid() being set. 00010 adds the
+-- same current_user-scoped policies (only the commands each route actually
+-- uses) to organizations, wizard_progress, sensor_accounts,
+-- facility_readiness_events, and wizard_events -- 00006 enabled RLS on these
+-- with zero policies, which only worked while the backend ran as
+-- postgres/service_role (BYPASSRLS). 00011 adds an additive current_user-
+-- scoped INSERT policy on organization_members so POST /facilities can
+-- insert the owner membership row in the same transaction that creates the
+-- organization itself (app.org_id can't be set to an org id that doesn't
+-- exist yet). 00012 adds an additive current_user-scoped SELECT policy on
+-- organization_members -- the CRITICAL fix for resolveTenantContext's own
+-- bootstrap lookup, which 00008's auth.uid()-based policy could never
+-- satisfy for this backend's connection (found running the TEN-007
+-- isolation suite, Task 15, against staging). 00013 alters those same 11
+-- policies to wrap current_setting(...) in NULLIF before casting to int --
+-- the placeholder GUC's empty-string resting state (once ever referenced on
+-- a pooled backend) otherwise throws instead of evaluating to false (Task 16
+-- part 2).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  7,
-  'supabase_migrations.schema_migrations has exactly 7 rows (Supabase migrations 00001-00007)'
+  13,
+  'supabase_migrations.schema_migrations has exactly 13 rows (Supabase migrations 00001-00013)'
 );
 
 SELECT * FROM finish();

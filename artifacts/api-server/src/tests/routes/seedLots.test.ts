@@ -1,15 +1,18 @@
 import { describe, test } from "node:test";
 import { strictEqual, ok } from "node:assert";
 import request from "supertest";
-import { createAuthenticatedTestApp } from "../helpers/testApp";
+import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  seedTenantContext,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 /**
- * GET /seed-lots/lookup (Task 6: per-facility qr_code scoping).
+ * GET /seed-lots/lookup (Task 6: per-facility qr_code scoping; Task 8:
+ * tenant-scoped via withTenantScope + req.tenant.facilityId).
  *
  * seed_lots.qr_code is no longer globally unique — it is unique per facility
  * (composite UNIQUE(facility_id, qr_code) added in 0023). The two tests below
@@ -17,9 +20,11 @@ import {
  *   1. Two seed lots with the SAME qr_code in two DIFFERENT facilities both
  *      insert cleanly (would have thrown a unique-violation under the old
  *      global-unique constraint).
- *   2. GET /seed-lots/lookup?qrCode=X, which scopes to the pilot-default
- *      facility (lowest id), must never leak Facility B's row back through a
- *      Facility A query even when both rows share that qr_code.
+ *   2. GET /seed-lots/lookup?qrCode=X, which now scopes to the requesting
+ *      user's facility (req.tenant.facilityId, resolved by
+ *      resolveTenantContext from the seeded organization_members row), must
+ *      never leak Facility B's row back through a Facility A query even when
+ *      both rows share that qr_code.
  *
  * Gated on TEST_DATABASE_URL, mirroring facility-readiness.test.ts /
  * sensor-accounts.test.ts: the router and `@workspace/db` are imported lazily
@@ -30,35 +35,45 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
-  // Only `seed_lots` is truncated. `facilities`/`organizations` are shared
-  // reference tables the FK graph now fans out through (TRUNCATE ... CASCADE
-  // would destroy every cycles/inventory_items/alerts/tasks/shipments/...
-  // row). This means we can no longer manufacture "the lowest facility id in
-  // the table" by truncating first — some other suite's pilot-default
-  // facility may already exist with a lower id than anything we insert here.
-  // Instead: resolve the CURRENT lowest-id facility (whatever it is — the
-  // same query the lookup handler itself runs) and use THAT as facility A,
-  // rather than assuming a freshly-inserted row will win the id race.
-  // Facility B is a brand-new insert, guaranteed a higher (serial) id than
-  // any pre-existing row. This makes the test's premise (lookup resolves to
-  // the lowest-id facility, and must never leak facility B's row) hold
-  // regardless of what other suites have already created.
+  // Only `seed_lots` is truncated. `facilities`/`organizations`/
+  // `organization_members` are shared reference tables the FK graph now fans
+  // out through (TRUNCATE ... CASCADE would destroy every
+  // cycles/inventory_items/alerts/tasks/shipments/... row). Each setup()
+  // therefore seeds its OWN fresh tenant context (org + facility + membership)
+  // for the test user via seedTenantContext, and asserts key off the RETURNED
+  // facilityId rather than off the tables being globally empty. The
+  // organization_members.user_id unique index means a repeated call for the
+  // same userId (e.g. across the two tests) upserts the membership onto the
+  // new org/facility — never a duplicate, never a stale-facility leak.
   const fixture = useDatabaseFixture(["seed_lots"]);
 
   async function setup() {
     const seedLots = await import("../../routes/seedLots");
-    const { db, organizationsTable, facilitiesTable, seedLotsTable } = await import(
-      "@workspace/db"
+    const {
+      db,
+      usersTable,
+      organizationsTable,
+      facilitiesTable,
+      organizationMembersTable,
+      seedLotsTable,
+    } = await import("@workspace/db");
+
+    // Seed a real tenant membership for the test user. This is exactly what
+    // resolveTenantContext (mounted by createAuthenticatedTestApp) joins on to
+    // populate req.tenant { organizationId, facilityId, role }, which the
+    // rewired lookup handler scopes by. The returned facilityId is Facility A
+    // — the facility the lookup must resolve to.
+    const { facilityId: facilityAId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
     );
 
-    const [facilityA] = await db
-      .select()
-      .from(facilitiesTable)
-      .orderBy(facilitiesTable.id)
-      .limit(1);
-    ok(facilityA, "expected at least one pre-existing facility (seeded by migrations)");
-
-    const [org] = await db
+    // Facility B is a separate facility (different org) so the same qr_code can
+    // coexist in two facilities under the composite UNIQUE(facility_id,
+    // qr_code) without colliding. Its rows must never surface through a
+    // Facility A-scoped lookup.
+    const [orgB] = await db
       .insert(organizationsTable)
       .values({ name: "North Field Org" })
       .returning();
@@ -66,20 +81,20 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
       .insert(facilitiesTable)
       .values({
         name: "North Field",
-        organizationId: org.id,
+        organizationId: orgB.id,
         facilityName: "North Field",
         timezone: "UTC",
         units: "metric",
         currency: "USD",
       })
       .returning();
-    ok(facilityB.id > facilityA.id, "facility B must get a strictly higher id than facility A");
+    ok(facilityB.id !== facilityAId, "facility B must be distinct from facility A");
 
     return {
       app: createAuthenticatedTestApp(seedLots.default),
       db,
       seedLotsTable,
-      facilityA,
+      facilityA: { id: facilityAId },
       facilityB,
     };
   }
@@ -88,11 +103,11 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
     const { db, seedLotsTable, facilityA, facilityB } = await setup();
     const sharedQrCode = "SHARED-QR-001";
 
-    const [lotA] = await db
+    const [lotA] = await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityA.id, qrCode: sharedQrCode, seedName: "Radish A" })
       .returning();
-    const [lotB] = await db
+    const [lotB] = await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityB.id, qrCode: sharedQrCode, seedName: "Radish B" })
       .returning();
@@ -113,16 +128,17 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
     const { app, db, seedLotsTable, facilityA, facilityB } = await setup();
     const sharedQrCode = "SHARED-QR-002";
 
-    await db
+    await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityA.id, qrCode: sharedQrCode, seedName: "Radish A" })
       .returning();
-    await db
+    await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityB.id, qrCode: sharedQrCode, seedName: "Radish B" })
       .returning();
 
-    // The lookup scopes to the pilot-default facility (lowest id = A), so it
+    // The lookup scopes to the requesting user's facility (req.tenant.
+    // facilityId = Facility A, resolved from the seeded membership), so it
     // must resolve to Facility A's row and never Facility B's, even though
     // both rows share this qr_code.
     const res = await request(app)

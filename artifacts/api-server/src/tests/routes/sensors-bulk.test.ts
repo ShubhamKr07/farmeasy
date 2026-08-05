@@ -1,10 +1,11 @@
 import { describe, test } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import request from "supertest";
-import { createAuthenticatedTestApp } from "../helpers/testApp";
+import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
+  seedTenantContext,
   closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
 
@@ -24,13 +25,22 @@ describe("POST /api/sensors/bulk", { skip: !dbUrl }, () => {
 
   async function setup() {
     const sensors = await import("../../routes/sensors");
-    const { db, organizationsTable, facilitiesTable, roomsTable, channelsTable } = await import("@workspace/db");
-    const [org] = await db.insert(organizationsTable).values({ name: "Test Org" }).returning();
-    const [facility] = await db.insert(facilitiesTable).values({
-      name: "Test Farm", organizationId: org.id, facilityName: "Test Farm",
-      timezone: "UTC", units: "metric", currency: "USD",
-    }).returning();
-    const [room] = await db.insert(roomsTable).values({ name: "seeding", facilityId: facility.id }).returning();
+    const {
+      db,
+      usersTable,
+      organizationsTable,
+      facilitiesTable,
+      organizationMembersTable,
+      roomsTable,
+      channelsTable,
+    } = await import("@workspace/db");
+    const { facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      { farmName: "Test Farm", facilityName: "Test Farm" },
+    );
+    const [room] = await db.insert(roomsTable).values({ name: "seeding", facilityId }).returning();
     const channels = await db.insert(channelsTable).values([
       { roomId: room.id, label: "C1" }, { roomId: room.id, label: "C2" }, { roomId: room.id, label: "C3" },
     ]).returning();

@@ -25,24 +25,57 @@ export function softDelete(table: string): string {
   return SOFT_DELETE_TABLES.has(table) ? `${table}.deleted_at IS NULL` : "TRUE";
 }
 
+/**
+ * Tables the metrics registry declares as `p.table` that have their OWN
+ * facility_id column, scoped directly.
+ */
+const DIRECT_FACILITY_TABLES = new Set(["cycles", "alerts", "tasks", "shipments", "seed_lots"]);
+
+/**
+ * Tables with no facility_id of their own — scoped via a subquery through
+ * their FK to a directly-scoped parent. Confirmed against
+ * lib/db/src/schema/index.ts's actual FK references (not the registry's own
+ * bespoke `join` clauses, which serve a different purpose — dimension/label
+ * joins, not scoping — and must not be relied on for this).
+ */
+const CHILD_FACILITY_SUBQUERIES: Record<string, string> = {
+  stock_movements: "inventory_item_id IN (SELECT id FROM inventory_items WHERE facility_id = :facilityId)",
+  bad_tray_entries: "cycle_id IN (SELECT id FROM cycles WHERE facility_id = :facilityId)",
+  sensor_readings: "sensor_id IN (SELECT id FROM sensors WHERE facility_id = :facilityId)",
+  cycle_seed_lots: "cycle_id IN (SELECT id FROM cycles WHERE facility_id = :facilityId)",
+};
+
+/**
+ * Facility-scope WHERE fragment for a metrics registry table. "" for tables
+ * with no tenant column at all (crops — a genuinely global shared catalog,
+ * confirmed via schema: no facility_id/organization_id, name globally
+ * unique). Threaded through :facilityId the same way :cutover/:weekStart/
+ * :monthStart already are (substitutePlaceholders below).
+ */
+export function facilityScope(table: string): string {
+  if (DIRECT_FACILITY_TABLES.has(table)) return `${table}.facility_id = :facilityId`;
+  if (table in CHILD_FACILITY_SUBQUERIES) return CHILD_FACILITY_SUBQUERIES[table]!;
+  return "";
+}
+
 /** date_trunc('<unit>', <colExpr>) — facility-local calendar bucket (rule 1). */
 export function dateTrunc(unit: string, colExpr: string): string {
   return `date_trunc('${unit}', ${colExpr})`;
 }
 
 /** Facility-local "now" as a zoneless timestamp, for window bounds. */
-export function facilityNow(): string {
-  return `now() AT TIME ZONE '${FACILITY_TIMEZONE}'`;
+export function facilityNow(timezone: string): string {
+  return `now() AT TIME ZONE '${timezone}'`;
 }
 
 /**
  * WHERE fragment restricting `<colExpr>` to the last `days` days (facility-local).
  * Returns "" for unbounded (all-time).
  */
-export function rangeWindow(colExpr: string, range: string | undefined): string {
+export function rangeWindow(colExpr: string, range: string | undefined, timezone: string): string {
   const days = rangeToDays(range);
   if (days == null) return "";
-  return `${colExpr} >= (${facilityNow()}) - interval '${days} days'`;
+  return `${colExpr} >= (${facilityNow(timezone)}) - interval '${days} days'`;
 }
 
 export function rangeToDays(range: string | undefined): number | null {
@@ -73,11 +106,12 @@ export function execRaw(query: string) {
  *   :weekStart  -> facility now - 7 days
  *   :monthStart -> facility now - 30 days
  */
-export function substitutePlaceholders(q: string): string {
+export function substitutePlaceholders(q: string, facilityId: number, timezone: string): string {
   return q
     .replace(/:cutover/g, `'${BAD_TRAYS_CUTOVER_DATE}'`)
-    .replace(/:weekStart/g, `(${facilityNow()} - interval '7 days')`)
-    .replace(/:monthStart/g, `(${facilityNow()} - interval '30 days')`);
+    .replace(/:weekStart/g, `(${facilityNow(timezone)} - interval '7 days')`)
+    .replace(/:monthStart/g, `(${facilityNow(timezone)} - interval '30 days')`)
+    .replace(/:facilityId/g, String(Number(facilityId)));
 }
 
 /** COUNT(*) for "*", else SUM(<measure>). Ratio/timeBucket row counts vs sums. */

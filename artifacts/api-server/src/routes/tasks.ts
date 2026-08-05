@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, isNull } from "drizzle-orm";
-import { db } from "@workspace/db";
-import { tasksTable } from "@workspace/db";
+import { withTenantScope, tasksTable } from "@workspace/db";
 
 const router = Router();
 
@@ -22,7 +21,8 @@ function formatTask(t: typeof tasksTable.$inferSelect) {
 router.get("/tasks", async (req: Request, res: Response) => {
   try {
     const status = req.query["status"] as string | undefined;
-    const conds = [];
+    const facilityId = req.tenant!.facilityId;
+    const conds = [eq(tasksTable.facilityId, facilityId)];
     if (status === "pending" || status === "in_progress" || status === "done") {
       // Explicit valid status filter: return matching tasks of that status
       // (including completed ones for status=done). Replaces the open-tasks
@@ -34,11 +34,9 @@ router.get("/tasks", async (req: Request, res: Response) => {
       // No (or invalid) status filter: default to open tasks only.
       conds.push(isNull(tasksTable.completedAt));
     }
-    const rows = await db
-      .select()
-      .from(tasksTable)
-      .where(and(...conds))
-      .orderBy(tasksTable.dueAt);
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx.select().from(tasksTable).where(and(...conds)).orderBy(tasksTable.dueAt),
+    );
     return res.json(rows.map(formatTask));
   } catch (err) {
     req.log.error(err);
@@ -50,16 +48,19 @@ router.post("/tasks", async (req: Request, res: Response) => {
   try {
     const { cycleId, type, assignee, dueAt } = req.body;
     if (!type) return res.status(400).json({ error: "type is required" });
-    const [t] = await db
-      .insert(tasksTable)
-      .values({
-        cycleId: cycleId ?? null,
-        type,
-        status: "pending",
-        assignee: assignee ?? null,
-        dueAt: dueAt ? new Date(dueAt) : null,
-      })
-      .returning();
+    const [t] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .insert(tasksTable)
+        .values({
+          cycleId: cycleId ?? null,
+          type,
+          status: "pending",
+          assignee: assignee ?? null,
+          dueAt: dueAt ? new Date(dueAt) : null,
+          facilityId: req.tenant!.facilityId,
+        })
+        .returning(),
+    );
     return res.status(201).json(formatTask(t));
   } catch (err) {
     req.log.error(err);
@@ -82,11 +83,13 @@ router.patch("/tasks/:id", async (req: Request, res: Response) => {
     if (assignee !== undefined) update.assignee = assignee;
     if (dueAt !== undefined) update.dueAt = dueAt ? new Date(dueAt) : null;
 
-    const [t] = await db
-      .update(tasksTable)
-      .set(update)
-      .where(eq(tasksTable.id, id))
-      .returning();
+    const [t] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(tasksTable)
+        .set(update)
+        .where(and(eq(tasksTable.id, id), eq(tasksTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
     if (!t) return res.status(404).json({ error: "Task not found" });
     return res.json(formatTask(t));
   } catch (err) {
