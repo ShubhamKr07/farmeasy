@@ -3940,12 +3940,12 @@ alter policy "tenant isolation by facility" on public.cycles
 1. ~~Write a new migration altering all 11 policies~~ DONE — `00013_tenancy_policies_nullif_guc_cast.sql` (used `ALTER POLICY ... USING (...)`, preserving policy identity/ordering).
 2. ~~Bump `supabase/tests/00001_foundation.sql`'s migration-count assertion~~ DONE.
 3. ~~Apply to staging, re-run the Task 14 isolation suite against it~~ DONE — confirmed the GUC-cast error is gone (the isolation suite got past it; a separate, unrelated bug — part 3 below — is what's blocking full-green now).
-4. Confirm the full isolation suite passes cleanly, twice in a row, against staging — blocked on part 3's fix below, not on this bug anymore.
+4. ~~Confirm the full isolation suite passes cleanly, twice in a row, against staging~~ DONE — 11/11 pass, twice in a row (required part 3's fix below too, which is now also done).
 5. Consider (not required, but worth deciding explicitly): whether `withTenantScope` itself should proactively guard against this (e.g. documenting the risk inline) even after the RLS-side fix, since any FUTURE tenant-scoped table added without going through the same defensive pattern would reintroduce this exact class of bug.
 
 ### Task 16, part 3: metrics dispatch never uses withTenantScope — RLS silently zeroes every dashboard query
 
-**Found immediately after part 2's fix, same Task 15 verification pass. NOT YET FIXED — folded into Task 16 per explicit "keep investigating first" decision.**
+**Found immediately after part 2's fix, same Task 15 verification pass. FIXED and verified — all 11 `cross-tenant.test.ts` tests (including `GET /api/metrics`) pass cleanly against staging, twice in a row.**
 
 **Files:**
 - `artifacts/api-server/src/routes/metrics.ts` (the `GET /metrics` dispatch loop)
