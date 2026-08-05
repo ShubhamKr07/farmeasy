@@ -52,7 +52,15 @@ export async function seedTestUser(
       ON CONFLICT (id) DO NOTHING
     `);
   }
-  await db
+  // Real signup always goes through the handle_new_user() SECURITY DEFINER
+  // trigger (00004) -- it runs as the trigger's owner regardless of caller,
+  // never through the app's own connection. This upsert's INSERT branch
+  // (when no row exists yet -- e.g. right after truncating public.users, or
+  // a genuinely first-time synthetic id) is purely this test helper standing
+  // in for that trigger, so it needs the same admin routing as the
+  // auth.users insert above; the UPDATE branch (00009) is what a real
+  // farmsmart_app connection is actually expected to do.
+  await (getAdminDb() ?? db)
     .insert(usersTable)
     .values({
       id: user.id,
