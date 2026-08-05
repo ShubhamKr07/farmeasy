@@ -9,8 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 25 Drizzle migrations should have been
--- replayed.
+-- and lib/db/scripts/migrate.mjs). All 26 Drizzle migrations should have been
+-- replayed (0025_backfill_organization_members.sql, MT-M1 Task 1, is the most
+-- recent addition).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -18,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  25,
-  'drizzle.__drizzle_migrations has exactly 25 rows (full migration history replayed)'
+  26,
+  'drizzle.__drizzle_migrations has exactly 26 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
