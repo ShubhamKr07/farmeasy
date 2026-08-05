@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROUTES_DIR = path.join(ROOT, "artifacts/api-server/src/routes");
+// lib/ added after MT-M1's final review found a real violation invisible to
+// this guard: lib/accounting/quickbooks.ts touched accounting_connections
+// directly with no withTenantScope, and this scan only ever looked at
+// routes/. Tenant-scoped tables are touched from lib/ too (accounting,
+// metrics), not just route handlers.
+const LIB_DIR = path.join(ROOT, "artifacts/api-server/src/lib");
 
 // Scoped tables added in this milestone (Tasks 1-6) -- extend this list as
 // MT-M1/MT-M2 add more.
@@ -121,29 +127,31 @@ const BASELINE_VIOLATIONS = new Set([
 const newViolations = [];
 const baselineViolations = [];
 
-for await (const file of glob("**/*.ts", { cwd: ROUTES_DIR })) {
-  const fullPath = path.join(ROUTES_DIR, file);
-  const relPath = path.relative(ROOT, fullPath);
-  const content = readFileSync(fullPath, "utf8");
+for (const scanDir of [ROUTES_DIR, LIB_DIR]) {
+  for await (const file of glob("**/*.ts", { cwd: scanDir })) {
+    const fullPath = path.join(scanDir, file);
+    const relPath = path.relative(ROOT, fullPath);
+    const content = readFileSync(fullPath, "utf8");
 
-  // A file that already routes its DB access through withTenantScope is
-  // considered clean regardless of raw db.<verb>( chains it may still
-  // contain — checked once per file, before scanning its matches.
-  if (content.includes("withTenantScope")) continue;
+    // A file that already routes its DB access through withTenantScope is
+    // considered clean regardless of raw db.<verb>( chains it may still
+    // contain — checked once per file, before scanning its matches.
+    if (content.includes("withTenantScope")) continue;
 
-  for (const match of content.matchAll(DIRECT_CALL)) {
-    // Map the match's character offset back to a 1-based line number so the
-    // report stays useful to a human reading the file.
-    const upToMatch = content.slice(0, match.index);
-    const lineNumber = upToMatch.split("\n").length;
-    // Report the specific line the db.<verb>( call starts on, trimmed, so
-    // baseline keys stay stable and readable (not the whole multi-line match).
-    const startLine = content.split("\n")[lineNumber - 1].trim();
-    const key = `${relPath}::${startLine}`;
-    if (BASELINE_VIOLATIONS.has(key)) {
-      baselineViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
-    } else {
-      newViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
+    for (const match of content.matchAll(DIRECT_CALL)) {
+      // Map the match's character offset back to a 1-based line number so the
+      // report stays useful to a human reading the file.
+      const upToMatch = content.slice(0, match.index);
+      const lineNumber = upToMatch.split("\n").length;
+      // Report the specific line the db.<verb>( call starts on, trimmed, so
+      // baseline keys stay stable and readable (not the whole multi-line match).
+      const startLine = content.split("\n")[lineNumber - 1].trim();
+      const key = `${relPath}::${startLine}`;
+      if (BASELINE_VIOLATIONS.has(key)) {
+        baselineViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
+      } else {
+        newViolations.push(`${relPath}:${lineNumber}: ${startLine}`);
+      }
     }
   }
 }

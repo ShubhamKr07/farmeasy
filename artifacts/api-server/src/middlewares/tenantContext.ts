@@ -93,6 +93,12 @@ export async function resolveTenantContext(
       const { eq, and } = await import("drizzle-orm");
       const { db, organizationMembersTable, facilitiesTable } = await import("@workspace/db");
 
+      // organization_members' backend-role SELECT policy (00012) is
+      // unqualified (current_user = 'farmsmart_app', not scoped by userId) --
+      // safe here only because this WHERE clause itself filters by userId
+      // before any RLS-admitted row reaches the app. If a future endpoint
+      // ever lists OTHER users' memberships, it must carry its own explicit
+      // org/facility filter -- RLS will not scope that query for you.
       const [membership] = await db
         .select({
           organizationId: organizationMembersTable.organizationId,
