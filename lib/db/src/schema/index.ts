@@ -401,7 +401,10 @@ export const wizardProgressTable = pgTable(
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("wizard_progress_user_id_uniq").on(table.userId),
+    uniqueIndex("wizard_progress_user_id_facility_id_uniq").on(table.userId, table.facilityId),
+    uniqueIndex("wizard_progress_user_id_no_facility_uniq")
+      .on(table.userId)
+      .where(sql`${table.facilityId} IS NULL`),
     index("wizard_progress_facility_id_idx").on(table.facilityId),
   ],
 );
