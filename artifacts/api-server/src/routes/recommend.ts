@@ -124,7 +124,7 @@ async function recommendHandler(req: Request, res: Response) {
   let opsContext: string | null = null;
   if (questionMentionsOps(question)) {
     try {
-      opsContext = formatOpsContext(await computeDashboardSnapshot());
+      opsContext = formatOpsContext(await computeDashboardSnapshot(req.tenant!));
     } catch (err) {
       req.log.error(err); // non-fatal — proceed without ops context
     }

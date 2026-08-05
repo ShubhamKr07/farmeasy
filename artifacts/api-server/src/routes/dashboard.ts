@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, ne, count, sql } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { withTenantScope, type TenantContext } from "@workspace/db";
 import {
   cyclesTable,
   growthProfilesTable,
@@ -32,9 +32,19 @@ function enforceAuth(req: Request, res: Response, next: NextFunction) {
  * recommender's ops-question grounding in routes/recommend.ts) can reuse
  * the exact same numbers instead of re-deriving them — one compute path
  * per number, enforced across features, not just within this route.
+ *
+ * Wrapped in withTenantScope: every table this function reads (cycles,
+ * growth_profiles, manual_checks, seed_lots, alerts, sensors,
+ * bad_tray_entries, channels) has an RLS policy requiring app.facility_id/
+ * app.org_id to be set. Without this wrapper, the query previously ran on a
+ * connection that never set it, so under a real non-BYPASSRLS role every
+ * number here silently computed as if the whole system were empty (found
+ * during MT-M1's final review, same failure class as the metrics dispatch
+ * fix — see routes/metrics.ts).
  */
-export async function computeDashboardSnapshot() {
-  const runningRows = await db
+export async function computeDashboardSnapshot(tenant: TenantContext) {
+  return withTenantScope(tenant, async (tx) => {
+  const runningRows = await tx
       .select({ cycle: cyclesTable, profile: growthProfilesTable })
       .from(cyclesTable)
       .leftJoin(
@@ -90,7 +100,7 @@ export async function computeDashboardSnapshot() {
     // Note: alert auto-creation for overdue cycles moved to a scheduled job
     // (lib/overdue-scanner) — GET /dashboard is now read-only (R6).
 
-    const completedRows = await db
+    const completedRows = await tx
       .select({
         harvestedQty: cyclesTable.harvestedQty,
         closedAt: cyclesTable.closedAt,
@@ -98,7 +108,7 @@ export async function computeDashboardSnapshot() {
       .from(cyclesTable)
       .where(eq(cyclesTable.status, "completed"));
 
-    const badTrayChecks = await db
+    const badTrayChecks = await tx
       .select({
         fullTrays: manualChecksTable.fullTrays,
         halfTrays: manualChecksTable.halfTrays,
@@ -128,7 +138,7 @@ export async function computeDashboardSnapshot() {
     // window as totalYieldThisWeek — wastage-aware estimate grounded in each
     // cycle's own expected yield (see POST /cycles/:id/manual-checks and
     // /complete-harvest), not a flat per-tray guess.
-    const wasteRows = await db
+    const wasteRows = await tx
       .select({ lossEstimate: badTrayEntriesTable.lossEstimate, createdAt: badTrayEntriesTable.createdAt })
       .from(badTrayEntriesTable);
     let totalWasteThisWeek = 0;
@@ -149,7 +159,7 @@ export async function computeDashboardSnapshot() {
       const back = `${count - 1} ${bucket}s`;
       const interval = bucket === "day" ? "1 day" : "1 week";
       const labelExpr = bucket === "day" ? `to_char(gs.d, 'Dy')` : `NULL`;
-      const res = await db.execute(sql`
+      const res = await tx.execute(sql`
         SELECT ${sql.raw(labelExpr)} AS label, COALESCE(SUM(${sql.raw(valueExpr)}), 0) AS value
         FROM generate_series(
           date_trunc(${sql.raw(`'${bucket}'`)}, now() - interval ${sql.raw(`'${back}'`)}),
@@ -183,7 +193,7 @@ export async function computeDashboardSnapshot() {
       ]);
 
     // Active seed lots (currently being grown)
-    const activeSeedLotsRows = await db
+    const activeSeedLotsRows = await tx
       .select({
         id: seedLotsTable.id,
         seedName: seedLotsTable.seedName,
@@ -221,7 +231,7 @@ export async function computeDashboardSnapshot() {
     // fabricated, number) — sensorsOnline/sensorsTotal below is still the
     // live freshness signal for anyone who needs it.
     const STALE_MS = 15 * 60 * 1000; // 15 min — used for sensorsOnline count only, not per-metric error
-    const allSensors = await db.select().from(sensorsTable);
+    const allSensors = await tx.select().from(sensorsTable);
     const now2 = Date.now();
 
     function metricFor(type: "temp" | "ph" | "water" | "humidity") {
@@ -257,13 +267,13 @@ export async function computeDashboardSnapshot() {
     };
 
     // Current alerts count
-    const currentAlerts = await db
+    const currentAlerts = await tx
       .select({ id: alertsTable.id, severity: alertsTable.severity })
       .from(alertsTable)
       .where(eq(alertsTable.status, "current"));
 
     // Channel utilization denominator: real channel count, not a hardcoded const (R9).
-    const channelCountRows = await db.select({ c: count() }).from(channelsTable);
+    const channelCountRows = await tx.select({ c: count() }).from(channelsTable);
     const totalChannels = Number(channelCountRows[0]?.c ?? 0);
 
     return {
@@ -293,11 +303,12 @@ export async function computeDashboardSnapshot() {
       criticalAlertsCount: currentAlerts.filter((a) => a.severity === "critical").length,
       actionRequired: actionRequired.sort((a, b) => b.daysOverdue - a.daysOverdue),
     };
+  });
 }
 
 router.get("/dashboard", async (req: Request, res: Response) => {
   try {
-    const snapshot = await computeDashboardSnapshot();
+    const snapshot = await computeDashboardSnapshot(req.tenant!);
     return res.json(snapshot);
   } catch (err) {
     req.log.error(err);

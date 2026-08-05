@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, asc, ne, count, like, and } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { db, withTenantScope } from "@workspace/db";
 import {
   roomsTable,
   channelsTable,
@@ -392,10 +392,18 @@ router.get("/layout/channels-status", async (req: Request, res: Response) => {
     const channels = await db.select().from(channelsTable).orderBy(asc(channelsTable.positionIndex));
     const racks = await db.select().from(racksTable);
     const trays = await db.select().from(traysTable);
-    const activeCycles = await db
-      .select({ trayPosition: cyclesTable.trayPosition })
-      .from(cyclesTable)
-      .where(ne(cyclesTable.status, "completed"));
+    // cycles is RLS-protected (facility-scoped) -- must go through
+    // withTenantScope, unlike this route's other tables (rooms/channels/
+    // racks/trays, which have no RLS at all). Found during MT-M1's final
+    // review: this raw read previously ran on a connection that never set
+    // app.facility_id, so under a real non-BYPASSRLS role it always
+    // returned zero cycles regardless of what actually existed.
+    const activeCycles = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ trayPosition: cyclesTable.trayPosition })
+        .from(cyclesTable)
+        .where(ne(cyclesTable.status, "completed")),
+    );
 
     const result = rooms.flatMap((room) =>
       channels
@@ -476,17 +484,22 @@ router.get("/layout/resolve", async (req: Request, res: Response) => {
       .where(eq(racksTable.channelId, channelRow.id));
     const totalTrays = Number(totalTraysRow?.count ?? 0);
 
-    // Active (non-completed) cycles assigned to this channel
-    const [activeCyclesRow] = await db
-      .select({ count: count(cyclesTable.id) })
-      .from(cyclesTable)
-      .where(
-        and(
-          ne(cyclesTable.status, "completed"),
-          like(cyclesTable.trayPosition, `%"room":"${roomRow.name}"%`),
-          like(cyclesTable.trayPosition, `%"channel":"${channelRow.label}"%`),
+    // Active (non-completed) cycles assigned to this channel -- see the
+    // /layout/channels-status handler above for why this needs
+    // withTenantScope (cycles is RLS-protected, unlike this route's other
+    // tables).
+    const [activeCyclesRow] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({ count: count(cyclesTable.id) })
+        .from(cyclesTable)
+        .where(
+          and(
+            ne(cyclesTable.status, "completed"),
+            like(cyclesTable.trayPosition, `%"room":"${roomRow.name}"%`),
+            like(cyclesTable.trayPosition, `%"channel":"${channelRow.label}"%`),
+          ),
         ),
-      );
+    );
     const activeCycles = Number(activeCyclesRow?.count ?? 0);
     const availableTrays = Math.max(0, totalTrays - activeCycles);
     const isFull = totalTrays > 0 && activeCycles >= totalTrays;

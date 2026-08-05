@@ -82,48 +82,70 @@ interface Availability {
   accounting_connected: boolean;
 }
 
-// Global flags (same for every user) cached once; accounting_connected is
-// per-user (each user has their own QuickBooks connection) so it's cached
-// separately, keyed by clerk user id, with a shorter TTL.
-let globalCache: { data: Omit<Availability, "accounting_connected">; expiresAt: number } | null = null;
+// Cached per facility (not one shared global value) -- these flags depend on
+// facility-scoped data (shipments/growth_profiles), so caching one answer
+// for every tenant would leak org A's "revenue available" flag onto org B's
+// dashboard. accounting_connected is per-(organization, user) since each
+// user has their own QuickBooks connection, cached separately with a
+// shorter TTL, keyed accordingly.
+const globalCache = new Map<number, { data: Omit<Availability, "accounting_connected">; expiresAt: number }>();
 const GLOBAL_TTL_MS = 5 * 60 * 1000;
 const acctCache = new Map<string, { connected: boolean; expiresAt: number }>();
 const ACCT_TTL_MS = 60 * 1000;
 
-async function computeGlobalAvailability(): Promise<Omit<Availability, "accounting_connected">> {
-  const [rev, sensor, crop] = await Promise.all([
-    db.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM shipments WHERE revenue_usd IS NOT NULL AND deleted_at IS NULL) AS v`)),
-    db.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM sensor_readings) AS v`)),
-    db.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM growth_profiles WHERE crop_id IS NOT NULL) AS v`)),
-  ]);
-  const v = (r: unknown) => Boolean((r as { rows: { v: boolean }[] }).rows[0]?.v);
-  return {
-    revenue: v(rev),
-    sensor_readings: v(sensor),
-    cost: false, // stock_movements has no unit-cost field; marginByCrop gated (dictionary caveat)
-    crop_id: v(crop),
-  };
+// Wrapped in withTenantScope: shipments and growth_profiles are both
+// RLS-protected (facility- and organization-scoped respectively) -- without
+// this, app.facility_id/app.org_id are never set and RLS silently zeroes
+// every EXISTS check regardless of what's actually stored (found during
+// MT-M1's final review). sensor_readings itself has no RLS, but is scoped
+// here too via a facility-owned sensor_id subquery for the same reason this
+// whole function was flagged in the plan as "a real cross-tenant leak in
+// spirit" when it was still a single global, unscoped check.
+async function computeFacilityAvailability(
+  tenant: { organizationId: number; facilityId: number },
+): Promise<Omit<Availability, "accounting_connected">> {
+  return withTenantScope(tenant, async (tx) => {
+    const [rev, sensor, crop] = await Promise.all([
+      tx.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM shipments WHERE revenue_usd IS NOT NULL AND deleted_at IS NULL AND facility_id = ${Number(tenant.facilityId)}) AS v`)),
+      tx.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM sensor_readings WHERE sensor_id IN (SELECT id FROM sensors WHERE facility_id = ${Number(tenant.facilityId)})) AS v`)),
+      tx.execute(sql.raw(`SELECT EXISTS (SELECT 1 FROM growth_profiles WHERE crop_id IS NOT NULL AND organization_id = ${Number(tenant.organizationId)}) AS v`)),
+    ]);
+    const v = (r: unknown) => Boolean((r as { rows: { v: boolean }[] }).rows[0]?.v);
+    return {
+      revenue: v(rev),
+      sensor_readings: v(sensor),
+      cost: false, // stock_movements has no unit-cost field; marginByCrop gated (dictionary caveat)
+      crop_id: v(crop),
+    };
+  });
 }
 
 router.get("/metrics/availability", async (req: Request, res: Response) => {
   try {
-    if (!globalCache || globalCache.expiresAt <= Date.now()) {
-      globalCache = { data: await computeGlobalAvailability(), expiresAt: Date.now() + GLOBAL_TTL_MS };
-    }
+    const facilityId = req.tenant!.facilityId;
+    const organizationId = req.tenant!.organizationId;
+    const cached = globalCache.get(facilityId);
+    const data = cached && cached.expiresAt > Date.now()
+      ? cached.data
+      : await computeFacilityAvailability(req.tenant!).then((data) => {
+          globalCache.set(facilityId, { data, expiresAt: Date.now() + GLOBAL_TTL_MS });
+          return data;
+        });
 
     const { userId } = getAuth(req);
     let accountingConnected = false;
     if (userId) {
-      const cached = acctCache.get(userId);
-      if (cached && cached.expiresAt > Date.now()) {
-        accountingConnected = cached.connected;
+      const acctCacheKey = `${organizationId}:${userId}`;
+      const cachedAcct = acctCache.get(acctCacheKey);
+      if (cachedAcct && cachedAcct.expiresAt > Date.now()) {
+        accountingConnected = cachedAcct.connected;
       } else {
-        accountingConnected = await isQuickbooksConnected(userId, req.tenant!.organizationId);
-        acctCache.set(userId, { connected: accountingConnected, expiresAt: Date.now() + ACCT_TTL_MS });
+        accountingConnected = await isQuickbooksConnected(userId, organizationId);
+        acctCache.set(acctCacheKey, { connected: accountingConnected, expiresAt: Date.now() + ACCT_TTL_MS });
       }
     }
 
-    return res.json({ ...globalCache.data, accounting_connected: accountingConnected });
+    return res.json({ ...data, accounting_connected: accountingConnected });
   } catch (err) {
     return res.status(500).json({ error: "availability query failed", detail: (err as Error).message });
   }
@@ -131,7 +153,7 @@ router.get("/metrics/availability", async (req: Request, res: Response) => {
 
 /** Exposed for tests / migration tooling. */
 export function resetAvailabilityCache() {
-  globalCache = null;
+  globalCache.clear();
   acctCache.clear();
 }
 

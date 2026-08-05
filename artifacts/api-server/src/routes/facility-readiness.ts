@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { db } from "@workspace/db";
+import { db, withTenantScope } from "@workspace/db";
 import {
   usersTable,
   facilitiesTable,
@@ -66,20 +66,36 @@ router.get("/facility-readiness", async (req: Request, res: Response) => {
 
     const activeEvent = (key: string) => events.find((e) => e.eventKey === key && !e.undoneAt);
 
-    // Items 4 and 5 (first_cycle_seeded / sensors_registered) are live,
-    // UNSCOPED counts — neither cyclesTable nor sensorsTable has a direct
-    // facilityId column, and scoping either would require a multi-hop join
-    // that no other endpoint in this codebase currently does (see brief's
-    // Design decisions). Item 6 (quickbooks_connected) IS user-scoped via
-    // accountingConnectionsTable.userId.
-    const [{ sensorCount }] = await db.select({ sensorCount: count() }).from(sensorsTable);
-    const [{ cycleCount }] = await db.select({ cycleCount: count() }).from(cyclesTable);
-    const [qboConnection] = await db
-      .select()
-      .from(accountingConnectionsTable)
-      .where(
-        and(eq(accountingConnectionsTable.userId, userId!), eq(accountingConnectionsTable.provider, "quickbooks")),
-      );
+    // Items 4 and 5 (first_cycle_seeded / sensors_registered): cyclesTable
+    // and sensorsTable both gained a direct facilityId column in this same
+    // milestone's route sweep (Tasks 4-8) -- the "neither has a direct
+    // facilityId column" reasoning this comment used to have is stale.
+    // Scoped directly by facility.id below, plus withTenantScope so RLS
+    // (facility-scoped on both tables) actually admits the rows -- without
+    // it, this connection never sets app.facility_id and every count here
+    // silently reads as zero under a real non-BYPASSRLS role (found during
+    // MT-M1's final review). accountingConnectionsTable is
+    // organization-scoped (RLS requires app.org_id), same reasoning.
+    const { sensorCount, cycleCount, qboConnection } = await withTenantScope(
+      { organizationId: facility.organizationId, facilityId: facility.id },
+      async (tx) => {
+        const [{ sensorCount }] = await tx
+          .select({ sensorCount: count() })
+          .from(sensorsTable)
+          .where(eq(sensorsTable.facilityId, facility.id));
+        const [{ cycleCount }] = await tx
+          .select({ cycleCount: count() })
+          .from(cyclesTable)
+          .where(eq(cyclesTable.facilityId, facility.id));
+        const [qboConnection] = await tx
+          .select()
+          .from(accountingConnectionsTable)
+          .where(
+            and(eq(accountingConnectionsTable.userId, userId!), eq(accountingConnectionsTable.provider, "quickbooks")),
+          );
+        return { sensorCount, cycleCount, qboConnection };
+      },
+    );
 
     const labelsDownloaded = activeEvent("labels_downloaded");
     const labelsScanned = activeEvent("labels_scanned");
