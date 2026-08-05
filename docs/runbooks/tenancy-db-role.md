@@ -5,44 +5,27 @@
 in the multi-tenancy initiative is a silent no-op. Verified via
 `scripts/ci/verify-db-role.mjs`.
 
-## Result of the MT-M0 check
+## Result of the MT-M0 check (superseded — see MT-M1 below)
 
-**No live staging connection was reachable from the environment in which
-Task 7 was executed, so the check could NOT be run. This section is an
-explicit "not yet run" statement, not a recorded result.**
+At the time Task 7 (MT-M0) ran, no live staging connection was reachable
+from that environment, so the check could not be run there. That gap is
+now resolved for staging.
 
-What was actually checked during Task 7:
+## Staging: resolved (MT-M1 Task 13, 2026-08-05)
 
-- Environment variables inspected: `STAGING_DATABASE_URL_DIRECT` (empty)
-  and `DATABASE_URL` (empty). Neither is set in this environment.
-- No `.env` file is present in the repository worktree.
-- The verification script itself was exercised only on its no-connection
-  error path (`DATABASE_URL` unset → it prints `DATABASE_URL must be set`
-  and exits `1`) and a syntax check (`node --check` passes). It was **not**
-  pointed at any database, local or otherwise — a check run against a
-  throwaway local Postgres would say nothing about the role configured for
-  the staging/production API server and is explicitly out of scope here.
+`farmsmart_app` is provisioned and live on staging (`farmsmart-api-staging`).
+`verify-db-role.mjs` confirms `Connected as: farmsmart_app` /
+`BYPASSRLS: false`. Full details, the real gaps found and fixed while
+rotating (stale staging schema, missing RLS policies on `users`/
+`organizations`/onboarding tables/`organization_members`), and the one
+known deferred test-isolation issue: **`docs/runbooks/mt-m1-rls-role-rotation.md`**.
 
-**Required follow-up before any RLS policy written in Task 8 is trusted:**
-a human with real access to the staging Supabase project must run, from an
-environment where the staging direct connection string is available:
+## Production: still open
 
-```sh
-DATABASE_URL="$STAGING_DATABASE_URL_DIRECT" node scripts/ci/verify-db-role.mjs
-```
-
-and record the real output here. Until that shows `BYPASSRLS: false`,
-proceed under the assumption that the API server's DB role bypasses RLS
-(i.e. assume policies are unenforced) — which is exactly the assumption
-that makes provisioning the `farmsmart_app` role below mandatory.
-
-If a result is obtained, replace this section with the recorded output in
-the form:
-
-```
-Connected as: <role>
-BYPASSRLS: <true|false>
-```
+Production's `DATABASE_URL` still connects as `postgres`/`service_role`
+(BYPASSRLS). Rotate it the same way as staging, after this plan's Task 14
+(isolation suite) has proven the rotated role behaves correctly under real
+cross-tenant traffic, and after Task 16 (test-isolation audit) is done.
 
 ## If a new role is needed
 
