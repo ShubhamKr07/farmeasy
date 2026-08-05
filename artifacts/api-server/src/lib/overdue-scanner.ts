@@ -27,6 +27,7 @@ export async function scanOverdueCyclesAndAlert(log?: Logger) {
     cycleShortId: string;
     seedName: string;
     trayPosition: string | null;
+    facilityId: number;
     type: "fertigation" | "harvest";
     daysOverdue: number;
   };
@@ -45,6 +46,7 @@ export async function scanOverdueCyclesAndAlert(log?: Logger) {
           cycleShortId: cycle.shortId,
           seedName: cycle.seedName,
           trayPosition: cycle.trayPosition,
+          facilityId: cycle.facilityId,
           type: "fertigation",
           daysOverdue: Math.floor((now - dueMs) / 864e5),
         });
@@ -57,6 +59,7 @@ export async function scanOverdueCyclesAndAlert(log?: Logger) {
           cycleShortId: cycle.shortId,
           seedName: cycle.seedName,
           trayPosition: cycle.trayPosition,
+          facilityId: cycle.facilityId,
           type: "harvest",
           daysOverdue: Math.floor((now - dueMs) / 864e5),
         });
@@ -81,6 +84,7 @@ export async function scanOverdueCyclesAndAlert(log?: Logger) {
         location,
         status: "current",
         actionType: item.type,
+        facilityId: item.facilityId,
       })
       .onConflictDoNothing()
       .returning();
