@@ -43,7 +43,7 @@ router.get("/metrics", async (req: Request, res: Response) => {
     const entries = await Promise.all(
       valid.map(async (v) => {
         try {
-          const data = await TEMPLATES[v.template](v.params, range, userId ?? undefined);
+          const data = await TEMPLATES[v.template](v.params, range, userId ?? undefined, req.tenant!.organizationId);
           return [v.id, data] as const;
         } catch (err) {
           // One failing metric shouldn't 500 the whole batch; report per-key.
@@ -103,7 +103,7 @@ router.get("/metrics/availability", async (req: Request, res: Response) => {
       if (cached && cached.expiresAt > Date.now()) {
         accountingConnected = cached.connected;
       } else {
-        accountingConnected = await isQuickbooksConnected(userId);
+        accountingConnected = await isQuickbooksConnected(userId, req.tenant!.organizationId);
         acctCache.set(userId, { connected: accountingConnected, expiresAt: Date.now() + ACCT_TTL_MS });
       }
     }

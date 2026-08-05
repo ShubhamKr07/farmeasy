@@ -19,7 +19,7 @@ import {
  * maps back to the Clerk user id, so the callback can attribute the
  * connection without itself being an authenticated request.
  */
-const pendingStates = new Map<string, { userId: string; expiresAt: number }>();
+const pendingStates = new Map<string, { userId: string; organizationId: number; expiresAt: number }>();
 
 function cleanupExpiredStates() {
   const now = Date.now();
@@ -38,7 +38,9 @@ accountingRouter.get("/accounting/connect", (req: Request, res: Response) => {
 
   cleanupExpiredStates();
   const state = randomBytes(16).toString("hex");
-  pendingStates.set(state, { userId: userId, expiresAt: Date.now() + 10 * 60 * 1000 });
+  // Store organizationId alongside userId -- the unauthenticated callback
+  // below has no req.tenant to read it from otherwise.
+  pendingStates.set(state, { userId: userId, organizationId: req.tenant!.organizationId, expiresAt: Date.now() + 10 * 60 * 1000 });
 
   const uri = getAuthorizeUri(state);
   return res.json({ authorizeUri: uri });
@@ -48,7 +50,7 @@ accountingRouter.get("/accounting/status", async (req: Request, res: Response) =
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const status = await getConnectionStatus(userId);
+  const status = await getConnectionStatus(userId, req.tenant!.organizationId);
   return res.json(status);
 });
 
@@ -56,7 +58,7 @@ accountingRouter.post("/accounting/disconnect", async (req: Request, res: Respon
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-  const ok = await disconnect(userId);
+  const ok = await disconnect(userId, req.tenant!.organizationId);
   return res.json({ disconnected: ok });
 });
 
@@ -91,7 +93,10 @@ accountingPublicRouter.get("/accounting/callback", async (req: Request, res: Res
     // intuit-oauth's createToken expects the full callback URL (it parses
     // code/realmId/state off it internally).
     const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
-    await saveConnectionFromCallback(entry.userId, fullUrl);
+    // organizationId comes from the pendingStates entry (stored at
+    // connect-time), NOT req.tenant -- this route has no tenant context, it
+    // isn't behind requireTenantContext or even requireSignedIn.
+    await saveConnectionFromCallback(entry.userId, entry.organizationId, fullUrl);
     return redirectWithStatus("connected");
   } catch (err) {
     req.log.error(err);

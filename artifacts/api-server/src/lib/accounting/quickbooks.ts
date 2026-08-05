@@ -48,7 +48,7 @@ interface StoredConnection {
   expiresAt: Date;
 }
 
-async function getConnectionRow(userId: string) {
+async function getConnectionRow(userId: string, organizationId: number) {
   const [row] = await db
     .select()
     .from(accountingConnectionsTable)
@@ -56,6 +56,7 @@ async function getConnectionRow(userId: string) {
       and(
         eq(accountingConnectionsTable.userId, userId),
         eq(accountingConnectionsTable.provider, "quickbooks"),
+        eq(accountingConnectionsTable.organizationId, organizationId),
       ),
     )
     .limit(1);
@@ -64,6 +65,7 @@ async function getConnectionRow(userId: string) {
 
 export async function saveConnectionFromCallback(
   userId: string,
+  organizationId: number,
   callbackUrl: string,
 ): Promise<{ realmId: string }> {
   const client = createOAuthClient();
@@ -80,6 +82,7 @@ export async function saveConnectionFromCallback(
     .insert(accountingConnectionsTable)
     .values({
       userId,
+      organizationId,
       provider: "quickbooks",
       realmId: token.realmId,
       accessTokenEnc: encryptToken(token.access_token),
@@ -101,8 +104,8 @@ export async function saveConnectionFromCallback(
   return { realmId: token.realmId };
 }
 
-export async function getConnectionStatus(userId: string) {
-  const row = await getConnectionRow(userId);
+export async function getConnectionStatus(userId: string, organizationId: number) {
+  const row = await getConnectionRow(userId, organizationId);
   if (!row) return { connected: false as const };
   return {
     connected: true as const,
@@ -112,8 +115,8 @@ export async function getConnectionStatus(userId: string) {
   };
 }
 
-export async function disconnect(userId: string): Promise<boolean> {
-  const row = await getConnectionRow(userId);
+export async function disconnect(userId: string, organizationId: number): Promise<boolean> {
+  const row = await getConnectionRow(userId, organizationId);
   if (!row) return false;
 
   try {
@@ -134,8 +137,9 @@ export async function disconnect(userId: string): Promise<boolean> {
  */
 export async function getAuthenticatedClient(
   userId: string,
+  organizationId: number,
 ): Promise<{ client: OAuthClient; realmId: string }> {
-  const row = await getConnectionRow(userId);
+  const row = await getConnectionRow(userId, organizationId);
   if (!row) throw new Error("QuickBooks is not connected for this user");
 
   const client = createOAuthClient();
@@ -167,7 +171,7 @@ export async function getAuthenticatedClient(
 }
 
 /** Cheap connectivity check for /api/metrics/availability — no token refresh. */
-export async function isConnected(userId: string): Promise<boolean> {
-  const row = await getConnectionRow(userId);
+export async function isConnected(userId: string, organizationId: number): Promise<boolean> {
+  const row = await getConnectionRow(userId, organizationId);
   return !!row;
 }

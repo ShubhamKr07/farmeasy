@@ -141,9 +141,11 @@ export async function quickbooksTemplate(
   p: QuickbooksParams,
   _range?: string,
   userId?: string,
+  organizationId?: number,
 ): Promise<unknown> {
   if (!userId) throw new Error("quickbooks template requires an authenticated user");
-  return runQuickbooksQuery(p.key, userId);
+  if (organizationId === undefined) throw new Error("quickbooks template requires an organization id");
+  return runQuickbooksQuery(p.key, userId, organizationId);
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -173,7 +175,7 @@ function labelFmt(unit: string): string {
   return "HH24:MI";
 }
 
-export const TEMPLATES: Record<TemplateName, (p: any, range?: string, userId?: string) => Promise<unknown>> = {
+export const TEMPLATES: Record<TemplateName, (p: any, range?: string, userId?: string, organizationId?: number) => Promise<unknown>> = {
   scalarAgg,
   groupBy,
   timeBucket,
