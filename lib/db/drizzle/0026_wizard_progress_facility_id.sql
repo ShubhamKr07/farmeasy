@@ -1,0 +1,3 @@
+ALTER TABLE "wizard_progress" ADD COLUMN "facility_id" integer;--> statement-breakpoint
+ALTER TABLE "wizard_progress" ADD CONSTRAINT "wizard_progress_facility_id_facilities_id_fk" FOREIGN KEY ("facility_id") REFERENCES "public"."facilities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "wizard_progress_facility_id_idx" ON "wizard_progress" USING btree ("facility_id");
