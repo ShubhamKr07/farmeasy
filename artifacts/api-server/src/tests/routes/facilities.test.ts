@@ -8,6 +8,7 @@ import {
   useDatabaseFixture,
   seedTestUser,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 /**
@@ -48,8 +49,20 @@ describe("POST /api/facilities", { skip: !dbUrl }, () => {
 
   async function setup() {
     const facilities = await import("../../routes/facilities");
-    const { db, roomsTable, usersTable } = await import("@workspace/db");
+    const { db, roomsTable, usersTable, organizationMembersTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
+    // POST /facilities plain-inserts into organization_members (no upsert --
+    // a real user only ever gets one membership, created once). Unlike
+    // users.organization_id (reset above by seedTestUser), organization_members
+    // is a shared table never truncated between test files -- if ANY other
+    // file's seedTenantContext call already gave this exact shared synthetic
+    // user a membership earlier in the same suite run, this insert collides
+    // on organization_members_user_id_uniq even though users.organization_id
+    // looks fresh. Delete any pre-existing row for this user first so this
+    // suite's own correctness doesn't depend on running before every other
+    // file that uses DEFAULT_TEST_USER.sub (Task 16, MT-M1).
+    await (getAdminDb() ?? db).delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
     return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable };
   }
 
@@ -82,8 +95,11 @@ describe("GET /api/facilities/me", { skip: !dbUrl }, () => {
 
   async function setup() {
     const facilities = await import("../../routes/facilities");
-    const { db, roomsTable, usersTable } = await import("@workspace/db");
+    const { db, roomsTable, usersTable, organizationMembersTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
+    // See the POST describe's setup() above for why this delete is needed.
+    await (getAdminDb() ?? db).delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
     return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable };
   }
 
