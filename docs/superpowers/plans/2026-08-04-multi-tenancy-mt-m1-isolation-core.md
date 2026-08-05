@@ -3870,6 +3870,30 @@ git commit -m "docs: record MT-M1 TEN-007 staging isolation run, meeting the mil
 
 ---
 
+### Task 16: Test-suite isolation audit — shared synthetic test user
+
+**Files:**
+- Investigate: `artifacts/api-server/src/tests/routes/facilities.test.ts`, `facility-readiness.test.ts`, `inventory.test.ts`, `sensor-accounts.test.ts`, `recommend.test.ts`, `seedLots.test.ts`, `sensors-bulk.test.ts`, `wizard.test.ts`, `shipments.test.ts`, `tasks.test.ts` — every file using `DEFAULT_TEST_USER.sub`/`seedTenantContext`/`seedTestUser` (`testApp.ts`'s single hardcoded synthetic id, `00000000-0000-4000-8000-000000000001`).
+
+**Context (found during Task 13's full-suite-against-staging verification, not fixed there per explicit decision to defer):**
+
+Running the complete `api-server` suite against a real, non-BYPASSRLS staging role surfaced `duplicate key value violates unique constraint "organization_members_user_id_uniq"` failures in `facilities.test.ts` (6 occurrences in one run). Root cause, as far as diagnosed: `organization_members` is deliberately never truncated between test files (it's treated as a "shared reference table" per the convention documented in `seedLots.test.ts`/other files' comments), but many files legitimately give the SAME hardcoded synthetic user id a real membership row via `seedTenantContext`. `facilities.test.ts`'s own tests assume that user starts with zero `organization_members` rows (exercising the real `POST /facilities` `AlreadyHasFacilityError` chicken-and-egg check) — an assumption that only holds if no other file (or no earlier test case within the same file) has already given that exact user a membership. `--test-concurrency=1` (`scripts/run-tests.mjs`) rules out a race — this is a real ordering/shared-state dependency, not a race condition.
+
+This was masked until now because:
+1. This branch has never had a CI run (never pushed/PR'd), so the full suite has never executed against a real, correctly-migrated database in one shot.
+2. Locally, these DB-gated suites just skip without `TEST_DATABASE_URL`.
+
+**What this task should do:**
+
+1. Audit every file in the list above for state assumptions about `DEFAULT_TEST_USER.sub` that depend on it NOT already having an `organization_members` row, a `users.organization_id`, or other cross-file-shared state — not just `facilities.test.ts`'s known failure.
+2. For each file found to have this dependency, either (a) mint its own fresh synthetic user id (e.g. a per-file or per-test UUID) instead of relying on the single shared `DEFAULT_TEST_USER.sub`, or (b) make the assumption explicit and self-sufficient (e.g. delete any pre-existing membership for that exact user id in the file's own `before`/`beforeEach`, via the admin connection, before asserting a fresh-state scenario).
+3. Verify the fix by running the full suite against a real database (disposable or staging) at least twice in a row without a manual reset in between, to prove file-order/repeat-run independence — the exact condition that exposed this bug.
+4. Confirm `pnpm --filter @workspace/api-server run typecheck` and the full suite (against a real database) are both clean.
+
+**Not required:** re-litigating whether `organization_members` SHOULD be a shared/non-truncated table — that convention is otherwise working correctly for every OTHER file; this task only needs to remove `facilities.test.ts`'s (and any similarly-affected file's) implicit dependency on being first.
+
+---
+
 ## Exit criteria (from the PRD, unchanged)
 
 - Two test orgs fully isolated in staging (Task 15).
