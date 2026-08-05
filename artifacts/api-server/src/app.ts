@@ -113,7 +113,7 @@ app.use("/api", accountingPublicRouter);
 // `enforceAuth` handlers in cycles/media remain as defense-in-depth.
 app.use("/api", requireSignedIn, dashboardRouter);
 app.use("/api", requireSignedIn, requireTenantContext, alertsRouter);
-app.use("/api", requireSignedIn, inventoryRouter);
+app.use("/api", requireSignedIn, requireTenantContext, inventoryRouter);
 app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
 app.use("/api", requireSignedIn, requireTenantContext, cyclesRouter);

@@ -1,8 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { eq, gt, and, asc } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@workspace/db";
-import { inventoryItemsTable, facilitiesTable } from "@workspace/db";
+import { withTenantScope, inventoryItemsTable } from "@workspace/db";
 import { generateShortId } from "../lib/utils";
 
 const router = Router();
@@ -105,16 +104,20 @@ router.get("/inventory", async (req: Request, res: Response) => {
       req.query.limit ? parseInt(req.query.limit as string, 10) || DEFAULT_LIMIT : DEFAULT_LIMIT,
     );
 
-    // Keyset pagination on id. No `cursor`/`limit` param = first page, same
-    // flat-array shape as before pagination existed.
-    const conditions = cursor !== undefined ? [gt(inventoryItemsTable.id, cursor)] : [];
+    // Keyset pagination on id, always scoped to the request's facility. No
+    // `cursor`/`limit` param = first page, same flat-array shape as before
+    // pagination existed.
+    const conditions = [eq(inventoryItemsTable.facilityId, req.tenant!.facilityId)];
+    if (cursor !== undefined) conditions.push(gt(inventoryItemsTable.id, cursor));
 
-    const rows = await db
-      .select()
-      .from(inventoryItemsTable)
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(asc(inventoryItemsTable.id))
-      .limit(limit + 1);
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select()
+        .from(inventoryItemsTable)
+        .where(and(...conditions))
+        .orderBy(asc(inventoryItemsTable.id))
+        .limit(limit + 1),
+    );
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
@@ -135,38 +138,29 @@ router.post("/inventory", async (req: Request, res: Response) => {
     const body = validate(CreateInventorySchema, req.body, res);
     if (!body) return;
 
-    // Facility resolution is session-context wiring deferred to a later
-    // milestone (MT-M1) -- this pilot-default lookup unblocks typecheck for
-    // this one handler now that inventory_items.facilityId is NOT NULL.
-    const [defaultFacility] = await db
-      .select({ id: facilitiesTable.id })
-      .from(facilitiesTable)
-      .orderBy(facilitiesTable.id)
-      .limit(1);
-    if (!defaultFacility) {
-      return res.status(500).json({ error: "No facility configured" });
-    }
-    const facilityId = defaultFacility.id;
+    const facilityId = req.tenant!.facilityId;
 
     let itemCode = generateShortId();
     let item: typeof inventoryItemsTable.$inferSelect | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
-      [item] = await db
-        .insert(inventoryItemsTable)
-        .values({
-          name: body.name,
-          brand: body.brand ?? null,
-          category: body.category ?? null,
-          qrCode: body.qrCode ?? null,
-          currentQty: String(body.currentQty ?? 0),
-          maxQty: String(body.maxQty ?? 0),
-          unit: body.unit ?? "g",
-          arrivalDate: body.arrivalDate ?? null,
-          facilityId,
-          itemCode,
-        })
-        .onConflictDoNothing({ target: [inventoryItemsTable.facilityId, inventoryItemsTable.itemCode] })
-        .returning();
+      [item] = await withTenantScope(req.tenant!, (tx) =>
+        tx
+          .insert(inventoryItemsTable)
+          .values({
+            name: body.name,
+            brand: body.brand ?? null,
+            category: body.category ?? null,
+            qrCode: body.qrCode ?? null,
+            currentQty: String(body.currentQty ?? 0),
+            maxQty: String(body.maxQty ?? 0),
+            unit: body.unit ?? "g",
+            arrivalDate: body.arrivalDate ?? null,
+            facilityId,
+            itemCode,
+          })
+          .onConflictDoNothing({ target: [inventoryItemsTable.facilityId, inventoryItemsTable.itemCode] })
+          .returning(),
+      );
       if (item) break;
       itemCode = generateShortId();
     }
@@ -216,31 +210,29 @@ router.patch("/inventory/:id", async (req: Request, res: Response) => {
     // merged values would violate `currentQty <= maxQty` — instead of blindly
     // updating its own fields and relying on the DB's CHECK constraint to
     // throw an unhandled 500. Never read the row outside this transaction.
-    const result = await db.transaction(async (tx) => {
+    // The facility filter on both the SELECT FOR UPDATE and the final UPDATE
+    // guarantees a cross-tenant id collision can never lock or mutate another
+    // facility's row.
+    const result = await withTenantScope(req.tenant!, async (tx) => {
       const [existing] = await tx
         .select()
         .from(inventoryItemsTable)
-        .where(eq(inventoryItemsTable.id, id))
+        .where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.facilityId, req.tenant!.facilityId)))
         .for("update");
 
       if (!existing) return { kind: "not_found" as const };
 
-      const mergedCurrent =
-        body.currentQty !== undefined ? body.currentQty : Number(existing.currentQty);
-      const mergedMax =
-        body.maxQty !== undefined ? body.maxQty : Number(existing.maxQty);
+      const mergedCurrent = body.currentQty !== undefined ? body.currentQty : Number(existing.currentQty);
+      const mergedMax = body.maxQty !== undefined ? body.maxQty : Number(existing.maxQty);
 
       if (mergedCurrent > mergedMax) {
-        return {
-          kind: "invalid" as const,
-          message: "currentQty must be less than or equal to maxQty",
-        };
+        return { kind: "invalid" as const, message: "currentQty must be less than or equal to maxQty" };
       }
 
       const [updated] = await tx
         .update(inventoryItemsTable)
         .set(updateData)
-        .where(eq(inventoryItemsTable.id, id))
+        .where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.facilityId, req.tenant!.facilityId)))
         .returning();
 
       return { kind: "ok" as const, item: updated };
@@ -262,10 +254,12 @@ router.patch("/inventory/:id", async (req: Request, res: Response) => {
 router.delete("/inventory/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params["id"] as string, 10);
-    const [item] = await db
-      .delete(inventoryItemsTable)
-      .where(eq(inventoryItemsTable.id, id))
-      .returning();
+    const [item] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .delete(inventoryItemsTable)
+        .where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.facilityId, req.tenant!.facilityId)))
+        .returning(),
+    );
 
     if (!item) return res.status(404).json({ error: "Item not found" });
     return res.json({ ok: true, id });

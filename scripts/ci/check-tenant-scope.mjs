@@ -64,14 +64,17 @@ const DIRECT_CALL = new RegExp(
 // Two groups here, both pre-existing debt (nothing in this list was
 // introduced after the check first shipped in MT-M0 Task 10):
 //
-//  (A) Six SINGLE-LINE call sites that the original per-line regex caught.
-//      These are the entries the check has always known about.
+//  (A) Three SINGLE-LINE call sites that the original per-line regex caught.
+//      (alerts.ts, growthProfiles.ts's route handler, and sensors.ts's
+//      single-line entries were dropped once Tasks 4/7/8 rewired those
+//      handlers to withTenantScope -- the file-level withTenantScope check
+//      now skips those files entirely, so the entries can never match again.)
 //
-//  (B) TWENTY-SIX MULTI-LINE call sites (18 distinct keys -- some keys, e.g.
-//      cycles.ts's repeated `const [profile] = await db` chain-start, cover
-//      several handlers at once) that the old single-line regex was blind to
-//      and that MT-M1 Task 3's multi-line-aware regex now sees for the first
-//      time. They are the same category of deferred debt as group (A), just
+//  (B) MULTI-LINE call sites (15 distinct keys -- some keys, e.g. cycles.ts's
+//      repeated `const [profile] = await db` chain-start, cover several
+//      handlers at once) that the old single-line regex was blind to and that
+//      MT-M1 Task 3's multi-line-aware regex now sees for the first time.
+//      They are the same category of deferred debt as group (A), just
 //      previously invisible; baselining them keeps CI green while MT-M1's
 //      route-sweep tasks (4-8) rewire each handler to withTenantScope and
 //      then delete the now-fixed entries. Files NOT covered by any MT-M1
@@ -79,15 +82,11 @@ const DIRECT_CALL = new RegExp(
 //      layout.ts) stay baselined as explicitly-tracked deferred debt.
 const BASELINE_VIOLATIONS = new Set([
   // --- (A) original single-line baselines (pre-date the multi-line fix) ---
-  "artifacts/api-server/src/routes/alerts.ts::rows = await db.select().from(alertsTable).orderBy(desc(alertsTable.createdAt));",
   "artifacts/api-server/src/routes/dashboard.ts::const allSensors = await db.select().from(sensorsTable);",
   "artifacts/api-server/src/routes/facility-readiness.ts::const [{ sensorCount }] = await db.select({ sensorCount: count() }).from(sensorsTable);",
   "artifacts/api-server/src/routes/facility-readiness.ts::const [{ cycleCount }] = await db.select({ cycleCount: count() }).from(cyclesTable);",
-  "artifacts/api-server/src/routes/growthProfiles.ts::const profiles = await db.select().from(growthProfilesTable);",
-  "artifacts/api-server/src/routes/sensors.ts::const rows = await db.select().from(sensorsTable);",
   // --- (B) multi-line call sites first visible after MT-M1 Task 3's fix ---
-  // alerts.ts (Task 4 rewires + drops these), badTrays.ts (Task 7):
-  "artifacts/api-server/src/routes/alerts.ts::rows = await db",
+  // badTrays.ts (Task 7):
   "artifacts/api-server/src/routes/badTrays.ts::const [cycle] = await db",
   // cycles.ts (Task 6 rewires the whole file -> it then contains
   // withTenantScope and is skipped entirely, so all four keys clear at once;
@@ -105,17 +104,19 @@ const BASELINE_VIOLATIONS = new Set([
   // facility-readiness.ts: the accounting lookup below is not in any MT-M1
   // sweep task -> deferred debt (the two (A) entries above are also here):
   "artifacts/api-server/src/routes/facility-readiness.ts::const [qboConnection] = await db",
-  // growthProfiles.ts (Task 7), inventory.ts (Task 8):
+  // growthProfiles.ts: the only remaining direct `db.` access in this file is
+  // the pilot-bootstrap seedDataIfEmpty() helper (NOT the route handler --
+  // Task 7 rewired that to withTenantScope). The file-level withTenantScope
+  // check therefore skips the whole file, so this entry is dead debt
+  // documenting the seed helper's deliberately-deferred bootstrap access
+  // (replaced by TEN-013 demo-mode provisioning in MT-M2, not this milestone):
   "artifacts/api-server/src/routes/growthProfiles.ts::const existing = await db",
-  "artifacts/api-server/src/routes/inventory.ts::const rows = await db",
   // layout.ts: NOT in any MT-M1 sweep task -> permanent deferred debt:
   "artifacts/api-server/src/routes/layout.ts::const activeCycles = await db",
   "artifacts/api-server/src/routes/layout.ts::const [activeCyclesRow] = await db",
-  // seedLots.ts (Task 8 rewires GET /seed-lots/lookup + drops this entry):
-  "artifacts/api-server/src/routes/seedLots.ts::const [lot] = await db",
   // shipments.ts (Task 4), tasks.ts (Task 4):
   "artifacts/api-server/src/routes/shipments.ts::const rows = await db",
-  "artifacts/api-server/src/routes/tasks.ts::const rows = await db",
+  "artifacts/api-server/src/tasks.ts::const rows = await db",
 ]);
 
 const newViolations = [];
