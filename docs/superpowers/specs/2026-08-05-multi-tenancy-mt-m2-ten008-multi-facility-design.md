@@ -66,6 +66,17 @@ Extends `cross-tenant.test.ts`'s existing cross-*organization* pattern one level
 
 TEN-009 (org rollup stubs), TEN-010 rev. B (team invites, roles, the technician mobile-only enforcement), TEN-012 (public sign-up), TEN-013 (demo mode) — each its own future sub-project. Role-based restriction on who can add a facility (TEN-010's territory). Per-facility membership assignment (Q24 explicitly defaults this to "all org members see all facilities" for v1 — a future RBAC initiative's scope, not this one).
 
+## 3a. Mobile "Add facility" authentication bridge
+
+**Constraint (confirmed during planning, not covered above): technicians sign in on mobile only.** `farmeasy` already has its own independent Supabase Auth session (`app/(auth)/sign-in.tsx`) — a technician has no separate way to authenticate on the web dashboard, so simply opening the wizard's URL in the phone's system browser and expecting a fresh login there does not work. `farmeasy` already ships `expo-web-browser`, so "Add facility" opens the wizard in an **in-app browser** (`WebBrowser.openBrowserAsync`, not the OAuth-redirect variant — the user stays inside this browser through the whole W2→W3→W3.5 flow and closes it manually when the wizard reaches Done), pre-authenticated via a one-time session handoff:
+
+1. Mobile already holds a live Supabase session (`supabase.auth.getSession()` — same call `_layout.tsx` and `custom-fetch.ts`'s auth-token getter already use).
+2. `WebBrowser.openBrowserAsync` opens `<dashboardUrl>/mobile-bridge#access_token=<...>&refresh_token=<...>`, tokens carried in the URL **fragment**, not a query string — a fragment is never transmitted to the server or captured in access logs (the same reason Supabase's own OAuth implicit flow uses one).
+3. A new unauthenticated route in `admin-dashboard`, `/mobile-bridge`, renders outside the normal `AuthGate` session check. On mount it reads `window.location.hash`, calls `supabase.auth.setSession({ access_token, refresh_token })`, immediately clears the hash from history (`window.history.replaceState`) so the tokens never persist in browser history, then does a client-side redirect into the app with a one-shot "start add-facility" signal (a `sessionStorage` flag consumed once by the switcher's own state, forcing `FacilityGate` to render the wizard for a brand-new facility rather than the active one).
+4. The rest of the flow is identical to first-time web onboarding: `Wizard.tsx` runs unmodified, `wizard_progress` gets a `(userId, facilityId: null)` row until W2's `POST /facilities` stamps it.
+
+No new backend endpoint is needed for the handoff itself — `/mobile-bridge` is a frontend-only route that calls the Supabase JS SDK directly, the same SDK call every other sign-in path already uses.
+
 ## 9. Risks and gaps
 
 - **The `wizard_progress` schema change is the highest-risk single piece.** Every existing row (one per user, all currently representing "facility #1's" onboarding) needs a backfill to the real `facility_id` it actually belongs to before the unique constraint changes — an expand→backfill→contract migration, matching the pattern MT-M0 already established for `rooms.facility_id`. Getting the backfill's facility-resolution logic wrong (which facility does an EXISTING wizard_progress row belong to?) would misattribute a user's onboarding history.
