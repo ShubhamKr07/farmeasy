@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { sql, eq } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
-import { db, facilitiesTable } from "@workspace/db";
+import { db, facilitiesTable, withTenantScope } from "@workspace/db";
 import { METRICS_BY_ID, metricsForTab, type MetricTab, type TemplateName } from "@workspace/metrics";
 import { TEMPLATES } from "../lib/metrics/templates";
 import { isConnected as isQuickbooksConnected } from "../lib/accounting/quickbooks";
@@ -44,17 +44,28 @@ router.get("/metrics", async (req: Request, res: Response) => {
   }
 
   try {
-    const entries = await Promise.all(
-      valid.map(async (v) => {
-        try {
-          const data = await TEMPLATES[v.template](v.params, facilityId, timezone, range, userId ?? undefined, req.tenant!.organizationId);
-          return [v.id, data] as const;
-        } catch (err) {
-          // One failing metric shouldn't 500 the whole batch; report per-key.
-          return [v.id, { error: (err as Error).message }] as const;
-        }
-      }),
-    );
+    // Every template/custom query's OWN scoping is a plain :facilityId
+    // literal substitution (tz.ts), never a Postgres session variable -- but
+    // 00007's RLS policies are still active on every table these queries
+    // touch and require app.org_id/app.facility_id to be set to admit any
+    // row. Without withTenantScope, these queries would run on a connection
+    // that never sets that GUC, so RLS silently zeroes every result
+    // regardless of the query's own correct scoping (found empirically:
+    // MT-M1 Task 15/16, running the isolation suite against a real
+    // non-BYPASSRLS role).
+    const entries = await withTenantScope(req.tenant!, async (tx) => {
+      return Promise.all(
+        valid.map(async (v) => {
+          try {
+            const data = await TEMPLATES[v.template](v.params, facilityId, timezone, range, userId ?? undefined, req.tenant!.organizationId, tx);
+            return [v.id, data] as const;
+          } catch (err) {
+            // One failing metric shouldn't 500 the whole batch; report per-key.
+            return [v.id, { error: (err as Error).message }] as const;
+          }
+        }),
+      );
+    });
     return res.json(Object.fromEntries(entries));
   } catch (err) {
     return res.status(500).json({ error: "metrics query failed", detail: (err as Error).message });

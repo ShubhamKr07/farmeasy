@@ -11,25 +11,19 @@ import {
   closeDatabasePoolAfterTests,
   getAdminDb,
 } from "../helpers/testDatabase";
-import facilitiesRouter from "../../routes/facilities";
-import alertsRouter from "../../routes/alerts";
-import tasksRouter from "../../routes/tasks";
-import shipmentsRouter from "../../routes/shipments";
-import inventoryRouter from "../../routes/inventory";
-import growthProfilesRouter from "../../routes/growthProfiles";
-import metricsRouter from "../../routes/metrics";
 
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
-const combinedRouter = Router();
-combinedRouter.use(facilitiesRouter);
-combinedRouter.use(alertsRouter);
-combinedRouter.use(tasksRouter);
-combinedRouter.use(shipmentsRouter);
-combinedRouter.use(inventoryRouter);
-combinedRouter.use(growthProfilesRouter);
-combinedRouter.use(metricsRouter);
+// Route modules are imported lazily inside before() (only when the describe
+// block actually runs) -- mirrors every other DB-gated test file in this
+// codebase. A static top-of-file import transitively pulls in
+// `@workspace/db`, which throws at module-load time when DATABASE_URL is
+// unset, regardless of describe's own `{ skip: !dbUrl }` gate (ESM imports
+// evaluate before any runtime skip logic runs) -- caught for real: this file
+// crashed the whole local no-database test run before this fix.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let combinedRouter: any;
 
 // Every table this milestone scopes, plus the bootstrap tables the two orgs
 // themselves are created into -- a full-suite truncate is safe here (this is
@@ -54,6 +48,22 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     if (!dbUrl) return;
     process.env.DATABASE_URL = dbUrl;
     const { db, usersTable } = await import("@workspace/db");
+
+    const facilitiesRouter = (await import("../../routes/facilities")).default;
+    const alertsRouter = (await import("../../routes/alerts")).default;
+    const tasksRouter = (await import("../../routes/tasks")).default;
+    const shipmentsRouter = (await import("../../routes/shipments")).default;
+    const inventoryRouter = (await import("../../routes/inventory")).default;
+    const growthProfilesRouter = (await import("../../routes/growthProfiles")).default;
+    const metricsRouter = (await import("../../routes/metrics")).default;
+    combinedRouter = Router();
+    combinedRouter.use(facilitiesRouter);
+    combinedRouter.use(alertsRouter);
+    combinedRouter.use(tasksRouter);
+    combinedRouter.use(shipmentsRouter);
+    combinedRouter.use(inventoryRouter);
+    combinedRouter.use(growthProfilesRouter);
+    combinedRouter.use(metricsRouter);
 
     // ONE truncate for the whole suite, not per-test: this suite seeds org
     // A/B and their resources ONCE here, then reads/asserts against that

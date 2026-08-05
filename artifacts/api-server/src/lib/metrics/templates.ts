@@ -33,6 +33,21 @@ import {
 
 type Row = Record<string, unknown>;
 
+// The transaction client withTenantScope (lib/db/src/scope.ts) hands its
+// callback -- structurally compatible with `db` for the one method these
+// functions actually call (a PgTransaction lacks db's own `$client` property,
+// so `typeof db` itself is too narrow here; both shapes satisfy .execute()).
+// routes/metrics.ts wraps its whole dispatch loop in withTenantScope and
+// passes the resulting tx as the final argument to every TEMPLATES[...]
+// call, so these queries run on the SAME connection that set
+// app.org_id/app.facility_id -- required for 00007's RLS policies to admit
+// any row, since these functions' OWN scoping is a plain :facilityId literal
+// substitution (substitutePlaceholders), never a Postgres GUC. Without tx,
+// falls back to the module-level `db` -- unchanged behavior for
+// metrics.test.ts/parity.test.ts's golden-fixture tests, which call these
+// functions directly without going through the route.
+type DbClient = Pick<typeof db, "execute">;
+
 function num(v: unknown): number {
   if (v == null) return 0;
   const n = Number(v);
@@ -45,8 +60,8 @@ function aggExpr(measure: string, agg?: string): string {
   return `${a.toUpperCase()}(${measure})`;
 }
 
-export async function scalarAgg(p: ScalarAggParams, facilityId: number, timezone: string, range?: string): Promise<{ value: number }> {
-  void timezone;
+export async function scalarAgg(p: ScalarAggParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<{ value: number }> {
+  void timezone; void userId; void organizationId;
   const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where, rangeWindowFor(p.table, p, range));
   const join = p.join ? `JOIN ${p.join}` : "";
   const q = substitutePlaceholders(
@@ -54,12 +69,12 @@ export async function scalarAgg(p: ScalarAggParams, facilityId: number, timezone
     facilityId,
     timezone,
   );
-  const res = await db.execute(sql.raw(q));
+  const res = await (tx ?? db).execute(sql.raw(q));
   return { value: num((res.rows[0] as Row)?.value) };
 }
 
-export async function groupBy(p: GroupByParams, facilityId: number, timezone: string, range?: string): Promise<{ label: string; value: number }[]> {
-  void timezone;
+export async function groupBy(p: GroupByParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<{ label: string; value: number }[]> {
+  void timezone; void userId; void organizationId;
   const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where, rangeWindowFor(p.table, p, range));
   const order = p.order ? `ORDER BY value ${p.order.toUpperCase()}` : "ORDER BY value DESC";
   const limit = p.limit ? `LIMIT ${p.limit}` : "";
@@ -70,11 +85,12 @@ export async function groupBy(p: GroupByParams, facilityId: number, timezone: st
     facilityId,
     timezone,
   );
-  const res = await db.execute(sql.raw(q));
+  const res = await (tx ?? db).execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
 }
 
-export async function timeBucket(p: TimeBucketParams, facilityId: number, timezone: string, range?: string): Promise<{ label: string; value: number }[]> {
+export async function timeBucket(p: TimeBucketParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<{ label: string; value: number }[]> {
+  void userId; void organizationId;
   const { unit, count } = bucketRange(p.bucket, range);
   const start = `${dateTrunc(unit, facilityNow(timezone))} - interval '${count - 1} ${unit}s'`;
   const end = dateTrunc(unit, facilityNow(timezone));
@@ -96,12 +112,12 @@ export async function timeBucket(p: TimeBucketParams, facilityId: number, timezo
     facilityId,
     timezone,
   );
-  const res = await db.execute(sql.raw(q));
+  const res = await (tx ?? db).execute(sql.raw(q));
   return (res.rows as Row[]).map((r) => ({ label: String(r.label ?? ""), value: num(r.value) }));
 }
 
-export async function ratio(p: RatioParams, facilityId: number, timezone: string, range?: string): Promise<{ value: number } | { label: string; value: number }[]> {
-  void timezone; void range;
+export async function ratio(p: RatioParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<{ value: number } | { label: string; value: number }[]> {
+  void timezone; void range; void userId; void organizationId;
   if (p.dim) {
     const where = andWhere(softDelete(p.numTable), facilityScope(p.numTable), p.numWhere);
     const q = substitutePlaceholders(
@@ -112,7 +128,7 @@ export async function ratio(p: RatioParams, facilityId: number, timezone: string
       facilityId,
       timezone,
     );
-    const res = await db.execute(sql.raw(q));
+    const res = await (tx ?? db).execute(sql.raw(q));
     return (res.rows as Row[]).map((r) => ({
       label: String(r.label ?? ""),
       value: num(r.den) !== 0 ? num(r.num) / num(r.den) : 0,
@@ -126,14 +142,14 @@ export async function ratio(p: RatioParams, facilityId: number, timezone: string
     facilityId,
     timezone,
   );
-  const res = await db.execute(sql.raw(q));
+  const res = await (tx ?? db).execute(sql.raw(q));
   const row = res.rows[0] as Row;
   const den = num(row.den);
   return { value: den !== 0 ? num(row.num) / den : 0 };
 }
 
-export async function tableTemplate(p: TableParams, facilityId: number, timezone: string, range?: string): Promise<Row[]> {
-  void timezone; void range;
+export async function tableTemplate(p: TableParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<Row[]> {
+  void timezone; void range; void userId; void organizationId;
   const where = andWhere(softDelete(p.table), facilityScope(p.table), p.where);
   const order = p.order ? `ORDER BY 1 ${p.order.toUpperCase()}` : "";
   const limit = p.limit ? `LIMIT ${p.limit}` : "";
@@ -142,15 +158,15 @@ export async function tableTemplate(p: TableParams, facilityId: number, timezone
     facilityId,
     timezone,
   );
-  const res = await db.execute(sql.raw(q));
+  const res = await (tx ?? db).execute(sql.raw(q));
   return res.rows as Row[];
 }
 
-export async function customTemplate(p: CustomParams, facilityId: number, timezone: string, range?: string): Promise<unknown> {
-  void range;
+export async function customTemplate(p: CustomParams, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient): Promise<unknown> {
+  void range; void userId; void organizationId;
   const fn = CUSTOM_QUERIES[p.key];
   if (!fn) throw new Error(`no custom query registered for key: ${p.key}`);
-  return fn(facilityId, timezone);
+  return fn(facilityId, timezone, tx);
 }
 
 export async function quickbooksTemplate(
@@ -160,8 +176,9 @@ export async function quickbooksTemplate(
   range?: string,
   userId?: string,
   organizationId?: number,
+  tx?: DbClient,
 ): Promise<unknown> {
-  void facilityId; void timezone; void range;
+  void facilityId; void timezone; void range; void tx;
   if (!userId) throw new Error("quickbooks template requires an authenticated user");
   if (organizationId === undefined) throw new Error("quickbooks template requires an organization id");
   return runQuickbooksQuery(p.key, userId, organizationId);
@@ -194,7 +211,7 @@ function labelFmt(unit: string): string {
   return "HH24:MI";
 }
 
-export const TEMPLATES: Record<TemplateName, (p: any, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number) => Promise<unknown>> = {
+export const TEMPLATES: Record<TemplateName, (p: any, facilityId: number, timezone: string, range?: string, userId?: string, organizationId?: number, tx?: DbClient) => Promise<unknown>> = {
   scalarAgg,
   groupBy,
   timeBucket,
