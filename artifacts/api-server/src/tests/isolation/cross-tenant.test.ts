@@ -10,6 +10,7 @@ import {
   useDatabaseFixture,
   seedTestUser,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 import facilitiesRouter from "../../routes/facilities";
 import alertsRouter from "../../routes/alerts";
@@ -75,7 +76,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const { growthProfilesTable, facilitiesTable } = await import("@workspace/db");
     const { eq } = await import("drizzle-orm");
     const [orgAFacility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, orgA.facilityId));
-    const [gp] = await db
+    const [gp] = await (getAdminDb() ?? db)
       .insert(growthProfilesTable)
       .values({
         name: "Isolation Test Crop",
