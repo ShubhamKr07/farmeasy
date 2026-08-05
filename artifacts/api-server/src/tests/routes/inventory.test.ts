@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import { strictEqual, ok } from "node:assert";
 import request from "supertest";
-import { createAuthenticatedTestApp } from "../helpers/testApp";
+import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
@@ -66,14 +66,13 @@ describe(
         organizationMembersTable,
       } = await import("@workspace/db");
       const { seedTenantContext } = await import("../helpers/testDatabase");
-      const { DEFAULT_TEST_USER } = await import("../helpers/testApp");
       const { facilityId } = await seedTenantContext(
         db,
         { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
         { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
       );
       return {
-        app: createAuthenticatedTestApp(inventory.default),
+        app: createAuthenticatedTestApp(inventory.default, DEFAULT_TEST_USER, facilityId),
         db,
         inventoryItemsTable,
         facilityId,

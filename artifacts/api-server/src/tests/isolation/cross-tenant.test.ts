@@ -93,12 +93,14 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     async function provisionOrg(email: string) {
       const userId = randomUUID();
       await seedTestUser(db, usersTable, { id: userId, email });
-      const testApp = createAuthenticatedTestApp(combinedRouter, { sub: userId });
-      const createRes = await request(testApp)
+      const bootstrapApp = createAuthenticatedTestApp(combinedRouter, { sub: userId });
+      const createRes = await request(bootstrapApp)
         .post("/api/facilities")
         .send({ farmName: `Org for ${email}`, timezone: "UTC", units: "metric", currency: "USD" });
       strictEqual(createRes.status, 201, `facility creation for ${email} must succeed`);
-      return { app: testApp, facilityId: createRes.body.facilityId as number, userId };
+      const facilityId = createRes.body.facilityId as number;
+      const app = createAuthenticatedTestApp(combinedRouter, { sub: userId }, facilityId);
+      return { app, facilityId, userId };
     }
 
     orgA = await provisionOrg("org-a@isolation-test.example.com");
