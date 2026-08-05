@@ -7,6 +7,7 @@ import {
   useDatabaseFixture,
   seedTenantContext,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 closeDatabasePoolAfterTests();
@@ -82,7 +83,7 @@ describe(
 
     test("default (no status) returns only open tasks", async () => {
       const { app, db, tasksTable, facilityId } = await setup();
-      await db.insert(tasksTable).values([
+      await (getAdminDb() ?? db).insert(tasksTable).values([
         { ...PENDING, facilityId },
         { ...DONE, facilityId },
       ]);
@@ -99,7 +100,7 @@ describe(
 
     test("status=done returns the completed task", async () => {
       const { app, db, tasksTable, facilityId } = await setup();
-      await db.insert(tasksTable).values([
+      await (getAdminDb() ?? db).insert(tasksTable).values([
         { ...PENDING, facilityId },
         { ...DONE, facilityId },
       ]);
@@ -117,7 +118,7 @@ describe(
 
     test("status=pending returns only pending tasks", async () => {
       const { app, db, tasksTable, facilityId } = await setup();
-      await db.insert(tasksTable).values([
+      await (getAdminDb() ?? db).insert(tasksTable).values([
         { ...PENDING, facilityId },
         { ...DONE, facilityId },
       ]);
@@ -133,7 +134,7 @@ describe(
 
     test("status=in_progress filters by status (no false isNull clause)", async () => {
       const { app, db, tasksTable, facilityId } = await setup();
-      await db.insert(tasksTable).values([
+      await (getAdminDb() ?? db).insert(tasksTable).values([
         { ...PENDING, facilityId },
         { ...DONE, facilityId },
         {
@@ -157,7 +158,7 @@ describe(
 
     test("invalid status falls back to open-tasks default", async () => {
       const { app, db, tasksTable, facilityId } = await setup();
-      await db.insert(tasksTable).values([
+      await (getAdminDb() ?? db).insert(tasksTable).values([
         { ...PENDING, facilityId },
         { ...DONE, facilityId },
       ]);

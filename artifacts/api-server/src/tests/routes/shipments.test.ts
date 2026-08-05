@@ -7,6 +7,7 @@ import {
   useDatabaseFixture,
   seedTenantContext,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 closeDatabasePoolAfterTests();
@@ -81,7 +82,7 @@ describe(
       // With limit=2 the limit+1 window is 3 rows; the OLD code fetched ids
       // 1-3 (all pending), `.filter(status=complete)` dropped every one, and
       // returned []. The matches (ids 4-5) never left the DB.
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-PND-1", "Acme", "pending", facilityId),
         shipment("SHP-PND-2", "Acme", "pending", facilityId),
         shipment("SHP-PND-3", "Acme", "pending", facilityId),
@@ -112,7 +113,7 @@ describe(
       const { app, db, shipmentsTable, facilityId } = await setup();
       // 4 non-matching pending rows (ids 1-4), then 4 matching complete rows
       // (ids 5-8). With limit=2 we expect two pages of complete rows.
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-PND-1", "Acme", "pending", facilityId),
         shipment("SHP-PND-2", "Acme", "pending", facilityId),
         shipment("SHP-PND-3", "Acme", "pending", facilityId),
@@ -153,7 +154,7 @@ describe(
     test("client filter is a case-insensitive substring returning matches after non-matches", async () => {
       const { app, db, shipmentsTable, facilityId } = await setup();
       // Non-matching clients first (ids 1-3), then matching "Globex" rows (4-5).
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-A-1", "Acme Corp", "pending", facilityId),
         shipment("SHP-A-2", "Acme Corp", "pending", facilityId),
         shipment("SHP-A-3", "Acme Corp", "pending", facilityId),
@@ -182,7 +183,7 @@ describe(
       // literal % (ids 4-5). Searching for client="%" must return only the two
       // rows containing a literal %, NOT every row (the unescaped `%%%` would
       // match all five).
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-N1", "Acme", "pending", facilityId),
         shipment("SHP-N2", "Beta", "pending", facilityId),
         shipment("SHP-N3", "Gamma", "pending", facilityId),
@@ -209,7 +210,7 @@ describe(
       // "AB Farm" contains "B Farm" (one char + " Farm"? no — test the literal
       // underscore). Searching "_" must match only rows with a literal _, not
       // every single-char-then-anything row.
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-U1", "Acme", "pending", facilityId),
         shipment("SHP-U2", "Beta", "pending", facilityId),
         shipment("SHP-U3", "Test_Farm", "complete", facilityId),
@@ -230,7 +231,7 @@ describe(
       const { app, db, shipmentsTable, facilityId } = await setup();
       // Non-matches (wrong client, pending) first, then matching rows
       // (Globex + complete) at the tail beyond the limit+1 window.
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-X1", "Acme", "pending", facilityId),
         shipment("SHP-X2", "Acme", "pending", facilityId),
         shipment("SHP-X3", "Globex", "pending", facilityId), // right client, wrong status
@@ -252,7 +253,7 @@ describe(
 
     test("no filter + no cursor/limit keeps the legacy flat-array shape", async () => {
       const { app, db, shipmentsTable, facilityId } = await setup();
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-1", "Acme", "pending", facilityId),
         shipment("SHP-2", "Acme", "complete", facilityId),
       ]);
@@ -270,7 +271,7 @@ describe(
 
     test("invalid status is ignored (no filter applied)", async () => {
       const { app, db, shipmentsTable, facilityId } = await setup();
-      await db.insert(shipmentsTable).values([
+      await (getAdminDb() ?? db).insert(shipmentsTable).values([
         shipment("SHP-1", "Acme", "pending", facilityId),
         shipment("SHP-2", "Acme", "complete", facilityId),
       ]);

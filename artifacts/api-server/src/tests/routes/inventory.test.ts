@@ -6,6 +6,7 @@ import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 closeDatabasePoolAfterTests();
@@ -88,7 +89,7 @@ describe(
       facilityId: number,
       overrides: { name?: string; currentQty?: string; maxQty?: string } = {},
     ): Promise<number> {
-      const [row] = await db
+      const [row] = await (getAdminDb() ?? db)
         .insert(table)
         .values({
           name: overrides.name ?? "Seed Bag",

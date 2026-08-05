@@ -7,6 +7,7 @@ import {
   useDatabaseFixture,
   seedTenantContext,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 /**
@@ -102,11 +103,11 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
     const { db, seedLotsTable, facilityA, facilityB } = await setup();
     const sharedQrCode = "SHARED-QR-001";
 
-    const [lotA] = await db
+    const [lotA] = await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityA.id, qrCode: sharedQrCode, seedName: "Radish A" })
       .returning();
-    const [lotB] = await db
+    const [lotB] = await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityB.id, qrCode: sharedQrCode, seedName: "Radish B" })
       .returning();
@@ -127,11 +128,11 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
     const { app, db, seedLotsTable, facilityA, facilityB } = await setup();
     const sharedQrCode = "SHARED-QR-002";
 
-    await db
+    await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityA.id, qrCode: sharedQrCode, seedName: "Radish A" })
       .returning();
-    await db
+    await (getAdminDb() ?? db)
       .insert(seedLotsTable)
       .values({ facilityId: facilityB.id, qrCode: sharedQrCode, seedName: "Radish B" })
       .returning();

@@ -63,11 +63,24 @@ SELECT is(
 -- adds tenant-isolation policies keyed on app.facility_id / app.org_id on
 -- the scoped tables (cycles, inventory_items, alerts, tasks, shipments,
 -- facility_logs, sensors, growth_profiles, accounting_connections,
--- seed_lots, organization_members) (Task 8).
+-- seed_lots, organization_members) (Task 8). 00008 adds an additive
+-- auth.uid()-scoped own-row policy on organization_members. 00009 adds
+-- additive current_user-scoped SELECT/UPDATE policies on public.users so the
+-- api-server backend's own non-BYPASSRLS role (farmsmart_app, MT-M1 Task 13)
+-- can read/update user rows without auth.uid() being set. 00010 adds the
+-- same current_user-scoped policies (only the commands each route actually
+-- uses) to organizations, wizard_progress, sensor_accounts,
+-- facility_readiness_events, and wizard_events -- 00006 enabled RLS on these
+-- with zero policies, which only worked while the backend ran as
+-- postgres/service_role (BYPASSRLS). 00011 adds an additive current_user-
+-- scoped INSERT policy on organization_members so POST /facilities can
+-- insert the owner membership row in the same transaction that creates the
+-- organization itself (app.org_id can't be set to an org id that doesn't
+-- exist yet).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  8,
-  'supabase_migrations.schema_migrations has exactly 8 rows (Supabase migrations 00001-00008)'
+  11,
+  'supabase_migrations.schema_migrations has exactly 11 rows (Supabase migrations 00001-00011)'
 );
 
 SELECT * FROM finish();

@@ -3,6 +3,7 @@ import { deepStrictEqual, ok } from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { getAdminDb } from "../helpers/testDatabase";
 
 /**
  * Golden-fixture tests for the /api/metrics query templates.
@@ -49,7 +50,7 @@ describe("metrics templates (golden fixture)", { skip: !TEST_DB }, () => {
     templates = await import("../../lib/metrics/templates");
     expected = (await import("./fixtures/expected")).expected;
     const seed = readFileSync(path.resolve(here, "fixtures", "seed.sql"), "utf8");
-    await db.execute(sql.raw(seed));
+    await (getAdminDb() ?? db).execute(sql.raw(seed));
   });
 
   test("scalarAgg — ov.yield.alltime", async () => {

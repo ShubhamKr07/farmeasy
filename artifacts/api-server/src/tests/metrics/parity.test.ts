@@ -3,6 +3,7 @@ import { ok } from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { getAdminDb } from "../helpers/testDatabase";
 
 /**
  * Tier-A → Tier-B parity: the same number whether computed client-side (JS
@@ -37,7 +38,7 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
     sql = (await import("drizzle-orm")).sql;
     templates = await import("../../lib/metrics/templates");
     const seed = readFileSync(path.resolve(here, "fixtures", "seed.sql"), "utf8");
-    await db.execute(sql.raw(seed));
+    await (getAdminDb() ?? db).execute(sql.raw(seed));
   });
 
   test("sh.rev.total: client SUM === SQL scalarAgg", async () => {
