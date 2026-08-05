@@ -36,13 +36,16 @@ const FIXTURE_TABLES =
   "manual_checks, bad_tray_entries";
 
 describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
-  let orgA: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number };
-  let orgB: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number };
+  let orgA: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number; userId: string };
+  let orgB: { app: ReturnType<typeof createAuthenticatedTestApp>; facilityId: number; userId: string };
   let seededAlertId: number;
   let seededTaskId: number;
   let seededShipmentId: number;
   let seededInventoryItemId: number;
   let seededGrowthProfileId: number;
+  let seededCycleId: number;
+  let seededSensorId: number;
+  let seededSeedLotQrCode: string;
 
   before(async () => {
     if (!dbUrl) return;
@@ -56,6 +59,11 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const inventoryRouter = (await import("../../routes/inventory")).default;
     const growthProfilesRouter = (await import("../../routes/growthProfiles")).default;
     const metricsRouter = (await import("../../routes/metrics")).default;
+    const cyclesRouter = (await import("../../routes/cycles")).default;
+    const facilityLogsRouter = (await import("../../routes/facilityLogs")).default;
+    const sensorsRouter = (await import("../../routes/sensors")).default;
+    const seedLotsRouter = (await import("../../routes/seedLots")).default;
+    const accountingRouter = (await import("../../routes/accounting")).accountingRouter;
     combinedRouter = Router();
     combinedRouter.use(facilitiesRouter);
     combinedRouter.use(alertsRouter);
@@ -64,6 +72,11 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     combinedRouter.use(inventoryRouter);
     combinedRouter.use(growthProfilesRouter);
     combinedRouter.use(metricsRouter);
+    combinedRouter.use(cyclesRouter);
+    combinedRouter.use(facilityLogsRouter);
+    combinedRouter.use(sensorsRouter);
+    combinedRouter.use(seedLotsRouter);
+    combinedRouter.use(accountingRouter);
 
     // ONE truncate for the whole suite, not per-test: this suite seeds org
     // A/B and their resources ONCE here, then reads/asserts against that
@@ -85,7 +98,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
         .post("/api/facilities")
         .send({ farmName: `Org for ${email}`, timezone: "UTC", units: "metric", currency: "USD" });
       strictEqual(createRes.status, 201, `facility creation for ${email} must succeed`);
-      return { app: testApp, facilityId: createRes.body.facilityId as number };
+      return { app: testApp, facilityId: createRes.body.facilityId as number, userId };
     }
 
     orgA = await provisionOrg("org-a@isolation-test.example.com");
@@ -121,6 +134,68 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
 
     const inventoryRes = await request(orgA.app).post("/api/inventory").send({ name: "Org A Item" });
     seededInventoryItemId = inventoryRes.body.id;
+
+    const cycleRes = await request(orgA.app).post("/api/cycles").send({
+      seedLotQrCodes: ["ISO-QR-1"],
+      seedName: "Isolation Test Crop",
+      fullTrays: 2,
+      halfTrays: 1,
+      seedWeightTray: 5,
+      growthProfileId: seededGrowthProfileId,
+      seedingDate: new Date().toISOString().slice(0, 10),
+    });
+    strictEqual(cycleRes.status, 201, "cycle creation for org A must succeed");
+    seededCycleId = cycleRes.body.id;
+
+    await request(orgA.app).post("/api/facility-logs").send({
+      logType: "env_check",
+      data: { zone: "Isolation Test Zone" },
+    });
+
+    // sensors.ts requires a channelId or rackId -- org A's own facility only
+    // has POST /facilities's 3 default rooms (no channels/racks), so a
+    // channel is seeded directly (same reasoning as the growth profile
+    // above: no per-org auto-seed for layout entities either).
+    const { channelsTable, roomsTable } = await import("@workspace/db");
+    const [orgARoom] = await db.select().from(roomsTable).where(eq(roomsTable.facilityId, orgA.facilityId)).limit(1);
+    const [channel] = await (getAdminDb() ?? db)
+      .insert(channelsTable)
+      .values({ roomId: orgARoom!.id, label: "Isolation Test Channel", positionIndex: 0 })
+      .returning();
+
+    const sensorRes = await request(orgA.app).post("/api/sensors").send({
+      channelId: channel.id,
+      type: "temp",
+      label: "Isolation Test Sensor",
+      unit: "C",
+    });
+    strictEqual(sensorRes.status, 201, "sensor creation for org A must succeed");
+    seededSensorId = sensorRes.body.id;
+
+    // seed_lots has no generic create-via-HTTP route in this milestone (only
+    // GET /seed-lots/lookup) -- seeded directly, matching the growth-profile/
+    // channel pattern above.
+    const { seedLotsTable } = await import("@workspace/db");
+    seededSeedLotQrCode = "ISO-SEEDLOT-QR";
+    await (getAdminDb() ?? db)
+      .insert(seedLotsTable)
+      .values({ facilityId: orgA.facilityId, qrCode: seededSeedLotQrCode, seedName: "Isolation Test Seed" });
+
+    // accounting_connections is populated by a real Intuit OAuth callback in
+    // production, which this suite can't drive -- seeded directly (same
+    // reasoning as above) so GET /accounting/status has something to find.
+    const { accountingConnectionsTable } = await import("@workspace/db");
+    await (getAdminDb() ?? db)
+      .insert(accountingConnectionsTable)
+      .values({
+        userId: orgA.userId,
+        organizationId: orgAFacility!.organizationId,
+        provider: "quickbooks",
+        realmId: "isolation-test-realm",
+        accessTokenEnc: "isolation-test-access-enc",
+        refreshTokenEnc: "isolation-test-refresh-enc",
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
   });
 
   test("TEN-003: two facilities each independently hold a seeding room (no cross-facility conflict)", async () => {
@@ -193,5 +268,60 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     // cross-tenant, org B's count would be >= 1 too.
     strictEqual(resB.body["ov.tasks.open"].value, 0);
     ok(resA.body["ov.tasks.open"].value >= 1);
+  });
+
+  test("GET /api/metrics: org B never sees org A's data via a custom.ts query (ov.cap.trayMix)", async () => {
+    // ov.cap.trayMix is one of custom.ts's 11 hand-written queries (Task 12) --
+    // unlike ov.tasks.open (a generic scalarAgg template), this exercises the
+    // custom-query dispatch path (CUSTOM_QUERIES) under real RLS.
+    const resA = await request(orgA.app).get("/api/metrics").query({ tab: "overview", keys: "ov.cap.trayMix" });
+    const resB = await request(orgB.app).get("/api/metrics").query({ tab: "overview", keys: "ov.cap.trayMix" });
+    strictEqual(resA.status, 200);
+    strictEqual(resB.status, 200);
+    const orgATotal = (resA.body["ov.cap.trayMix"] as { label: string; value: number }[])
+      .reduce((sum, r) => sum + r.value, 0);
+    const orgBTotal = (resB.body["ov.cap.trayMix"] as { label: string; value: number }[])
+      .reduce((sum, r) => sum + r.value, 0);
+    // Org A seeded a cycle with 2 full + 1 half tray; org B seeded no cycles.
+    strictEqual(orgBTotal, 0);
+    ok(orgATotal > 0);
+  });
+
+  test("GET /cycles: org B never sees org A's cycle", async () => {
+    const res = await request(orgB.app).get("/api/cycles");
+    strictEqual(res.status, 200);
+    ok(!res.body.some((c: { id: number }) => c.id === seededCycleId), "org B's cycle list must not contain org A's cycle");
+  });
+
+  test("GET /cycles/:id: org B gets 404 for org A's cycle id", async () => {
+    const res = await request(orgB.app).get(`/api/cycles/${seededCycleId}`);
+    strictEqual(res.status, 404);
+  });
+
+  test("GET /sensors: org B never sees org A's sensor", async () => {
+    const res = await request(orgB.app).get("/api/sensors");
+    strictEqual(res.status, 200);
+    ok(!res.body.some((s: { id: number }) => s.id === seededSensorId), "org B's sensor list must not contain org A's sensor");
+  });
+
+  test("GET /seed-lots/lookup: org B never resolves org A's seed lot by qr code", async () => {
+    const res = await request(orgB.app).get("/api/seed-lots/lookup").query({ qrCode: seededSeedLotQrCode });
+    // seed_lots.qr_code is unique per facility (composite UNIQUE(facility_id,
+    // qr_code), Task 6) -- org B has no row with this qr code at all, so the
+    // lookup must 404, never resolve org A's row.
+    strictEqual(res.status, 404);
+  });
+
+  test("GET /accounting/status: org B never sees org A's QuickBooks connection", async () => {
+    const res = await request(orgB.app).get("/api/accounting/status");
+    strictEqual(res.status, 200);
+    strictEqual(res.body.connected, false, "org B must not see org A's accounting_connections row");
+  });
+
+  test("POST /facility-logs: org A's log is scoped to org A's own facility (no read endpoint exists to assert cross-tenant via HTTP -- facilityLogs.ts only exposes POST)", async () => {
+    const { db, facilityLogsTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
+    const [log] = await (getAdminDb() ?? db).select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, orgA.facilityId));
+    ok(log, "org A's facility_logs row must exist and be tagged with org A's own facilityId");
   });
 });
