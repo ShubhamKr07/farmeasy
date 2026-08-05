@@ -25,7 +25,7 @@ async function ovYieldExpectedVsActual(facilityId: number, timezone: string) {
            COALESCE(SUM(cycles.harvested_qty), 0) AS actual
     FROM cycles
     JOIN growth_profiles gp ON gp.id = cycles.growth_profile_id
-    WHERE ${andWhere(softDelete("cycles"), "cycles.status='completed'")}
+    WHERE ${andWhere(softDelete("cycles"), "cycles.status='completed'", "cycles.facility_id = :facilityId")}
     GROUP BY gp.crop_id
     ORDER BY actual DESC
   `, facilityId, timezone);
