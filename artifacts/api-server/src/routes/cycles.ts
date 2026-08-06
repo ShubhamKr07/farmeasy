@@ -194,7 +194,7 @@ router.get("/cycles", async (req, res) => {
     if (status === "history" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "History access is restricted to supervisors" });
+        .json({ error: "History access is restricted to admins" });
     }
 
     const rows = await withTenantScope(req.tenant!, (tx) =>
@@ -330,7 +330,7 @@ router.get("/cycles/:id", async (req, res) => {
     if (rows[0].cycle.status === "completed" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "Access to completed cycle details is restricted to supervisors" });
+        .json({ error: "Access to completed cycle details is restricted to admins" });
     }
 
     const checks = await withTenantScope(req.tenant!, (tx) =>
@@ -627,7 +627,7 @@ router.get("/cycles/:id/manual-checks", async (req, res) => {
     if (cycle.status === "completed" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "Access to completed cycle audit log is restricted to supervisors" });
+        .json({ error: "Access to completed cycle audit log is restricted to admins" });
     }
 
     const checks = await withTenantScope(req.tenant!, (tx) =>
