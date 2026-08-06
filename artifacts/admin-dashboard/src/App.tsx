@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
-import { useActiveFacility } from "@/hooks/use-active-facility";
+import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -136,7 +136,11 @@ function AuthGate() {
     );
   }
 
-  return <FacilityGate />;
+  return (
+    <ActiveFacilityProvider>
+      <FacilityGate />
+    </ActiveFacilityProvider>
+  );
 }
 
 /**
