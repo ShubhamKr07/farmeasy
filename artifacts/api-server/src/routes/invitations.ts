@@ -37,7 +37,13 @@ router.post("/invitations", async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
     }
-    const { email, role } = parsed.data;
+    const { role } = parsed.data;
+    // Normalize before the one-org check AND before storing, so "User@Ex.com"
+    // can't bypass the case-sensitive comparison below or create a
+    // differently-cased duplicate row. Task 6's accept flow looks up by email
+    // too — it must normalize the same way to stay consistent with what's
+    // stored here.
+    const email = parsed.data.email.trim().toLowerCase();
     const { organizationId } = req.tenant!;
 
     // One-org-per-user: reject if this email is already an active member of any org.
