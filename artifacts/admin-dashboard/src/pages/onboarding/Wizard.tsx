@@ -76,8 +76,28 @@ export function Wizard({
   // flag exists to fix. `hasLoadedOnce` instead just means "isLoading has
   // resolved to false at least once" — set once and never unset, same
   // during-render-adjustment pattern as `resumed` above.
+  //
+  // Also force `resumed = true` here, unconditionally, the first time
+  // isLoading resolves to false — even when progress?.currentStep was falsy
+  // on that first resolution (no row yet: first-time onboarding or the
+  // "Add facility" transition). Once the underlying wizard_progress row is
+  // created by the very next PUT, a later ordinary refetch of the SAME query
+  // key (TanStack Query v5 defaults: refetchOnWindowFocus/reconnect, see
+  // App.tsx) can come back with a real currentStep. Without this, the resume
+  // effect above (guarded only by `!resumed`) would still be armed and could
+  // fire on that later refetch — spuriously showing the "Welcome back"
+  // banner mid-session or, worse, snapping `step` backward to a stale value
+  // in a race with the in-flight PUT. `resumed` is really "the initial
+  // data-sync decision for this component instance has already been made,
+  // never override local step state again" — that decision is fully made
+  // the first time loading finishes, whether or not there was a row to
+  // resume from. This runs alongside (never before/instead of) the resume
+  // effect above, so the genuine "already-in-progress wizard, real
+  // currentStep on first load" case is unaffected: that branch already set
+  // `resumed = true` itself by the time this one runs.
   if (!isLoading && !hasLoadedOnce) {
     setHasLoadedOnce(true);
+    setResumed(true);
   }
 
   // WIZ-006: fire a "view" telemetry event once per step mount. The hook
