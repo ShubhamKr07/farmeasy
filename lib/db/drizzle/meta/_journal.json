@@ -204,6 +204,13 @@
       "when": 1785956124079,
       "tag": "0028_wizard_progress_facility_id_uniq",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786036136074,
+      "tag": "0029_invitations",
+      "breakpoints": true
     }
   ]
 }
