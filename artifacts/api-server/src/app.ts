@@ -139,10 +139,11 @@ app.use("/api", accountingPublicRouter);
 //
 //   1. Genuinely ungated, or gated only PER-ROUTE (a route-specific
 //      middleware arg, e.g. `router.get("/x", requireTenantContext, ...)` in
-//      growthProfiles.ts/seedLots.ts) -- a per-route gate only ever runs once
-//      that specific route has already matched, so it can never intercept a
-//      request meant for another router. Safe anywhere; order among these
-//      doesn't matter.
+//      growthProfiles.ts/seedLots.ts, or no tenant gate at all, e.g.
+//      media.ts's `POST /media/upload`, which only checks `enforceAuth`) --
+//      a per-route (or absent) gate only ever runs once that specific route
+//      has already matched, so it can never intercept a request meant for
+//      another router. Safe anywhere; order among these doesn't matter.
 //   2. Self-gates via an unconditional `router.use(requireTenantContext)`
 //      inside the router file itself (cycles.ts, facility-readiness.ts) --
 //      this behaves exactly like an app.ts-level gate (see above), so it
@@ -166,6 +167,23 @@ app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
 app.use("/api", requireSignedIn, sensorAccountsRouter);
 app.use("/api", requireSignedIn, wizardEventsRouter);
+// Generic catch-all router (routes/index.ts: health/dashboard/layout
+// re-mounted, plus growthProfiles/seedLots, both gated per-route only, plus
+// media.ts's `POST /media/upload`, which carries no tenant gate at all --
+// only `enforceAuth`). Every route this bundle actually handles is tier-1 by
+// the rule above, so it belongs here, not after tier 2/3: mounting it last
+// (as ordinary Express most-specific-first convention, which is what this
+// mount previously did) put every tier-2/tier-3 requireTenantContext-gated
+// router ahead of it, so a request to `/api/media/upload` with no/invalid
+// X-Facility-Id was 400'd by an EARLIER router's gate before ever reaching
+// media.ts's own (gate-less) handler -- the same interception class this
+// whole reorder exists to prevent, just missed here because the bundle was
+// treated as "tier 1 in substance" without checking media.ts's own gating
+// individually. There is no ordering dependency forcing it last -- it mounts
+// concrete paths (`/growth-profiles`, `/seed-lots/lookup`,
+// `/media/upload`, ...), not a wildcard/catch-all pattern that needs to lose
+// to more specific routes.
+app.use("/api", requireSignedIn, router);
 
 // Tier 2: self-gate internally via router.use(requireTenantContext) --
 // behaves like an app.ts-level gate, so must follow all of tier 1.
@@ -182,12 +200,5 @@ app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
 app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
 app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
-
-// Generic catch-all router (growthProfiles/seedLots, both gated per-route
-// only -- tier 1 in substance; health/dashboard/layout/media re-mounted
-// here too). Kept last as ordinary Express convention (most-specific-first)
-// since it's the catch-all, not because it needs to be -- it carries no
-// app.ts-level requireTenantContext and would be equally safe in tier 1.
-app.use("/api", requireSignedIn, router);
 
 export default app;

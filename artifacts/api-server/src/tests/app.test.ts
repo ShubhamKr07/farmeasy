@@ -231,4 +231,27 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
 
     strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
   });
+
+  test("signed-in user with NO X-Facility-Id hitting media.ts's route in the catch-all router (routes/index.ts) is NOT intercepted by an earlier tenant gate -- media.ts's own (gate-less) handler is reached", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    // No file attached and no X-Facility-Id header. If an earlier
+    // requireTenantContext-gated mount intercepted this request (the app.ts
+    // ordering bug this test locks in), it would 400 with "Missing or
+    // invalid X-Facility-Id" before ever reaching media.ts. Reaching
+    // media.ts's own handler instead 400s with "No file provided" -- proving
+    // the catch-all router (which media.ts is bundled into via
+    // routes/index.ts) is mounted somewhere no earlier gate can intercept it.
+    const res = await request(app)
+      .post("/api/media/upload")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+    strictEqual(
+      res.body.error,
+      "No file provided",
+      `expected media.ts's own handler to be reached, not an earlier tenant gate: ${JSON.stringify(res.body)}`,
+    );
+  });
 });
