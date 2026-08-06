@@ -13,8 +13,23 @@ import {
 } from "@workspace/db";
 import { calcDaysOverdue, generateShortId, seedingWeight } from "../lib/utils";
 import { signMediaReferences } from "../services/mediaUrls";
+import { requireTenantContext } from "../middlewares/tenantContext";
 
 const router = Router();
+// TEN-008: every route below reads req.tenant! (via withTenantScope) with a
+// non-null assertion -- resolveTenantContext (mounted upstream in app.ts)
+// never guarantees req.tenant is set (missing/invalid X-Facility-Id, or a
+// facility id belonging to an organization this user isn't an active member
+// of both leave it unset, by design -- see tenantContext.ts). Before this
+// gate, those cases fell through to withTenantScope's own defensive throw
+// ("called without a resolvable organization context"), caught by each
+// route's catch block and surfaced as a bare 500 -- masking what is really a
+// client-bug-class 400, and inconsistent with every sibling tenant-scoped
+// router (growthProfiles.ts, seedLots.ts, facility-readiness.ts), which all
+// already gate on requireTenantContext. Caught for real by TEN-008 Task 12's
+// same-org two-facility isolation tests (missing/cross-org X-Facility-Id
+// against GET /cycles).
+router.use(requireTenantContext);
 
 type UserRole = "technician" | "supervisor" | "quality_lead" | "facility_lead";
 
