@@ -11,6 +11,7 @@ import Animated, {
 import { useColors } from "@/hooks/useColors";
 import { elevation } from "@/constants/elevation";
 import LogoMark from "@/components/LogoMark";
+import { FacilitySwitcherSheet } from "@/components/FacilitySwitcherSheet";
 
 const PANEL_WIDTH = 280;
 
@@ -101,6 +102,8 @@ export default function HamburgerMenu({
           </View>
 
           <View style={s.divider} />
+
+          <FacilitySwitcherSheet onSelected={onClose} />
 
           <Pressable
             style={s.menuRow}

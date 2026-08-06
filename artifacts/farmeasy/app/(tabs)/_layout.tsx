@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useSignOutAndClear } from "@/hooks/useSignOutAndClear";
+import { useActiveFacility } from "@/hooks/useActiveFacility";
 import { AppShellProvider, useAppShell } from "@/context/AppShellContext";
 import AskMeFab from "@/components/AskMeFab";
 import HamburgerMenu from "@/components/HamburgerMenu";
@@ -116,6 +117,7 @@ function ClassicTabBar() {
 
 function AppShellHamburger() {
   const [session, setSession] = useState<Session | null>(null);
+  useActiveFacility(); // TEN-008: restores the persisted facility selection and wires setFacilityId at boot, regardless of whether the panel is open.
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
