@@ -46,6 +46,7 @@ export function Wizard({
   );
   const [step, setStep] = useState<WizardStep>("farm_basics");
   const [resumed, setResumed] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [addedDevices, setAddedDevices] = useState<AddedDevice[]>([]);
   const [createdFacilityId, setCreatedFacilityId] = useState<number | null>(facilityId);
   const postEvent = usePostWizardEvent();
@@ -63,6 +64,20 @@ export function Wizard({
   if (progress?.currentStep && !resumed) {
     setStep(progress.currentStep as WizardStep);
     setResumed(true);
+  }
+
+  // Tracks "has this component ever finished a load" (deliberately NOT the
+  // same thing as `resumed` above, which only means "the resume-from-server
+  // effect fired at least once"). `resumed` stays false whenever the initial
+  // GET comes back with no row (the common case for both first-time
+  // zero-facility onboarding and "Add facility": no wizard_progress row
+  // exists yet the first time this mounts). So gating the isLoading
+  // early-return below on `resumed` wouldn't help the exact regression this
+  // flag exists to fix. `hasLoadedOnce` instead just means "isLoading has
+  // resolved to false at least once" — set once and never unset, same
+  // during-render-adjustment pattern as `resumed` above.
+  if (!isLoading && !hasLoadedOnce) {
+    setHasLoadedOnce(true);
   }
 
   // WIZ-006: fire a "view" telemetry event once per step mount. The hook
@@ -112,7 +127,20 @@ export function Wizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
-  if (isLoading) return null; // AuthGate's LoadingScreen already covers the outer shell
+  // Only blank the screen for the component's very FIRST load (before
+  // `hasLoadedOnce` is ever set) — AuthGate's LoadingScreen already covers
+  // the outer shell for that case. A LATER isLoading=true, caused by
+  // `facilityId` flipping from null to a real id (FacilityGate re-rendering
+  // this same fiber right after "Add facility"'s first step, or first-time
+  // zero-facility onboarding — both via finishAddFacility), points
+  // useGetWizardProgress at a brand-new, never-cached query key even though
+  // this component already knows exactly what step it's on locally (`step`
+  // was already advanced in the same batched render). Blanking the screen
+  // for that round-trip would be a visible flash with nothing left to wait
+  // for — `progress` isn't used to decide what to render below, only to
+  // seed local state once via the `resumed` effect above, which is already
+  // one-shot-guarded and won't be re-triggered by this later fetch.
+  if (isLoading && !hasLoadedOnce) return null;
 
   const advance = () => {
     // "save" fires for the step being left (the one whose data was just
