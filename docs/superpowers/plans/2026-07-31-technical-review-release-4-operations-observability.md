@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove replica-local scheduled work, make overdue alerts correctly idempotent, add structured cross-service telemetry, and establish executable incident detection and rollback procedures.
+**Goal:** Remove replica-local scheduled work, make overdue alerts correctly idempotent, add structured cross-service telemetry, establish executable incident detection and rollback procedures, and layer PostHog error tracking plus Self-driving remediation on top of the operational plane.
 
-**Architecture:** Reference data is installed by migration, never application startup. Overdue scanning runs as a short-lived Render cron command protected by a PostgreSQL transaction advisory lock. API and recommender emit correlated JSON events; Render provides service metrics and Better Stack ingests logs, heartbeat, and custom threshold alerts. Persistent PostgreSQL recommender cache is not warmed automatically.
+**Architecture:** Reference data is installed by migration, never application startup. Overdue scanning runs as a short-lived Render cron command protected by a PostgreSQL transaction advisory lock. API and recommender emit correlated JSON events; Render provides service metrics and Better Stack ingests logs, heartbeat, and custom threshold alerts. Persistent PostgreSQL recommender cache is not warmed automatically. PostHog is a separate, second observability plane: it captures only code exceptions (never operational logs), groups them into issues, symbolicates stack traces against deployed source maps, and feeds Self-driving which opens human-reviewed draft PRs. A scheduled GitHub Actions workflow joins PostHog error data with GitHub PR state and emails a daily digest over existing SMTP. Better Stack remains the real-time operational alert authority; PostHog never replaces it.
 
-**Tech Stack:** Drizzle/PostgreSQL advisory locks, Render Cron, Pino, Python JSON logging, Render metrics/logs, Better Stack.
+**Tech Stack:** Drizzle/PostgreSQL advisory locks, Render Cron, Pino, Python JSON logging, Render metrics/logs, Better Stack, PostHog (`posthog-js`, `posthog-node`, `posthog` Python SDK), PostHog Self-driving (open beta), PostHog CLI (source-map upload), Nodemailer/SMTP.
 
 ## Global Constraints
 
@@ -17,6 +17,14 @@
 - Do not add automatic Tavily/Gemini cache warming. PostgreSQL cache is durable; paid warming needs separate budgeted feature approval.
 - Never log question, answer, `ops_context`, JWT, cookies, user UUID, internal key, provider key, or full upstream payload.
 - `INTERVAL_FALLBACK_SHA` always equals Task 4 Step 8 commit SHA.
+- PostHog uses the existing US Cloud project only. EU is out of scope.
+- PostHog scope is error tracking only: no product-analytics autocapture, no session replay, no PostHog Logs, no code-variable capture, no mobile native-crash plugin in this release. Adding any of those is a separate, later plan.
+- Every PostHog-captured exception must carry `environment`, `service`, `release`, `request_id`, and `error_type`. `user_id_hash` (the truncated SHA-256 already emitted by Task 8) is the only user identifier sent; never send the raw user UUID.
+- PostHog capture must never include request bodies, question text, answer text, `ops_context`, SQL, bind arguments, headers, JWTs, cookies, emails, provider request/response payloads, internal keys, or provider keys. The redaction rule is identical to the Pino rule above and is enforced by seeded canary tests on every runtime.
+- PostHog clients are fail-open: any initialization failure, network failure, or missing token must not affect user requests, the API, the dashboard, the recommender, or existing Pino logging.
+- PostHog project tokens (`POSTHOG_KEY` / `VITE_POSTHOG_KEY` / `EXPO_PUBLIC_POSTHOG_KEY`) are public ingestion tokens; they may be present in client bundles. The PostHog **personal API key** (`POSTHOG_PERSONAL_API_KEY`) is a secret used only for source-map upload and report reads; never commit it, never expose it to clients.
+- Self-driving is permitted to open draft pull requests against `ShubhamKr07/farmsmart` only. It must never: push to `main`, auto-merge, auto-deploy, bypass required CI, bypass the production approval gate, touch auth/authorization code, secrets, cryptography, database migrations, `render.yaml`, or the deploy workflows without explicit human initiation. Branch protection, required `CI / Required` status, exact-SHA staging promotion, and the `production` environment approval rule all remain the sole deploy authorities.
+- PostHog capture on production stays disabled (tokens absent) until Tasks 11-14 pass their staging evidence gates. Mobile (Task 15) is a follow-up that ships with the next planned EAS build; it is not on the production-promotion critical path of Tasks 11-14.
 
 ---
 
@@ -351,6 +359,8 @@ git commit -m "docs(jobs): record production cron activation"
 
 **Interfaces:** Stable event fields: `event`, `request_id`, `user_id_hash`, `duration_ms`, `query_name`, `cache_hit`, `upstream_timeout`, `provider_calls`, `status`, and `error_type`.
 
+> **PostHog dependency (Tasks 11-15):** `request_id`, `user_id_hash`, `service`, `environment`, `release`, and `error_type` are the shared correlation contract. PostHog reuses the truncated-SHA-256 `user_id_hash` produced in Step 4 — it must never receive the raw user UUID. If this task changes any of those field names or shapes, update Task 11's PostHog property mapping in the same release.
+
 - [ ] **Step 1: Write tests** for cached, live-search, farm-context-only, and no-result responses. `cache_hit` means initial PostgreSQL vector lookup found qualifying results.
 
 - [ ] **Step 2: Capture initial cache state immediately after first lookup.** Farm-context-only answer must not report cache hit.
@@ -430,7 +440,7 @@ git commit -m "obs: instrument database and scheduled workloads"
 - Create: `docs/runbooks/incident-response.md`
 - Modify: `docs/runbooks/staging-bootstrap.md`
 
-**Architecture decision:** Use Render native deploy/service/cron notifications plus Better Stack log ingestion, heartbeat, and custom log-query alerts. Record cost, retention, owner, and deletion path in ADR-005.
+**Architecture decision:** Two observability planes, not one. **Operational plane** = Render native deploy/service/cron notifications plus Better Stack log ingestion, heartbeat, and custom log-query alerts — owns readiness, latency, database-pool saturation, cron heartbeat, rate-limit spikes, and provider-cost anomalies; it pages the operator in real time. **Error plane** = PostHog Error Tracking — owns grouped code exceptions, stack-trace symbolication, release/commit attribution, and Self-driving draft-PR remediation; it never pages and never replaces Better Stack. The daily SMTP digest (Task 14) is a summary only, never an alert channel. ADR-005 records cost, retention, owner, deletion path, and the explicit ownership table for each signal (`dashboard.snapshot`, `database.pool`, `$exception`, etc.) so an on-call engineer never wonders which tool owns a given symptom.
 
 - [ ] **Step 1: Create Better Stack staging and production sources plus cron heartbeats.** Keep source tokens and `BETTER_STACK_HEARTBEAT_URL` values in Render/GitHub secrets. Configure Render log drain or documented service integration; never commit tokens.
 
@@ -445,7 +455,7 @@ git commit -m "obs: instrument database and scheduled workloads"
 
 - [ ] **Step 3: Test each monitor** with synthetic staging event/heartbeat. For limiter/pool monitors, inject uniquely tagged `synthetic=true` events into staging source: five limiter events within 15 minutes and three saturated pool events within 5 minutes. Require one notification and resolved state for each without lowering production thresholds; capture UTC time, monitor, synthetic ID, redacted payload, and notification. Confirm production receives no synthetic event. Recovery requires no match for 10 minutes.
 
-- [ ] **Step 4: Write runbook** covering request-ID trace, advisory-lock inspection, cache freshness SQL, timeout/cost diagnosis, readiness checks, safe cron rerun, secret-canary audit, two-phase rollback, owners, and expected recovery times.
+- [ ] **Step 4: Write runbook** covering request-ID trace, advisory-lock inspection, cache freshness SQL, timeout/cost diagnosis, readiness checks, safe cron rerun, secret-canary audit, two-phase rollback, owners, expected recovery times, **and the PostHog error-plane recovery procedures**: how to disable capture (remove `POSTHOG_KEY`/`VITE_POSTHOG_KEY`/`EXPO_PUBLIC_POSTHOG_KEY`), how to pause Self-driving (toggle the Error Tracking signal source off in the PostHog inbox; revoke the GitHub integration to stop draft-PR creation without losing issue history), how to verify source-link attribution after a deploy, and how to recover the daily SMTP digest (re-provision `POSTHOG_SMTP_*` secrets and run the workflow's `workflow_dispatch` test delivery). The runbook must state that disabling PostHog never affects Better Stack, Render metrics, or the deploy pipeline.
 
 - [ ] **Step 5: Add cache diagnostics.**
 
@@ -458,7 +468,184 @@ from recommender_cache;
 
 ```bash
 git add docs/adr/ADR-005.md docs/runbooks/incident-response.md docs/runbooks/staging-bootstrap.md
-git commit -m "docs(obs): define monitoring and incident response"
+git commit -m "docs(obs): define dual-plane monitoring and incident response"
+```
+
+### Task 11: Add PostHog runtime exception capture (API, dashboard, recommender)
+
+**Files:**
+
+- Create: `artifacts/api-server/src/lib/posthog.ts`
+- Modify: `artifacts/api-server/src/app.ts`
+- Modify: `artifacts/api-server/src/index.ts`
+- Modify: every API route that currently swallows an exception via bare `console.error` (grep `console.error` under `artifacts/api-server/src/routes/`)
+- Create: `artifacts/api-server/src/tests/posthog.test.ts`
+- Create: `artifacts/admin-dashboard/src/lib/posthog.ts`
+- Modify: `artifacts/admin-dashboard/src/main.tsx`
+- Create: `artifacts/admin-dashboard/src/components/PostHogErrorFallback.tsx`
+- Create: `artifacts/recommender-svc/app/posthog_client.py`
+- Modify: `artifacts/recommender-svc/app/main.py`
+- Modify: `artifacts/recommender-svc/app/config.py`
+- Create: `artifacts/recommender-svc/tests/test_posthog.py`
+- Modify: `artifacts/api-server/package.json`, `artifacts/admin-dashboard/package.json`, `artifacts/recommender-svc/pyproject.toml`, `artifacts/recommender-svc/uv.lock`, `pnpm-lock.yaml`
+- Modify: `render.yaml` (add `POSTHOG_KEY`, `POSTHOG_HOST` to api-server and recommender; add `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` to dashboard)
+
+**Consumes:** Task 8's `request_id`, `user_id_hash`, `service`, `environment`, `release`, `error_type` correlation fields.
+
+**Interfaces:**
+
+```ts
+// artifacts/api-server/src/lib/posthog.ts
+export const posthog: PostHog | null;           // null when POSTHOG_KEY absent (fail-open)
+export function captureServerError(err: unknown, context: {
+  request_id?: string; user_id_hash?: string; route?: string;
+  status?: number; error_type?: string;
+}): void;
+```
+
+```python
+# artifacts/recommender-svc/app/posthog_client.py
+def get_posthog() -> Posthog | None: ...        # None when POSTHOG_KEY absent (fail-open)
+def capture_service_error(err: BaseException, context: dict) -> None: ...
+```
+
+- [ ] **Step 1: Write failing canary tests first.** `artifacts/api-server/src/tests/posthog.test.ts` asserts: (a) with no `POSTHOG_KEY`, `posthog` is `null` and `captureServerError` is a no-op that never throws; (b) with a fake token and a stubbed transport, an Express error produces exactly one `$exception` event whose properties contain `environment`, `service: "api"`, `release`, `request_id`, `error_type`, and `user_id_hash`, and whose properties and message do **not** contain the seeded canaries (fake JWT, internal key, raw UUID, question text, answer text, cookie, `ops_context`). `test_posthog.py` asserts the same shape for the recommender, plus that the captured exception never contains the question, the answer, the farm context, or the Gemini/Tavily payload.
+
+- [ ] **Step 2: Add the API client module.** Create `artifacts/api-server/src/lib/posthog.ts`. Initialize `new PostHog(process.env.POSTHOG_KEY ?? "", { host: process.env.POSTHOG_HOST ?? "https://us.i.posthog.com", enableExceptionAutocapture: false, flushAt: 20, flushInterval: 10_000 })` only when `POSTHOG_KEY` is non-empty; otherwise export `null`. Disable person profiles, GeoIP, and session replay at the client level. Expose `captureServerError(err, ctx)` which calls `posthog.captureException(err, { distinctId: ctx.user_id_hash ?? "anonymous", properties: { environment, service: "api", release: process.env.RENDER_GIT_COMMIT?.slice(0,12) ?? "unknown", request_id, error_type, route, status } })` and wraps the call in `try/catch` so it can never throw into the request path. Release/version wiring is finalized in Task 12; here it is `"unknown"`.
+
+- [ ] **Step 3: Wire the Express error handler.** In `artifacts/api-server/src/app.ts`, import `setupExpressErrorHandler` from `posthog-node` and call it **after** all routes are mounted (mirroring the existing route registration order) so unhandled Express exceptions are captured. The handler must run before the process exits; it must not alter the response status or body. Confirm the existing Pino request log still fires.
+
+- [ ] **Step 4: Replace bare `console.error` call sites with the bounded reporter.** For each API route currently doing `console.error(err)` inside a `catch` (grep under `src/routes/`), call `captureServerError(err, { request_id, user_id_hash, route: req.path, error_type: err?.name ?? "Error" })` and keep the existing operational behavior (status code, response). Do not capture expected validation errors (HTTP 4xx from Zod). Do not capture in test runs unless `POSTHOG_KEY` is explicitly set in the test env.
+
+- [ ] **Step 5: Add graceful shutdown flush.** In `artifacts/api-server/src/index.ts`, after `app.listen`, register a `process.on("beforeExit")` / `SIGTERM` handler that calls `await posthog?.shutdown()` and `pool.end()` in `finally`. Capture must never block request handling; shutdown flush is bounded to the SDK's internal timeout.
+
+- [ ] **Step 6: Add the dashboard client.** Create `artifacts/admin-dashboard/src/lib/posthog.ts` initializing `posthog-js` with `VITE_POSTHOG_KEY`/`VITE_POSTHOG_HOST`, `autocapture: false`, `session_recording: { maskAllInputs: true, maskAllText: true, blockAllMedia: true }` (defense in depth — replay stays off in this release), `disable_session_recording: true`, `opt_out_capturing_by_default: false`, `loaded` hook that sets `posthog.debug()` only when `import.meta.env.DEV`. Export `captureClientError(err, ctx)` mirroring the API shape. Create `PostHogErrorFallback.tsx` that calls `captureClientError` and renders the existing fallback markup; wire it as a top-level error boundary in `main.tsx` around `<App />`. Do **not** remove the existing Replit runtime-error-overlay dev plugin.
+
+- [ ] **Step 7: Add the recommender client.** Create `artifacts/recommender-svc/app/posthog_client.py` with `get_posthog()` returning `Posthog(POSTHOG_KEY, host=POSTHOG_HOST, enable_exception_autocapture=False, disable_geoip=True)` or `None`. In `app/main.py`, add an `@app.exception_handler(Exception)` that calls `capture_service_error(exc, {"environment","service":"recommender","release":os.environ.get("RENDER_GIT_COMMIT","unknown")[:12],"request_id":...})` then re-raises the existing HTTPException/500 behavior. Never pass `req.question`, `req.ops_context`, the synthesized answer, the farm context, or the provider payload into the capture context.
+
+- [ ] **Step 8: Add env vars to `render.yaml`.** For `farmsmart-api` and both staging mirrors: add `POSTHOG_KEY` (`sync: false`, public ingestion token) and `POSTHOG_HOST` (`value: https://us.i.posthog.com`). For the recommender and its staging mirror: same two keys. For the dashboard and its staging mirror: add `VITE_POSTHOG_KEY` (`sync: false`) and `VITE_POSTHOG_HOST` (`value: https://us.i.posthog.com`). Leave production values unset until Task 14's gate passes; staging can be provisioned now. Run `render blueprints validate render.yaml --workspace "$RENDER_WORKSPACE_ID" --confirm -o text`.
+
+- [ ] **Step 9: Run tests and commit.**
+
+```bash
+pnpm --filter @workspace/api-server exec node --import tsx/esm --test src/tests/posthog.test.ts
+pnpm run typecheck
+uv run --directory artifacts/recommender-svc pytest tests/test_posthog.py -v
+git add artifacts/api-server/src/lib/posthog.ts artifacts/api-server/src/app.ts artifacts/api-server/src/index.ts artifacts/api-server/src/routes artifacts/api-server/src/tests/posthog.test.ts artifacts/admin-dashboard/src/lib/posthog.ts artifacts/admin-dashboard/src/main.tsx artifacts/admin-dashboard/src/components/PostHogErrorFallback.tsx artifacts/recommender-svc/app/posthog_client.py artifacts/recommender-svc/app/main.py artifacts/recommender-svc/app/config.py artifacts/recommender-svc/tests/test_posthog.py artifacts/api-server/package.json artifacts/admin-dashboard/package.json artifacts/recommender-svc/pyproject.toml artifacts/recommender-svc/uv.lock pnpm-lock.yaml render.yaml
+git commit -m "feat(obs): add PostHog runtime exception capture (api, dashboard, recommender)"
+```
+
+### Task 12: Upload source maps and tag releases (API + dashboard)
+
+**Files:**
+
+- Modify: `artifacts/api-server/build.mjs`
+- Modify: `artifacts/api-server/package.json`
+- Modify: `artifacts/admin-dashboard/vite.config.ts`
+- Modify: `artifacts/admin-dashboard/package.json`
+- Modify: `.github/workflows/deploy-staging.yml`, `.github/workflows/deploy-production.yml`
+- Modify: `render.yaml` (document the `POSTHOG_CLI_*` build-time vars in comments; they are build-only, not runtime)
+
+**Consumes:** Task 11's clients; the exact CI-tested SHA from the deploy workflows.
+
+- [ ] **Step 1: API source maps via esbuild.** `artifacts/api-server/build.mjs` already emits `sourcemap: "linked"`. Verify `dist/index.mjs` and `dist/index.mjs.map` exist post-build. The API runs the unminified bundle directly, so frames already point near source — the goal here is release attribution, not de-obfuscation. Add a post-build step that invokes `posthog-cli sourcemap inject --directory dist` then `posthog-cli sourcemap upload --directory dist --release-name farmsmart-api --release-version "$DEPLOY_SHA"` gated on `POSTHOG_CLI_API_KEY` being set; skip silently when unset so local/CI builds without secrets still pass.
+
+- [ ] **Step 2: Dashboard source maps via Vite.** Add `@posthog/rollup-plugin` to `artifacts/admin-dashboard/package.json`. In `vite.config.ts`, add the plugin only when `POSTHOG_API_KEY` and `POSTHOG_PROJECT_ID` are present, with `sourcemaps: { enabled: true, releaseName: "farmsmart-dashboard", releaseVersion: process.env.DEPLOY_SHA ?? "local", deleteAfterUpload: true }`. Set `build.sourcemap: "hidden"` so maps are generated for upload but not linked in the shipped bundle (the public bundle must not expose them). The plugin is a no-op locally without credentials.
+
+- [ ] **Step 3: Wire build-time secrets in deploy workflows.** In both `deploy-staging.yml` and `deploy-production.yml`, add `POSTHOG_CLI_API_KEY` (personal API key, `error tracking write` + `organization read` scopes), `POSTHOG_CLI_PROJECT_ID`, and `POSTHOG_CLI_HOST: https://us.posthog.com` from the respective GitHub environment secrets, exposed to the `pnpm --filter ... run build` step. Set `DEPLOY_SHA` (already resolved by the workflow) in the build env so the release version is the exact promoted SHA. The production workflow must fail the build if `POSTHOG_CLI_API_KEY` is present-but-empty (guard against silent symbolication gaps); staging may warn and continue.
+
+- [ ] **Step 4: Verify staging symbolication end to end.** After a staging deploy at a known SHA, trigger the synthetic staging exception from Task 13 Step 1 (or a temporary route), open the resulting PostHog issue, and confirm: the stack trace resolves to a real file path and line number in the deployed bundle, and the release chip shows `farmsmart-api@<short-sha>` / `farmsmart-dashboard@<short-sha>` matching the promoted SHA. Capture screenshots or JSON of the resolved frame as evidence.
+
+- [ ] **Step 5: Run validation and commit.**
+
+```bash
+pnpm run typecheck
+pnpm --filter @workspace/api-server run build
+pnpm --filter @workspace/admin-dashboard run build
+render blueprints validate render.yaml --workspace "$RENDER_WORKSPACE_ID" --confirm -o text
+git add artifacts/api-server/build.mjs artifacts/api-server/package.json artifacts/admin-dashboard/vite.config.ts artifacts/admin-dashboard/package.json .github/workflows/deploy-staging.yml .github/workflows/deploy-production.yml render.yaml
+git commit -m "feat(obs): upload source maps and tag api/dashboard releases by SHA"
+```
+
+### Task 13: Enable PostHog Self-driving (Error Tracking signal source only)
+
+**Files:**
+
+- Modify: `docs/runbooks/incident-response.md`
+- Create: `docs/runbooks/posthog-self-driving.md`
+
+**Consumes:** Tasks 11-12 verified in staging — real exceptions arriving, grouped, and symbolicated against the deployed SHA.
+
+- [ ] **Step 1: Connect the repository.** In the existing US PostHog project, connect `github.com/ShubhamKr07/farmsmart` via the Self-driving setup. Enable the **Error Tracking** signal source only. Leave Replay, UX friction, Logs, and all external sources (Sentry, Zendesk, Linear, etc.) off. Confirm AI data processing consent is enabled at the org level (required for Self-driving).
+
+- [ ] **Step 2: Verify one synthetic staging exception becomes one draft PR.** Inject a single synthetic, clearly-labeled exception into staging API (e.g. a temporary `/api/_posthog_synthetic` route behind `NODE_ENV != production` that throws a typed `SyntheticPostHogProbeError`). Confirm in the PostHog inbox: one signal arrives, it groups into one report, the research agent marks it **Actionable**, and an implementation agent opens exactly one draft PR. The PR must: be a draft, target a `ai-fix/*` branch (not `main`), link the PostHog report, include a root-cause explanation, and include a regression test. Confirm the PR triggers the required `CI` workflow and cannot be merged while CI is red or while it remains a draft.
+
+- [ ] **Step 3: Confirm guardrails hold.** Verify the agent: cannot push to `main` (branch protection), cannot auto-merge, cannot trigger a staging or production deploy (those workflows require `workflow_run` from CI on `main`, which a draft PR is not), and does not touch migrations, `render.yaml`, auth, or secrets in its diff. Record the observed limitations in `docs/runbooks/posthog-self-driving.md`.
+
+- [ ] **Step 4: Document spend control and disable path.** `docs/runbooks/posthog-self-driving.md` records: the $15/PR pricing (first three free each month), how to set a monthly spend limit, how to pause new PRs (toggle the Error Tracking signal source off in the inbox — open reports/PRs are preserved), how to fully revoke agent access (disconnect the GitHub integration), and the explicit statement that pausing Self-driving never disables error capture or Better Stack.
+
+- [ ] **Step 5: Remove the synthetic probe and commit docs.**
+
+```bash
+git add docs/runbooks/incident-response.md docs/runbooks/posthog-self-driving.md
+git commit -m "docs(obs): enable PostHog self-driving error-tracking source"
+```
+
+### Task 14: Add daily PostHog + PR digest over SMTP
+
+**Files:**
+
+- Create: `scripts/ci/report-posthog-errors.mjs`
+- Create: `scripts/ci/report-posthog-errors.test.mjs`
+- Create: `.github/workflows/posthog-daily-report.yml`
+- Modify: `scripts/package.json` (add `nodemailer` dep + `test:posthog-report` script)
+- Modify: `pnpm-lock.yaml`
+
+**Consumes:** Tasks 11-13 (real grouped issues exist) and the PostHog personal API key (read scope).
+
+- [ ] **Step 1: Write the report script with failing test first.** `report-posthog-errors.test.mjs` stubs the PostHog API (returns two fake issues, one open PR) and the SMTP transport, runs the script, and asserts: the rendered email body contains issue titles, occurrence counts, affected-user counts, `service`, `environment`, `release`, links to the PostHog reports, links to the open Self-driving PRs, and a CI/pending-review summary; and that the body contains **no** exception payload, stack trace, PII, or raw user UUID. Assert the script exits 0 even when PostHog returns zero issues (empty-but-valid report).
+
+- [ ] **Step 2: Implement the report script.** `report-posthog-errors.mjs` queries the PostHog private API (`https://us.posthog.com/api/projects/:id/error_tracking/` endpoints) for issues with `first_seen` or `last_seen` in the last 24h, filtered by `environment` and `service`. For each issue it captures: title, occurrence count, unique-user count, `service`, `environment`, `release`, and the PostHog URL. It then queries the GitHub API (`gh pr list --search "author:app/posthog is:open" --json ...`) for open Self-driving PRs and their CI status. It renders both plain-text and minimal HTML, and sends via Nodemailer over SMTP (`host`, `port`, `user`, `pass`, `from`, `to` from env). All HTTP/SMTP failures are caught and logged; the script never raises into the workflow step failure path except on missing required env (fail-fast on misconfiguration, never silent skip).
+
+- [ ] **Step 3: Add the scheduled workflow.** `.github/workflows/posthog-daily-report.yml` runs on `schedule: - cron: "0 12 * * *"` and `- cron: "0 13 * * *"` (covering EST 08:00 and EDT 08:00 year-round — America/New_York is UTC-5 in winter, UTC-4 in summer; GitHub cron is UTC-only and does not track DST, so both fire daily and the script suppresses the off-by-one duplicate), plus `workflow_dispatch` for manual test delivery. The job uses a dedicated `observability` GitHub environment with **no** deploy credentials. Env: `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_HOST: https://us.posthog.com`, `POSTHOG_SMTP_HOST/PORT/USER/PASS`, `POSTHOG_SMTP_FROM`, `POSTHOG_SMTP_TO`. Permissions: `contents: read`, `pull-requests: read`, `actions: read` — nothing else.
+
+- [ ] **Step 4: Suppress the DST duplicate inside the script.** At the top of the script, compute `new Date()` in `America/New_York`; if the local hour is not `8`, exit 0 without sending. This makes exactly one of the two daily cron fires deliver a report year-round.
+
+- [ ] **Step 5: Test delivery and commit.** Trigger `workflow_dispatch` on a staging-configured recipient; confirm the email arrives, renders correctly, and contains zero exception payloads. Then commit.
+
+```bash
+node --test scripts/ci/report-posthog-errors.test.mjs
+git add scripts/ci/report-posthog-errors.mjs scripts/ci/report-posthog-errors.test.mjs .github/workflows/posthog-daily-report.yml scripts/package.json pnpm-lock.yaml
+git commit -m "feat(obs): daily PostHog error + PR digest over SMTP"
+```
+
+### Task 15: Mobile JS exception capture and Hermes source maps (follow-up)
+
+**Files:**
+
+- Create: `artifacts/farmeasy/lib/posthog.ts`
+- Modify: `artifacts/farmeasy/app/_layout.tsx`
+- Modify: `artifacts/farmeasy/components/ErrorBoundary.tsx`
+- Modify: `artifacts/farmeasy/metro.config.js`
+- Modify: `artifacts/farmeasy/app.json`
+- Modify: `artifacts/farmeasy/eas.json`
+- Modify: `artifacts/farmeasy/package.json`, `pnpm-lock.yaml`
+
+**Consumes:** Tasks 11-14 stable in production for at least one release cycle. This task ships with the **next planned EAS build** — it is not on the production-promotion critical path of the server/web tasks because adding `posthog-react-native` and its Expo peers introduces native modules requiring a new native build, not an OTA-only update.
+
+- [ ] **Step 1: Install the SDK and Expo peers.** `npx expo install posthog-react-native expo-file-system expo-application expo-device expo-localization`. This adds native modules → requires a new EAS Build, not just `eas update`. Confirm the build still produces a valid `production` channel build before proceeding.
+
+- [ ] **Step 2: Add the client module.** `artifacts/farmeasy/lib/posthog.ts` initializes `PostHog` with `EXPO_PUBLIC_POSTHOG_KEY`/`EXPO_PUBLIC_POSTHOG_HOST`, `autocapture: { captureScreens: false, captureTouches: false }` (no screen/touch analytics in this release), `enableSessionReplay: false`, `errorTracking: { autocapture: { uncaughtExceptions: true, unhandledRejections: true, console: [], nativeCrashes: false } }` (JS exceptions only; native crashes stay off — no `@posthog/react-native-plugin`, no dSYM/ProGuard upload in this release). Tag every event with `environment`, `service: "mobile"`, `release`, `app_version`.
+
+- [ ] **Step 3: Wire the provider and error boundary.** In `app/_layout.tsx`, wrap with `<PostHogProvider client={posthog}>`. In `components/ErrorBoundary.tsx`, call `posthog.captureException(error, { componentStack })` in `componentDidCatch` **in addition to** the existing `onError` prop — the existing user-facing `ErrorFallback` UX stays unchanged. Do not enable console capture (would double-count React render errors alongside the boundary).
+
+- [ ] **Step 4: Hermes source maps.** In `metro.config.js`, switch to `getPostHogExpoConfig(__dirname)` from `posthog-react-native/metro`. Add `"posthog-react-native/expo"` to `app.json` `expo.plugins` with `{ "skipOnConflict": true }` (handles JS source-map upload on native builds; OTA updates need a manual `posthog-cli hermes upload --directory dist` after `eas update`, documented in the runbook). Set `POSTHOG_CLI_API_KEY`/`POSTHOG_CLI_PROJECT_ID` in the EAS build environment (EAS secrets, not in the repo).
+
+- [ ] **Step 5: Build, verify, commit.** Run a `production` EAS Build; confirm the build uploads Hermes source maps to PostHog. Trigger a synthetic JS exception on the preview build; confirm it groups into one issue with a symbolicated stack trace. Then commit.
+
+```bash
+git add artifacts/farmeasy/lib/posthog.ts artifacts/farmeasy/app/_layout.tsx artifacts/farmeasy/components/ErrorBoundary.tsx artifacts/farmeasy/metro.config.js artifacts/farmeasy/app.json artifacts/farmeasy/eas.json artifacts/farmeasy/package.json pnpm-lock.yaml
+git commit -m "feat(obs): mobile JS exception capture and Hermes source maps"
 ```
 
 ## Release 4 Verification Gate
@@ -469,6 +656,7 @@ TEST_DATABASE_URL="$TEST_DATABASE_URL" DATABASE_URL="$TEST_DATABASE_URL" pnpm --
 pnpm --filter @workspace/api-server run build
 test -f artifacts/api-server/dist/jobs/overdueScan.mjs
 uv run --directory artifacts/recommender-svc pytest -v
+node --test scripts/ci/report-posthog-errors.test.mjs
 render blueprints validate render.yaml --workspace "$RENDER_WORKSPACE_ID" --confirm -o text
 ```
 
@@ -483,6 +671,12 @@ Required evidence:
 - Rate-limit handlers and API/recommender pool serializers emit bounded healthy/saturated evidence.
 - Rate-limit and database-pool monitors each deliver synthetic staging notification.
 - Every monitor has delivered one synthetic staging notification.
+- PostHog canary tests pass: `$exception` events from API, dashboard, and recommender carry `environment`/`service`/`release`/`request_id`/`error_type` and contain none of the seeded sensitive canaries (JWT, internal key, raw UUID, question, answer, `ops_context`, provider payload).
+- Staging stack traces symbolicate to real file:line and the release chip matches the promoted `DEPLOY_SHA` for both `farmsmart-api` and `farmsmart-dashboard`.
+- One synthetic staging exception produced exactly one PostHog report and exactly one draft PR; the draft PR passed required CI and could not be merged while draft or CI-red.
+- Daily SMTP digest test delivery reached the configured recipient with correct issue/PR summary and zero exception payloads.
+- Removing `POSTHOG_KEY` (API/recommender) / `VITE_POSTHOG_KEY` (dashboard) at runtime disabled capture with no effect on request handling, Pino logs, Better Stack, or the deploy pipeline (fail-open verified).
+- (Task 15, when shipped) Mobile preview-build JS exception grouped into one symbolicated PostHog issue; native crashes intentionally not captured.
 
 ## Rollback
 
@@ -490,4 +684,9 @@ Required evidence:
 - Job code: redeploy last-good job SHA; additive schema remains.
 - Telemetry: revert logging commit if serialization or volume causes incident; preserve runbook and native request logs.
 - Better Stack: disable log drain/monitors; Render native notifications remain.
-- Database migrations remain forward-only.
+- PostHog capture: remove `POSTHOG_KEY` / `VITE_POSTHOG_KEY` / `EXPO_PUBLIC_POSTHOG_KEY` from the affected Render service(s). Capture stops immediately; app behavior is unaffected. Pino logs and Better Stack keep running.
+- PostHog Self-driving: toggle the Error Tracking signal source off in the PostHog inbox to stop new draft PRs (open reports and PRs are preserved), or disconnect the GitHub integration to fully revoke agent access. Either action leaves error capture and Better Stack untouched.
+- Daily digest: disable the `posthog-daily-report.yml` workflow, or remove `POSTHOG_SMTP_*` secrets from the `observability` environment. The report is read-only and sends mail only; it cannot affect production.
+- Source-map uploads: safe to leave in place — uploaded maps have no runtime effect and only affect stack-trace readability in PostHog. If a release is bad, stop uploading; old symbolication remains.
+- PostHog SDK integration: if the SDK itself causes a runtime regression (volume, latency, crash), revert the Task 11/15 integration commit and redeploy. Better Stack, Render metrics, and the deploy pipeline are independent and remain active throughout.
+- Database migrations remain forward-only. PostHog adds no database migrations.
