@@ -23,6 +23,7 @@ import { Layout } from "@/pages/layout/Layout";
 import { Profile } from "@/pages/profile/Profile";
 import { Settings } from "@/pages/settings/Settings";
 import { Wizard } from "@/pages/onboarding/Wizard";
+import { AcceptInvite } from "@/pages/accept-invite/AcceptInvite";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 if (apiBaseUrl) setBaseUrl(apiBaseUrl);
@@ -299,7 +300,15 @@ function App() {
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <SupabaseAuthBridge />
           <OAuthCallbackHandler />
-          <AuthGate />
+          <Switch>
+            {/* Invitees have no session yet — /accept-invite must bypass the
+                AuthGate sign-in screen. Keep the auth bridge + OAuth handler
+                above mounted for all paths. */}
+            <Route path="/accept-invite" component={AcceptInvite} />
+            <Route>
+              <AuthGate />
+            </Route>
+          </Switch>
         </WouterRouter>
         <Toaster />
       </TooltipProvider>
