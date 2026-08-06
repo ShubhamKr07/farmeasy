@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "./lib/supabase";
-import { setBaseUrl, setAuthTokenGetter, useGetWizardProgress } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
+import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -135,7 +136,11 @@ function AuthGate() {
     );
   }
 
-  return <FacilityGate />;
+  return (
+    <ActiveFacilityProvider>
+      <FacilityGate />
+    </ActiveFacilityProvider>
+  );
 }
 
 /**
@@ -153,24 +158,77 @@ function LoadingScreen() {
 }
 
 /**
- * Wizard-completion guard (WIZ-001). Runs once the user is signed in: a
- * user who hasn't finished the wizard (no wizard_progress row yet, or a row
- * whose currentStep isn't "done") gets routed into the onboarding wizard
- * instead of any dashboard content; a user who has finished it
- * (currentStep === "done") gets the normal <Router/>. Gating on wizard
- * completion (not facility-existence) is what makes resume/re-entry work:
- * a user who submits farm_basics (which creates their facility) and then
- * abandons on a later step must still be routed back into the wizard on
- * their next sign-in, even though a facility already exists for them.
- * <Wizard/> has no wouter routes of its own, so this same gate — since it
- * wraps <Router/> entirely — also catches any deep link into /cycles,
- * /inventory, etc. and redirects it back into the wizard until W4
- * completes, with no per-route guard duplication needed.
+ * Facility-picker screen — shown only when an org has 2+ facilities and no
+ * valid persisted selection exists yet (fresh browser, or the persisted id
+ * no longer belongs to this org). Never shown for single-facility orgs
+ * (useActiveFacility auto-selects those silently).
+ */
+function FacilityPicker({
+  facilities,
+  onSelect,
+}: {
+  facilities: { id: number; facilityName: string }[];
+  onSelect: (id: number) => void;
+}) {
+  return (
+    <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background">
+      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto" />
+      <p className="text-muted-foreground">Choose a facility to continue</p>
+      <div className="flex flex-col gap-2 w-full max-w-sm">
+        {facilities.map((f) => (
+          <Button key={f.id} variant="outline" onClick={() => onSelect(f.id)} data-testid={`picker-facility-${f.id}`}>
+            {f.facilityName}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Wizard-completion guard (WIZ-001), now per-facility (TEN-008): a facility
+ * whose wizard_progress row isn't "done" yet routes into the wizard for
+ * THAT facility, instead of any dashboard content. "Add facility" starts a
+ * brand-new wizard run (facilityId not yet known) via isAddingFacility,
+ * distinct from re-entering an existing facility's unfinished wizard.
+ *
+ * needsPicker (2+ facilities, no valid persisted selection) blocks on an
+ * explicit choice rather than guessing — see useActiveFacility's own doc
+ * comment for the full 0/1/2+-facility resolution rule.
  */
 function FacilityGate() {
-  const { data: progress, isLoading } = useGetWizardProgress();
+  const {
+    activeFacilityId,
+    needsPicker,
+    facilities,
+    isLoading,
+    selectFacility,
+    isAddingFacility,
+    finishAddFacility,
+  } = useActiveFacility();
+
+  // Guard against a flash of the wizard/picker while useListFacilities is
+  // still in flight: facilities defaults to [] during loading, which would
+  // otherwise look identical to "brand-new user, no facility yet" below.
   if (isLoading) return <LoadingScreen />;
-  if (progress?.currentStep !== "done") return <Wizard />; // wizard incomplete -> wizard, no dashboard content
+
+  if (needsPicker) {
+    return <FacilityPicker facilities={facilities} onSelect={selectFacility} />;
+  }
+
+  if (isAddingFacility) {
+    return <Wizard facilityId={null} onFacilityCreated={finishAddFacility} />;
+  }
+
+  const activeFacility = facilities.find((f) => f.id === activeFacilityId);
+  if (activeFacility && !activeFacility.onboarded) {
+    return <Wizard facilityId={activeFacility.id} onFacilityCreated={() => undefined} />;
+  }
+  if (!activeFacility && facilities.length === 0) {
+    // Brand-new user, no facility at all yet — first-time onboarding.
+    return <Wizard facilityId={null} onFacilityCreated={finishAddFacility} />;
+  }
+
   return <Router />; // existing dashboard routes
 }
 

@@ -34,11 +34,21 @@ type WizardStep = (typeof STEP_ORDER)[number];
  * in place of the normal dashboard `<Router/>` whenever the signed-in user
  * has no facility yet.
  */
-export function Wizard() {
-  const { data: progress, isLoading } = useGetWizardProgress();
+export function Wizard({
+  facilityId,
+  onFacilityCreated,
+}: {
+  facilityId: number | null;
+  onFacilityCreated: (newFacilityId: number, organizationId: number) => void;
+}) {
+  const { data: progress, isLoading } = useGetWizardProgress(
+    facilityId !== null ? { facilityId } : undefined,
+  );
   const [step, setStep] = useState<WizardStep>("farm_basics");
   const [resumed, setResumed] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [addedDevices, setAddedDevices] = useState<AddedDevice[]>([]);
+  const [createdFacilityId, setCreatedFacilityId] = useState<number | null>(facilityId);
   const postEvent = usePostWizardEvent();
   const putProgress = usePutWizardProgress();
   const postReadinessEvent = usePostFacilityReadinessEvent();
@@ -51,9 +61,49 @@ export function Wizard() {
   // it's fine to keep above the isLoading early return below; it's also
   // naturally already isLoading-safe since `progress` is undefined/null
   // while loading, making `progress?.currentStep` falsy.
-  if (progress?.currentStep && !resumed) {
+  // `!hasLoadedOnce` added (TEN-008 review cycle 4): without it, a LATER
+  // ordinary refetch of this same query key (TanStack Query v5 defaults:
+  // refetchOnWindowFocus/reconnect, see App.tsx's unconfigured QueryClient)
+  // can land after the wizard_progress row is created by the very next PUT
+  // (first-time onboarding / "Add facility" both start with no row, so
+  // `progress?.currentStep` is falsy on the FIRST load and this effect
+  // doesn't fire then) — that later refetch's real `currentStep` would still
+  // satisfy `!resumed` and fire this effect, spuriously showing the "Welcome
+  // back" banner mid-session or snapping `step` backward in a race with the
+  // in-flight PUT. Once the component has finished loading once
+  // (`hasLoadedOnce`), the resume decision is final either way: a genuine
+  // resume already fired this branch on that same first load (before
+  // `hasLoadedOnce` could have been set — see ordering note below), and a
+  // no-row-yet first load has nothing to resume from ever again for this
+  // component instance.
+  if (progress?.currentStep && !resumed && !hasLoadedOnce) {
     setStep(progress.currentStep as WizardStep);
     setResumed(true);
+  }
+
+  // Tracks "has this component ever finished a load" (deliberately NOT the
+  // same thing as `resumed` above, which only means "the resume-from-server
+  // effect fired at least once"). `resumed` stays false whenever the initial
+  // GET comes back with no row (the common case for both first-time
+  // zero-facility onboarding and "Add facility": no wizard_progress row
+  // exists yet the first time this mounts) — `hasLoadedOnce` instead just
+  // means "isLoading has resolved to false at least once," set once and
+  // never unset, same during-render-adjustment pattern as `resumed` above.
+  // On the very first render pass, both this block and the resume-effect
+  // block above read `resumed`/`hasLoadedOnce` from the same pre-update
+  // values (both still false) — React's "adjust state during render" restart
+  // (state changed mid-render, so the whole function body re-runs once more
+  // before committing) is what lets the resume effect's setStep/setResumed
+  // land using the pre-flip values, not this block's own textual position.
+  // Genuine resume-from-reload is unaffected. Deliberately does NOT also force
+  // `resumed = true` unconditionally here — doing so would make
+  // `showResumeBanner` (`resumed && progress?.currentStep === step`) collapse
+  // to just `progress?.currentStep === step`, which the wizard's own PUT
+  // effect keeps true almost continuously (it upserts currentStep to match
+  // local step after every change) — a near-certain false-positive banner on
+  // any ordinary tab refocus, not just a narrow race.
+  if (!isLoading && !hasLoadedOnce) {
+    setHasLoadedOnce(true);
   }
 
   // WIZ-006: fire a "view" telemetry event once per step mount. The hook
@@ -81,7 +131,7 @@ export function Wizard() {
   // first load after a resume is harmless (same value written back).
   useEffect(() => {
     if (isLoading) return;
-    putProgress.mutate({ data: { currentStep: step } });
+    putProgress.mutate({ data: { currentStep: step, facilityId: createdFacilityId ?? undefined } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
@@ -103,7 +153,20 @@ export function Wizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
-  if (isLoading) return null; // AuthGate's LoadingScreen already covers the outer shell
+  // Only blank the screen for the component's very FIRST load (before
+  // `hasLoadedOnce` is ever set) — AuthGate's LoadingScreen already covers
+  // the outer shell for that case. A LATER isLoading=true, caused by
+  // `facilityId` flipping from null to a real id (FacilityGate re-rendering
+  // this same fiber right after "Add facility"'s first step, or first-time
+  // zero-facility onboarding — both via finishAddFacility), points
+  // useGetWizardProgress at a brand-new, never-cached query key even though
+  // this component already knows exactly what step it's on locally (`step`
+  // was already advanced in the same batched render). Blanking the screen
+  // for that round-trip would be a visible flash with nothing left to wait
+  // for — `progress` isn't used to decide what to render below, only to
+  // seed local state once via the `resumed` effect above, which is already
+  // one-shot-guarded and won't be re-triggered by this later fetch.
+  if (isLoading && !hasLoadedOnce) return null;
 
   const advance = () => {
     // "save" fires for the step being left (the one whose data was just
@@ -150,7 +213,15 @@ export function Wizard() {
         )}
       </header>
       {showResumeBanner && <ResumeBanner />}
-      {step === "farm_basics" && <FarmBasics onSaved={advance} />}
+      {step === "farm_basics" && (
+        <FarmBasics
+          onSaved={(data) => {
+            setCreatedFacilityId(data.facilityId);
+            onFacilityCreated(data.facilityId, data.organizationId);
+            advance();
+          }}
+        />
+      )}
       {step === "layout" && <LayoutGrid onSaved={advance} />}
       {step === "sensors_accounts" && <VendorAccounts onSaved={advance} onSkipAll={skipToDone} />}
       {step === "sensors_devices" && (

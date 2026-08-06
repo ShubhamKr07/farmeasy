@@ -11,4 +11,5 @@ import type { PutWizardProgressRequestStepData } from './putWizardProgressReques
 export interface PutWizardProgressRequest {
   currentStep: PutWizardProgressRequestCurrentStep;
   stepData?: PutWizardProgressRequestStepData;
+  facilityId?: number;
 }

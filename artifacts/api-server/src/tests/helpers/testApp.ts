@@ -41,12 +41,22 @@ export const DEFAULT_TEST_USER = {
  * bypass of the production app: app.ts and its real middleware chain are
  * never touched.
  *
- *   const app = createAuthenticatedTestApp(shipmentsRouter);
+ * `facilityId`, when provided, is injected as an `X-Facility-Id` request
+ * header the same way — a test double standing in for the real client
+ * header TEN-008's resolveTenantContext now requires on every
+ * facility-scoped request, not a bypass of that resolver (it still runs for
+ * real and still re-validates the value against real
+ * organization_members/facilities rows). Omit it for routes that are
+ * genuinely org-scoped or pre-facility-existence (sensor-accounts,
+ * facilities, wizard progress) and don't need it.
+ *
+ *   const app = createAuthenticatedTestApp(shipmentsRouter, DEFAULT_TEST_USER, facilityId);
  *   const res = await request(app).get("/api/shipments");
  */
 export function createAuthenticatedTestApp(
   router: Router,
   user: { sub: string; user_role?: string } = DEFAULT_TEST_USER,
+  facilityId?: number,
 ): Express {
   const app = express();
   // Mirror app.ts: parse JSON bodies before route handlers consume them.
@@ -58,6 +68,9 @@ export function createAuthenticatedTestApp(
   app.use((req: Request, _res: Response, next: NextFunction) => {
     req.supabaseUser = user;
     req.log = testLogger;
+    if (facilityId !== undefined) {
+      req.headers["x-facility-id"] = String(facilityId);
+    }
     next();
   });
   app.use(resolveTenantContext);

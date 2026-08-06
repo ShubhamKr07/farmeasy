@@ -47,21 +47,26 @@ const PUBLIC_PROBE_PATHS = new Set(["/api/healthz", "/api/readyz"]);
 const TENANT_LOOKUP_TIMEOUT_MS = 2000;
 
 /**
- * Resolves { organizationId, facilityId, role } from organization_members
- * and attaches it to req.tenant. Never rejects — mirrors
+ * Resolves { organizationId, facilityId, role } from organization_members +
+ * facilities and attaches it to req.tenant. Never rejects — mirrors
  * supabaseAuthMiddleware's own "attach if present, let the route decide"
  * pattern (see that file's doc comment). Routes that are part of onboarding
- * itself (POST /facilities, GET /facilities/me, wizard progress,
- * facility-readiness) run for users who by definition have no membership
- * yet; a rejecting middleware here would break exactly those flows. Routes
- * that DO require tenant context use requireTenantContext (below),
- * mounted per-router, the same way app.ts already mounts requireSignedIn
- * selectively.
+ * itself (POST /facilities, GET /facilities/me, wizard progress) run for
+ * users who by definition have no membership yet; a rejecting middleware
+ * here would break exactly those flows. Routes that DO require tenant
+ * context use requireTenantContext (below), mounted per-router, the same way
+ * app.ts already mounts requireSignedIn selectively.
  *
- * Facility resolution is "the org's one facility" (facilities.organizationId
- * = the resolved org, take the only row) — MT-M2's TEN-008 changes this
- * lookup when multi-facility ships; it does not change this middleware's
- * shape or req.tenant's type.
+ * TEN-008: facility resolution is now the client's explicit choice, not "the
+ * org's one facility" — the client sends X-Facility-Id on every
+ * facility-scoped request, and this resolver re-validates it against real
+ * organization_members/facilities rows on every single request (never
+ * trusts a cached/prior-validated value, matching withTenantScope's own
+ * per-request-reverified design). Missing or unparseable header: req.tenant
+ * stays unset, same as any other unresolvable case — requireTenantContext
+ * surfaces this as a 400 (a client-bug class, not a 403/404 — the
+ * resource-ownership question doesn't even apply if the client hasn't named
+ * a real facility yet).
  *
  * db/drizzle imports are deferred to dynamic imports inside this function so
  * that merely importing the module (e.g. in unit tests for
@@ -80,11 +85,16 @@ export async function resolveTenantContext(
   const userId = req.supabaseUser?.sub ?? null;
   if (!userId) return next();
 
+  const facilityIdHeader = req.header("x-facility-id");
+  if (!facilityIdHeader) return next();
+  const facilityId = Number(facilityIdHeader);
+  if (!Number.isInteger(facilityId) || facilityId <= 0) return next();
+
   // Never reject: a DB error (unreachable, wrong DB, transient, or timeout)
   // must not break the request — this mirrors supabaseAuthMiddleware's own
   // attach-if-present-then-let-the-route-decide contract (see the doc comment
   // above). Routes that genuinely need tenant context mount
-  // requireTenantContext, which 403s on a missing req.tenant — the route,
+  // requireTenantContext, which 400s on a missing req.tenant — the route,
   // not the resolver, decides.
   try {
     // Defer db import to avoid initialization errors when DATABASE_URL is
@@ -99,6 +109,12 @@ export async function resolveTenantContext(
       // before any RLS-admitted row reaches the app. If a future endpoint
       // ever lists OTHER users' memberships, it must carry its own explicit
       // org/facility filter -- RLS will not scope that query for you.
+      //
+      // The facilitiesTable.id equality (the client's requested facility)
+      // is what makes this a real per-request re-validation rather than a
+      // trust-the-header lookup: a facility id that exists but belongs to an
+      // org this user isn't an active member of matches nothing here, same
+      // as an outright bogus id.
       const [membership] = await db
         .select({
           organizationId: organizationMembersTable.organizationId,
@@ -114,6 +130,7 @@ export async function resolveTenantContext(
           and(
             eq(organizationMembersTable.userId, userId),
             eq(organizationMembersTable.status, "active"),
+            eq(facilitiesTable.id, facilityId),
           ),
         )
         .limit(1);
@@ -171,13 +188,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 
 /**
  * Assertion middleware for routes that require resolved tenant context —
- * mount per-router, same pattern as app.ts's requireSignedIn. 403, not 404:
- * the identity resolved (requireSignedIn already passed), there is simply no
- * membership — distinct from a resource-ownership 404 (Task 5+).
+ * mount per-router, same pattern as app.ts's requireSignedIn. 400, not
+ * 403/404: a missing or invalid X-Facility-Id (including a real facility id
+ * that belongs to an org this user isn't an active member of) is a
+ * client-bug class distinct from a resource-ownership 404 (Task 5+ style) or
+ * an identity/authorization 403 — the client simply hasn't named a real,
+ * accessible facility for this request yet (TEN-008 error-handling design).
  */
 export function requireTenantContext(req: Request, res: Response, next: NextFunction) {
   if (!req.tenant) {
-    return res.status(403).json({ error: "No facility membership found" });
+    return res.status(400).json({ error: "Missing or invalid X-Facility-Id" });
   }
   return next();
 }

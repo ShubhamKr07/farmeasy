@@ -393,13 +393,20 @@ export const wizardProgressTable = pgTable(
     id: serial("id").primaryKey(),
     userId: uuid("user_id").notNull().references(() => usersTable.id),
     organizationId: integer("organization_id").references(() => organizationsTable.id),
+    facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "cascade" }),
     currentStep: wizardStepEnum("current_step").notNull().default("farm_basics"),
     stepData: jsonb("step_data").notNull().default({}),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("wizard_progress_user_id_uniq").on(table.userId)],
+  (table) => [
+    uniqueIndex("wizard_progress_user_id_facility_id_uniq").on(table.userId, table.facilityId),
+    uniqueIndex("wizard_progress_user_id_no_facility_uniq")
+      .on(table.userId)
+      .where(sql`${table.facilityId} IS NULL`),
+    index("wizard_progress_facility_id_idx").on(table.facilityId),
+  ],
 );
 
 // sensor_accounts — vendor cloud accounts (SEN-002/003), org-scoped per README

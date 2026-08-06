@@ -44,7 +44,7 @@ describe("POST /api/sensors/bulk", { skip: !dbUrl }, () => {
     const channels = await db.insert(channelsTable).values([
       { roomId: room.id, label: "C1" }, { roomId: room.id, label: "C2" }, { roomId: room.id, label: "C3" },
     ]).returning();
-    return { app: createAuthenticatedTestApp(sensors.default), channelIds: channels.map((c) => c.id) };
+    return { app: createAuthenticatedTestApp(sensors.default, DEFAULT_TEST_USER, facilityId), channelIds: channels.map((c) => c.id) };
   }
 
   test("creates one row per (type × channel) combination", async () => {

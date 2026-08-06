@@ -13,9 +13,11 @@ import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useSignOutAndClear } from "@/hooks/useSignOutAndClear";
+import { ActiveFacilityProvider, useActiveFacility } from "@/context/ActiveFacilityContext";
 import { AppShellProvider, useAppShell } from "@/context/AppShellContext";
 import AskMeFab from "@/components/AskMeFab";
 import HamburgerMenu from "@/components/HamburgerMenu";
+import { FacilityPickerScreen } from "@/components/FacilityPickerScreen";
 
 function NativeTabBar() {
   return (
@@ -159,6 +161,44 @@ function TabShell() {
   );
 }
 
+/**
+ * TEN-008: `ActiveFacilityProvider` (see `context/ActiveFacilityContext.tsx`)
+ * is mounted around this component — a child mounted only once `TabLayout`
+ * has confirmed a session — rather than at `TabLayout`'s own top level.
+ * Mirrors admin-dashboard's `App.tsx`, where the equivalent provider is only
+ * ever mounted around `FacilityGate`, itself only rendered after `AuthGate`
+ * confirms `session`. Mounting it any earlier would fire the facilities
+ * query before the Supabase auth-token getter is wired up, sending the
+ * first request out unauthenticated.
+ *
+ * The provider wraps `AuthedTabLayout` itself, not just `TabShell` below —
+ * `needsPicker`/`facilities`/`selectFacility` must be available for the
+ * facility-picker branch too, not only once `TabShell` renders (unlike
+ * `AppShellProvider`, which only ever needs to wrap `TabShell`).
+ */
+function AuthedTabLayout() {
+  const { facilities, isLoading, needsPicker, selectFacility } = useActiveFacility();
+
+  // Mirrors admin-dashboard's FacilityGate, which checks isLoading before
+  // needsPicker for the same reason: needsPicker/facilities both start at
+  // their empty-state defaults (false / []) until the AsyncStorage hydration
+  // read and the facilities fetch resolve, so without this guard TabShell
+  // would render (and its default tab would fire a facility-scoped request
+  // with no X-Facility-Id) for one frame on every cold launch, before
+  // needsPicker ever gets a chance to flip true.
+  if (isLoading) return null;
+
+  if (needsPicker) {
+    return <FacilityPickerScreen facilities={facilities} onSelect={selectFacility} />;
+  }
+
+  return (
+    <AppShellProvider>
+      <TabShell />
+    </AppShellProvider>
+  );
+}
+
 export default function TabLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -184,8 +224,8 @@ export default function TabLayout() {
   }
 
   return (
-    <AppShellProvider>
-      <TabShell />
-    </AppShellProvider>
+    <ActiveFacilityProvider>
+      <AuthedTabLayout />
+    </ActiveFacilityProvider>
   );
 }

@@ -1320,8 +1320,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreateFacilityResponse"
-        "409":
-          description: Signed-in user already belongs to a facility
+    get:
+      operationId: listFacilities
+      tags: [facilities]
+      summary: The signed-in user's organization's full facility list (TEN-008 switcher)
+      responses:
+        "200":
+          description: The organization's facilities (empty array if the user has no organization yet)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Facility"
 
   /facilities/me:
     get:
@@ -1342,7 +1353,17 @@ paths:
     get:
       operationId: getWizardProgress
       tags: [wizard]
-      summary: Resume support — the signed-in user's current wizard step + saved draft data
+      summary: >
+        Resume support — the signed-in user's current wizard step + saved
+        draft data. Without facilityId, resumes the in-progress,
+        not-yet-facility-created run; with it, resumes that specific
+        facility's wizard run (TEN-008 "Add facility" re-entry).
+      parameters:
+        - name: facilityId
+          in: query
+          required: false
+          schema:
+            type: integer
       responses:
         "200":
           description: The signed-in user's wizard progress, or null if the wizard hasn't been started yet
@@ -1352,6 +1373,8 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/WizardProgress"
                   - type: "null"
+        "400":
+          description: Invalid facilityId, or a facilityId not in the user's own organization
     put:
       operationId: putWizardProgress
       tags: [wizard]
@@ -2055,18 +2078,22 @@ components:
           enum: [metric, imperial]
         currency:
           type: string
-      required: [id, name, organizationId, facilityName, timezone, units, currency]
+        onboarded:
+          type: boolean
+      required: [id, name, organizationId, facilityName, timezone, units, currency, onboarded]
 
     WizardProgress:
       type: object
       properties:
+        facilityId:
+          type: ["integer", "null"]
         currentStep:
           type: string
           enum: [farm_basics, layout, sensors_accounts, sensors_devices, sensors_review, done]
         stepData:
           type: object
           additionalProperties: true
-      required: [currentStep, stepData]
+      required: [facilityId, currentStep, stepData]
 
     PutWizardProgressRequest:
       type: object
@@ -2077,6 +2104,8 @@ components:
         stepData:
           type: object
           additionalProperties: true
+        facilityId:
+          type: integer
       required: [currentStep]
 
     PostWizardEventRequest:

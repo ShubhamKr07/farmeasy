@@ -376,6 +376,7 @@ export interface Facility {
   timezone: string;
   units: FacilityUnits;
   currency: string;
+  onboarded: boolean;
 }
 
 export type WizardProgressCurrentStep = typeof WizardProgressCurrentStep[keyof typeof WizardProgressCurrentStep];
@@ -393,6 +394,8 @@ export const WizardProgressCurrentStep = {
 export type WizardProgressStepData = { [key: string]: unknown };
 
 export interface WizardProgress {
+  /** @nullable */
+  facilityId: number | null;
   currentStep: WizardProgressCurrentStep;
   stepData: WizardProgressStepData;
 }
@@ -414,6 +417,7 @@ export type PutWizardProgressRequestStepData = { [key: string]: unknown };
 export interface PutWizardProgressRequest {
   currentStep: PutWizardProgressRequestCurrentStep;
   stepData?: PutWizardProgressRequestStepData;
+  facilityId?: number;
 }
 
 export type PostWizardEventRequestStep = typeof PostWizardEventRequestStep[keyof typeof PostWizardEventRequestStep];
@@ -1191,6 +1195,10 @@ export const ListMetricsRange = {
   custom: 'custom',
   all: 'all',
 } as const;
+
+export type GetWizardProgressParams = {
+facilityId?: number;
+};
 
 export type PostFacilityReadinessEvent200 = {
   ok: boolean;

@@ -1,0 +1,257 @@
+// artifacts/api-server/src/tests/app.test.ts
+import { describe, test, before, after } from "node:test";
+import { strictEqual, ok } from "node:assert";
+import request from "supertest";
+import { randomUUID } from "node:crypto";
+import {
+  requireTestDatabaseUrl,
+  seedTenantContext,
+  closeDatabasePoolAfterTests,
+} from "./helpers/testDatabase";
+
+/**
+ * Real app.ts integration test (Task 12.5 regression).
+ *
+ * Every other test file in this repo (see helpers/testApp.ts's
+ * createAuthenticatedTestApp) builds its own standalone Express app that
+ * mounts a caller-supplied router directly, with none of app.ts's own
+ * per-router requireSignedIn/requireTenantContext wrapping replicated -- so
+ * the REAL `app` object (artifacts/api-server/src/app.ts's default export)
+ * has never been exercised by any test. That gap is exactly how the
+ * mount-ordering bug this file exists to catch went undetected: Express's
+ * `app.use(path, mw1, mw2, router)` runs `mw1`/`mw2` for EVERY request whose
+ * path matches `path` (a prefix match, and every router here shares the
+ * "/api" prefix) that reaches that point in the stack -- not just requests
+ * `router` itself would actually handle. A short-circuiting middleware (like
+ * `requireTenantContext`, which 400s instead of calling `next()`) mounted
+ * ahead of a router it doesn't belong to can intercept that router's
+ * requests before they're ever dispatched -- see app.ts's own comment above
+ * its mount list for the full writeup. This file imports the REAL `app`
+ * (not a synthetic reconstruction) and drives real HTTP requests at it via
+ * supertest, so a regression in mount order (or in requireTenantContext
+ * scoping generally) fails a test here even if every router's own
+ * standalone-app test still passes.
+ *
+ * Getting a real, signed-in identity into these requests is the hard part:
+ * app.ts wires the REAL `supabaseAuthMiddleware`
+ * (src/middlewares/supabaseAuth.ts), which verifies a bearer token against
+ * Supabase's own remote JWKS -- there is no test-double seam here to attach
+ * `req.supabaseUser` directly (that seam is exactly what
+ * createAuthenticatedTestApp uses, and exactly what would defeat the point
+ * of this file). Instead, `createRealTestUser` below drives actual user
+ * creation + password sign-in against the local disposable Supabase
+ * instance's own GoTrue auth server (the same instance TEST_DATABASE_URL
+ * points at) to mint a real, JWKS-verifiable access token -- the same
+ * credential-issuing path a real mobile/dashboard client goes through in
+ * production. `supabaseAuthMiddleware` needs SUPABASE_URL/
+ * SUPABASE_SERVICE_ROLE_KEY to even load (it reads them at module scope) --
+ * both those and TEST_DATABASE_URL are asserted present before this
+ * describe block runs at all (see `canRun` below); when any is missing the
+ * whole block -- including the dynamic `import("../app")` that would
+ * otherwise throw at load time -- is skipped, so a local/CI run without the
+ * full Supabase env stays green, matching every other DB-gated suite in
+ * this repo.
+ *
+ * `app` itself, and every route module app.ts statically imports, is loaded
+ * lazily inside `before()` -- not as a top-level `import` -- for the same
+ * reason cross-tenant.test.ts's own combinedRouter import is lazy: a
+ * top-of-file static import evaluates before any runtime skip logic runs
+ * (ESM modules are evaluated eagerly), so it would crash the ENTIRE
+ * `node --test` run (every test FILE in this package is passed to a single
+ * node process -- see scripts/run-tests.mjs) the moment SUPABASE_URL is
+ * unset, even for a run that never intends to exercise this file at all.
+ */
+const dbUrl = requireTestDatabaseUrl();
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const canRun = Boolean(dbUrl && supabaseUrl && supabaseServiceRoleKey);
+closeDatabasePoolAfterTests();
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let app: any;
+
+/**
+ * Creates a brand-new Supabase auth user (randomized email -- see the
+ * module doc comment on why a fixed email would collide across repeated
+ * runs against this same persistent local database) and signs in as them,
+ * returning a real GoTrue-issued access token. Two admin-key-authenticated
+ * calls: `auth.admin.createUser` (bypasses email confirmation via
+ * `email_confirm: true`, so no inbox/webhook is needed) followed by
+ * `auth.signInWithPassword` (the real password-grant token exchange) --
+ * confirmed independently against this repo's local disposable Supabase
+ * instance that the resulting token verifies successfully against
+ * `${SUPABASE_URL}/auth/v1/.well-known/jwks.json` via `jose.jwtVerify`, the
+ * exact check `supabaseAuthMiddleware` performs.
+ */
+async function createRealTestUser(): Promise<{
+  userId: string;
+  email: string;
+  accessToken: string;
+}> {
+  const { createClient } = await import("@supabase/supabase-js");
+  const admin = createClient(supabaseUrl!, supabaseServiceRoleKey!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const email = `app-test-${randomUUID()}@app-test.example.com`;
+  const password = `Test-${randomUUID()}!Aa1`;
+
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (createErr || !created.user) {
+    throw new Error(`createRealTestUser: failed to create user: ${createErr?.message}`);
+  }
+
+  const { data: signedIn, error: signInErr } = await admin.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (signInErr || !signedIn.session) {
+    throw new Error(`createRealTestUser: failed to sign in: ${signInErr?.message}`);
+  }
+
+  return { userId: created.user.id, email, accessToken: signedIn.session.access_token };
+}
+
+/** Deletes a real Supabase auth user created by createRealTestUser, so repeated local runs don't leak `auth.users` rows. */
+async function deleteRealTestUser(userId: string): Promise<void> {
+  const { createClient } = await import("@supabase/supabase-js");
+  const admin = createClient(supabaseUrl!, supabaseServiceRoleKey!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  await admin.auth.admin.deleteUser(userId).catch(() => {
+    // Best-effort cleanup only -- a failed delete here must never fail the suite.
+  });
+}
+
+describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, () => {
+  const createdUserIds: string[] = [];
+
+  before(async () => {
+    // Point @workspace/db at the test database BEFORE anything (app.ts's
+    // route modules) statically imports it -- mirrors useDatabaseFixture's
+    // own before() hook.
+    process.env.DATABASE_URL = dbUrl;
+    app = (await import("../app")).default;
+  });
+
+  after(async () => {
+    for (const userId of createdUserIds) {
+      await deleteRealTestUser(userId);
+    }
+  });
+
+  test("brand-new user (no organization_members row) can POST /api/facilities through the real app -- the exact regression this fix prevents", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const res = await request(app)
+      .post("/api/facilities")
+      .set("Authorization", `Bearer ${user.accessToken}`)
+      .send({ farmName: "Regression Test Farm", timezone: "UTC", units: "metric", currency: "USD" });
+
+    strictEqual(
+      res.status,
+      201,
+      `expected 201, got ${res.status}: ${JSON.stringify(res.body)} -- before the reorder, this request could be intercepted by an earlier requireTenantContext-gated mount (e.g. alertsRouter's) and 400`,
+    );
+    ok(res.body.facilityId, "response must include the new facilityId");
+  });
+
+  test("same brand-new user can GET /api/facilities/me and gets 200 with null, not 400", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const res = await request(app)
+      .get("/api/facilities/me")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+    strictEqual(res.body, null);
+  });
+
+  test("existing user WITH a resolved facility: GET /api/alerts with a valid X-Facility-Id still gets normal (200) behavior through the real app", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    const { facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: user.userId, email: user.email },
+      { farmName: "Alerts Regression Farm" },
+    );
+
+    const res = await request(app)
+      .get("/api/alerts")
+      .set("Authorization", `Bearer ${user.accessToken}`)
+      .set("X-Facility-Id", String(facilityId));
+
+    strictEqual(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+    ok(Array.isArray(res.body), "GET /api/alerts must return an array");
+  });
+
+  test("same existing user, same route, NO X-Facility-Id header: still correctly gets 400 (the gate itself still works, just correctly scoped now)", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: user.userId, email: user.email },
+      { farmName: "Alerts Regression Farm 2" },
+    );
+
+    const res = await request(app)
+      .get("/api/alerts")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+  });
+
+  test("unauthenticated request (no bearer token) still correctly gets 401 through the real app", async () => {
+    const res = await request(app).get("/api/facilities/me");
+    strictEqual(res.status, 401, `expected 401, got ${res.status}: ${JSON.stringify(res.body)}`);
+  });
+
+  test("brand-new user hitting a tier-3 (app.ts-level-gated) route with no X-Facility-Id still correctly 400s, not 500/leak", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const res = await request(app)
+      .get("/api/inventory")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+  });
+
+  test("signed-in user with NO X-Facility-Id hitting media.ts's route in the catch-all router (routes/index.ts) is NOT intercepted by an earlier tenant gate -- media.ts's own (gate-less) handler is reached", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    // No file attached and no X-Facility-Id header. If an earlier
+    // requireTenantContext-gated mount intercepted this request (the app.ts
+    // ordering bug this test locks in), it would 400 with "Missing or
+    // invalid X-Facility-Id" before ever reaching media.ts. Reaching
+    // media.ts's own handler instead 400s with "No file provided" -- proving
+    // the catch-all router (which media.ts is bundled into via
+    // routes/index.ts) is mounted somewhere no earlier gate can intercept it.
+    const res = await request(app)
+      .post("/api/media/upload")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+    strictEqual(
+      res.body.error,
+      "No file provided",
+      `expected media.ts's own handler to be reached, not an earlier tenant gate: ${JSON.stringify(res.body)}`,
+    );
+  });
+});

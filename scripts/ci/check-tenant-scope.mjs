@@ -67,8 +67,9 @@ const DIRECT_CALL = new RegExp(
 // check has no more baseline debt. Any NEW violation not in this list still
 // fails CI.
 //
-// Two groups here, both pre-existing debt (nothing in this list was
-// introduced after the check first shipped in MT-M0 Task 10):
+// Three groups here. (A) and (B) are pre-existing deferred debt (nothing in
+// either was introduced after the check first shipped in MT-M0 Task 10);
+// (C) is PERMANENT, not debt to fix later -- see its own block below.
 //
 //  (A) Three SINGLE-LINE call sites that the original per-line regex caught.
 //      (alerts.ts, growthProfiles.ts's route handler, and sensors.ts's
@@ -86,6 +87,22 @@ const DIRECT_CALL = new RegExp(
 //      then delete the now-fixed entries. Files NOT covered by any MT-M1
 //      sweep task (dashboard.ts, facility-readiness.ts's accounting line,
 //      layout.ts) stay baselined as explicitly-tracked deferred debt.
+//
+//  (C) TWO PERMANENT entries -- TEN-008's deliberate bootstrap-style
+//      organization_members lookups: GET /facilities's org resolution
+//      (facilities.ts) and wizard.ts's getOrganizationId helper. Both
+//      queries filter organization_members by userId directly in their WHERE
+//      clause before any row ever reaches the app -- exactly matching
+//      resolveTenantContext's own established bootstrap pattern in
+//      artifacts/api-server/src/middlewares/tenantContext.ts. That file
+//      lives in middlewares/, not routes/ or lib/, so this scanner never
+//      looks at it -- which is why an identical pattern was never flagged
+//      there. Unlike every entry in groups (A) and (B), these two are NOT
+//      "MT-M1 deferred debt to fix later": both routes run before a
+//      facility/tenant is even known (there is no req.tenant yet at that
+//      point in the request lifecycle), so they can never be wrapped in
+//      withTenantScope -- that wrapper requires a resolved tenant, which is
+//      precisely what these lookups exist to bootstrap in the first place.
 const BASELINE_VIOLATIONS = new Set([
   // --- (A) original single-line baselines (pre-date the multi-line fix) ---
   "artifacts/api-server/src/routes/dashboard.ts::const allSensors = await db.select().from(sensorsTable);",
@@ -122,6 +139,21 @@ const BASELINE_VIOLATIONS = new Set([
   "artifacts/api-server/src/routes/layout.ts::const [activeCyclesRow] = await db",
   // shipments.ts (Task 4):
   "artifacts/api-server/src/routes/shipments.ts::const rows = await db",
+  // --- (C) TEN-008's PERMANENT bootstrap-style organization_members lookups
+  //         (NOT deferred debt -- these will never be wrapped in
+  //         withTenantScope; see the header comment above for the full
+  //         rationale). Both queries filter organization_members by userId
+  //         directly in their WHERE clause before any row reaches the app,
+  //         exactly matching resolveTenantContext's own bootstrap pattern in
+  //         middlewares/tenantContext.ts -- a file this scanner never
+  //         inspects (it lives in middlewares/, not routes/ or lib/), which
+  //         is why an identical pattern was never flagged there. Both routes
+  //         run before a facility/tenant is even known (no req.tenant exists
+  //         yet at this point in the request lifecycle), so there is no
+  //         tenant scope to wrap them in -- they exist to bootstrap the very
+  //         tenant context that withTenantScope would later consume.
+  "artifacts/api-server/src/routes/facilities.ts::const [membership] = await db",
+  "artifacts/api-server/src/routes/wizard.ts::const [membership] = await db",
 ]);
 
 const newViolations = [];
@@ -164,5 +196,5 @@ if (newViolations.length > 0) {
 }
 
 console.log(
-  `check-tenant-scope: clean (${SCOPED_TABLES.length} scoped tables checked, 0 new violations, ${baselineViolations.length} known baseline items deferred to MT-M1)`,
+  `check-tenant-scope: clean (${SCOPED_TABLES.length} scoped tables checked, 0 new violations, ${baselineViolations.length} known baseline items -- deferred MT-M1 debt or TEN-008's permanent bootstrap-lookup exceptions, see BASELINE_VIOLATIONS above)`,
 );

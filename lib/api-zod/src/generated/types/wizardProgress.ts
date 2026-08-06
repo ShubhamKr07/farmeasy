@@ -9,6 +9,8 @@ import type { WizardProgressCurrentStep } from './wizardProgressCurrentStep';
 import type { WizardProgressStepData } from './wizardProgressStepData';
 
 export interface WizardProgress {
+  /** @nullable */
+  facilityId: number | null;
   currentStep: WizardProgressCurrentStep;
   stepData: WizardProgressStepData;
 }

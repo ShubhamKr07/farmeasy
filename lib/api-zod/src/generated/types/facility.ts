@@ -15,4 +15,5 @@ export interface Facility {
   timezone: string;
   units: FacilityUnits;
   currency: string;
+  onboarded: boolean;
 }

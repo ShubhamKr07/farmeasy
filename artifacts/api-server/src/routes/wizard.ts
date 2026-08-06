@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { wizardProgressTable, usersTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { wizardProgressTable, usersTable, organizationMembersTable, facilitiesTable } from "@workspace/db";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
 
 const router = Router();
@@ -19,6 +19,7 @@ const WIZARD_STEPS = [
 const PutWizardProgressSchema = z.object({
   currentStep: z.enum(WIZARD_STEPS),
   stepData: z.record(z.string(), z.unknown()).optional(),
+  facilityId: z.number().int().positive().optional(),
 });
 
 function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | null {
@@ -30,19 +31,65 @@ function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | 
   return result.data;
 }
 
-// GET /wizard/progress — resume support (WIZ-001). Returns null if the
-// signed-in user hasn't started the wizard yet (no row), so the client's
-// Wizard.tsx defaults to the first step instead of treating this as an error.
+/**
+ * Resolves which organization the signed-in user belongs to (or null for a
+ * brand-new user who hasn't reached W2 yet). Deliberately NOT req.tenant —
+ * this route pair is the one deliberate exception to X-Facility-Id being
+ * hard-required (TEN-008 design doc, §Architecture): there is no facility to
+ * name yet for a brand-new wizard run, and re-entering the wizard for an
+ * existing facility identifies it via the `facilityId` query
+ * param/request-body field below, not the header.
+ */
+async function getOrganizationId(userId: string): Promise<number | null> {
+  const [membership] = await db
+    .select({ organizationId: organizationMembersTable.organizationId })
+    .from(organizationMembersTable)
+    .where(and(eq(organizationMembersTable.userId, userId), eq(organizationMembersTable.status, "active")))
+    .limit(1);
+  return membership?.organizationId ?? null;
+}
+
+// GET /wizard/progress — resume support (WIZ-001), now per-facility
+// (TEN-008). `?facilityId=<id>` resumes an EXISTING facility's wizard run
+// (re-entering "Add facility" for a facility whose W2 already succeeded but
+// a later step didn't finish) — validated against the user's own
+// organization before use, same re-validation discipline as
+// resolveTenantContext. Omitted: resumes the user's current in-progress,
+// not-yet-facility-created run (facility_id IS NULL) — the common case for
+// both first-time onboarding and the very start of "Add facility," before
+// W2's POST /facilities has run yet. Returns null if no matching row exists,
+// so the client's Wizard.tsx defaults to the first step instead of treating
+// this as an error.
 router.get("/wizard/progress", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
+    const facilityIdParam = req.query.facilityId;
+
+    let facilityCondition;
+    if (typeof facilityIdParam === "string" && facilityIdParam.trim() !== "") {
+      const facilityId = Number(facilityIdParam);
+      if (!Number.isInteger(facilityId) || facilityId <= 0) {
+        return res.status(400).json({ error: "Invalid facilityId" });
+      }
+      const organizationId = await getOrganizationId(userId!);
+      const [facility] = await db
+        .select({ id: facilitiesTable.id })
+        .from(facilitiesTable)
+        .where(and(eq(facilitiesTable.id, facilityId), eq(facilitiesTable.organizationId, organizationId ?? -1)));
+      if (!facility) return res.status(400).json({ error: "Facility not found in your organization" });
+      facilityCondition = eq(wizardProgressTable.facilityId, facilityId);
+    } else {
+      facilityCondition = isNull(wizardProgressTable.facilityId);
+    }
+
     const [row] = await db
       .select({
+        facilityId: wizardProgressTable.facilityId,
         currentStep: wizardProgressTable.currentStep,
         stepData: wizardProgressTable.stepData,
       })
       .from(wizardProgressTable)
-      .where(eq(wizardProgressTable.userId, userId!));
+      .where(and(eq(wizardProgressTable.userId, userId!), facilityCondition));
     return res.status(200).json(row ?? null);
   } catch (err) {
     req.log.error(err);
@@ -51,29 +98,21 @@ router.get("/wizard/progress", async (req: Request, res: Response) => {
 });
 
 // PUT /wizard/progress — save the current step's draft data and/or advance
-// currentStep. Upserts on the unique userId index so each user has exactly
-// one progress row; organizationId is carried along once the user has one
-// (set by POST /facilities) purely for admin/debugging convenience — not
-// read by any client code path.
+// currentStep. TEN-008: body.facilityId, once known (set right after W2's
+// POST /facilities succeeds), both identifies which row to update (a real
+// facility's row, not the null-facility "which facility am I even creating"
+// row) AND, on the one PUT call that first supplies it, transitions that
+// exact null-facility row into a real-facility row via an UPDATE keyed on
+// (userId, facilityId IS NULL) — never a second INSERT, so the same
+// partial-unique-index invariant (Task 3) that limits a user to one
+// in-progress unassigned run is never raced.
 //
 // This must be a single atomic statement, not a read-then-write (even a
 // transaction with `SELECT ... FOR UPDATE` isn't enough — see below). Two
-// concurrent PUTs for the same user (double-click submit, two open tabs) —
-// one saving a draft, one an advance-only call with no stepData — must never
-// let the advance-only call's write clobber the draft-save's write,
-// regardless of which one Postgres actually commits first.
-//
-// A `SELECT ... FOR UPDATE` inside a transaction closes this race only when
-// a wizard_progress row already exists to lock: if the very first save for a
-// brand-new user races (the common case, since nothing pre-creates this row
-// at signup), both concurrent SELECTs see no row (nothing to lock), both
-// compute stepData in JS from only their own request body, and only *then*
-// does Postgres serialize the actual INSERTs at the row level via ON
-// CONFLICT — by which point each statement's SET values were already fixed
-// as static parameters. Whichever insert loses the row-level race and
-// converts to the conflict-UPDATE still overwrites the winner's just-
-// committed stepData with its own stale precomputed value. Same lost-update
-// bug, just a narrower window (first-ever save instead of every save).
+// concurrent PUTs for the same (user, facility) — one saving a draft, one an
+// advance-only call with no stepData — must never let the advance-only
+// call's write clobber the draft-save's write, regardless of which one
+// Postgres actually commits first.
 //
 // Fixed by removing the separate read entirely: when this PUT sent no
 // stepData, the SET clause references the target table's own stepData
@@ -91,27 +130,103 @@ router.put("/wizard/progress", async (req: Request, res: Response) => {
 
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId!));
 
-    const [row] = await db
-      .insert(wizardProgressTable)
-      .values({
-        userId: userId!,
-        organizationId: user?.organizationId ?? null,
-        currentStep: body.currentStep,
-        stepData: body.stepData ?? {},
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: wizardProgressTable.userId,
-        set: {
+    if (body.facilityId !== undefined) {
+      // Validate the facility actually belongs to the user's own
+      // organization before ever writing it onto their wizard_progress row —
+      // same re-validation discipline as resolveTenantContext/getAuth
+      // elsewhere in this milestone, never trust a client-supplied id
+      // outright.
+      const organizationId = await getOrganizationId(userId!);
+      const [facility] = await db
+        .select({ id: facilitiesTable.id })
+        .from(facilitiesTable)
+        .where(and(eq(facilitiesTable.id, body.facilityId), eq(facilitiesTable.organizationId, organizationId ?? -1)));
+      if (!facility) {
+        return res.status(400).json({ error: "facilityId not found in your organization" });
+      }
+
+      const [row] = await db
+        .update(wizardProgressTable)
+        .set({
+          facilityId: body.facilityId,
           currentStep: body.currentStep,
           stepData:
             body.stepData !== undefined
               ? sql`${JSON.stringify(body.stepData)}::jsonb`
               : sql`${wizardProgressTable.stepData}`,
           updatedAt: new Date(),
-        },
+        })
+        .where(and(eq(wizardProgressTable.userId, userId!), isNull(wizardProgressTable.facilityId)))
+        .returning({
+          facilityId: wizardProgressTable.facilityId,
+          currentStep: wizardProgressTable.currentStep,
+          stepData: wizardProgressTable.stepData,
+        });
+
+      if (row) return res.status(200).json(row);
+
+      // No null-facility row existed to transition (e.g. re-entering an
+      // already-facility-stamped run after a client-side reload) — fall
+      // through to the ordinary per-facility upsert below instead of
+      // erroring.
+    }
+
+    // Conflict-target note (verified against the real database, not assumed):
+    // wizard_progress has two unique indexes post-Task-3 — a composite
+    // (user_id, facility_id) and a PARTIAL one, `UNIQUE (user_id) WHERE
+    // facility_id IS NULL`. Drizzle's `.onConflictDoUpdate({ target: ... })`
+    // only accepts a column (or column array) for `target` — passing a raw
+    // `sql` fragment there doesn't match this Drizzle version's type surface
+    // (pg-core's PgInsertOnConflictDoUpdateConfig.target is `IndexColumn |
+    // IndexColumn[]`, i.e. an actual PgColumn). A bare
+    // `target: wizardProgressTable.userId` alone reproduces
+    // `ON CONFLICT (user_id) DO UPDATE ...`, which Postgres rejects against a
+    // partial index with "there is no unique or exclusion constraint
+    // matching the ON CONFLICT specification" (confirmed with a real psql
+    // session against this exact schema). The fix is Drizzle's own
+    // `targetWhere` option — it appends the same predicate the partial index
+    // was created with, producing
+    // `ON CONFLICT (user_id) WHERE facility_id IS NULL DO UPDATE ...`, which
+    // Postgres accepts as an unambiguous arbiter (also confirmed with a real
+    // psql session).
+    const [row] = await db
+      .insert(wizardProgressTable)
+      .values({
+        userId: userId!,
+        organizationId: user?.organizationId ?? null,
+        facilityId: body.facilityId ?? null,
+        currentStep: body.currentStep,
+        stepData: body.stepData ?? {},
+        updatedAt: new Date(),
       })
+      .onConflictDoUpdate(
+        body.facilityId !== undefined
+          ? {
+              target: [wizardProgressTable.userId, wizardProgressTable.facilityId],
+              set: {
+                currentStep: body.currentStep,
+                stepData:
+                  body.stepData !== undefined
+                    ? sql`${JSON.stringify(body.stepData)}::jsonb`
+                    : sql`${wizardProgressTable.stepData}`,
+                updatedAt: new Date(),
+              },
+            }
+          : {
+              target: wizardProgressTable.userId,
+              targetWhere: sql`${wizardProgressTable.facilityId} IS NULL`,
+              set: {
+                currentStep: body.currentStep,
+                stepData:
+                  body.stepData !== undefined
+                    ? sql`${JSON.stringify(body.stepData)}::jsonb`
+                    : sql`${wizardProgressTable.stepData}`,
+                updatedAt: new Date(),
+              },
+            },
+      )
       .returning({
+        facilityId: wizardProgressTable.facilityId,
         currentStep: wizardProgressTable.currentStep,
         stepData: wizardProgressTable.stepData,
       });

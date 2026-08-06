@@ -59,7 +59,7 @@ describe(
         { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
       );
       return {
-        app: createAuthenticatedTestApp(tasks.default),
+        app: createAuthenticatedTestApp(tasks.default, DEFAULT_TEST_USER, facilityId),
         db,
         tasksTable,
         facilityId,

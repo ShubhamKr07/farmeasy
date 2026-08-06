@@ -46,6 +46,12 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   let seededCycleId: number;
   let seededSensorId: number;
   let seededSeedLotQrCode: string;
+  // TEN-008: org A's second facility -- proves facility-level isolation
+  // WITHIN the same organization/user, one level deeper than this suite's
+  // existing cross-*organization* pattern.
+  let facilityATwoId: number;
+  let facilityATwoApp: ReturnType<typeof createAuthenticatedTestApp>;
+  let facilityTwoCycleId: number;
 
   before(async () => {
     if (!dbUrl) return;
@@ -64,6 +70,10 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const sensorsRouter = (await import("../../routes/sensors")).default;
     const seedLotsRouter = (await import("../../routes/seedLots")).default;
     const accountingRouter = (await import("../../routes/accounting")).accountingRouter;
+    // TEN-008: GET /facility-readiness (Step 2's new tests) isn't mounted by
+    // any of the routers above -- added here so that assertion can run
+    // against the real route rather than 404ing on an unmounted path.
+    const facilityReadinessRouter = (await import("../../routes/facility-readiness")).default;
     combinedRouter = Router();
     combinedRouter.use(facilitiesRouter);
     combinedRouter.use(alertsRouter);
@@ -77,6 +87,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     combinedRouter.use(sensorsRouter);
     combinedRouter.use(seedLotsRouter);
     combinedRouter.use(accountingRouter);
+    combinedRouter.use(facilityReadinessRouter);
 
     // ONE truncate for the whole suite, not per-test: this suite seeds org
     // A/B and their resources ONCE here, then reads/asserts against that
@@ -93,12 +104,14 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     async function provisionOrg(email: string) {
       const userId = randomUUID();
       await seedTestUser(db, usersTable, { id: userId, email });
-      const testApp = createAuthenticatedTestApp(combinedRouter, { sub: userId });
-      const createRes = await request(testApp)
+      const bootstrapApp = createAuthenticatedTestApp(combinedRouter, { sub: userId });
+      const createRes = await request(bootstrapApp)
         .post("/api/facilities")
         .send({ farmName: `Org for ${email}`, timezone: "UTC", units: "metric", currency: "USD" });
       strictEqual(createRes.status, 201, `facility creation for ${email} must succeed`);
-      return { app: testApp, facilityId: createRes.body.facilityId as number, userId };
+      const facilityId = createRes.body.facilityId as number;
+      const app = createAuthenticatedTestApp(combinedRouter, { sub: userId }, facilityId);
+      return { app, facilityId, userId };
     }
 
     orgA = await provisionOrg("org-a@isolation-test.example.com");
@@ -196,6 +209,28 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
         refreshTokenEnc: "isolation-test-refresh-enc",
         expiresAt: new Date(Date.now() + 3600_000),
       });
+
+    // TEN-008: a second facility for org A itself — proves facility-level
+    // isolation WITHIN the same organization/user, one level deeper than
+    // this suite's existing cross-*organization* pattern.
+    const secondFacilityRes = await request(orgA.app)
+      .post("/api/facilities")
+      .send({ farmName: "Org A Second Facility", timezone: "UTC", units: "metric", currency: "USD" });
+    strictEqual(secondFacilityRes.status, 201, "org A's second facility must be created");
+    facilityATwoId = secondFacilityRes.body.facilityId as number;
+    facilityATwoApp = createAuthenticatedTestApp(combinedRouter, { sub: orgA.userId }, facilityATwoId);
+
+    const facilityTwoCycleRes = await request(facilityATwoApp).post("/api/cycles").send({
+      seedLotQrCodes: ["ISO-QR-FACILITY-2"],
+      seedName: "Isolation Test Crop",
+      fullTrays: 3,
+      halfTrays: 0,
+      seedWeightTray: 8,
+      growthProfileId: seededGrowthProfileId,
+      seedingDate: new Date().toISOString().slice(0, 10),
+    });
+    strictEqual(facilityTwoCycleRes.status, 201, "cycle creation for org A's second facility must succeed");
+    facilityTwoCycleId = facilityTwoCycleRes.body.id;
   });
 
   test("TEN-003: two facilities each independently hold a seeding room (no cross-facility conflict)", async () => {
@@ -323,5 +358,78 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const { eq } = await import("drizzle-orm");
     const [log] = await (getAdminDb() ?? db).select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, orgA.facilityId));
     ok(log, "org A's facility_logs row must exist and be tagged with org A's own facilityId");
+  });
+
+  test("TEN-008: GET /cycles never leaks facility A's original facility's cycle into facility A's second facility", async () => {
+    const res = await request(facilityATwoApp).get("/api/cycles");
+    strictEqual(res.status, 200);
+    ok(
+      !res.body.some((c: { id: number }) => c.id === seededCycleId),
+      "facility A's SECOND facility's cycle list must not contain the ORIGINAL facility's cycle, even though both are the same org and same user",
+    );
+    ok(
+      res.body.some((c: { id: number }) => c.id === facilityTwoCycleId),
+      "facility A's second facility's cycle list must contain its own cycle",
+    );
+  });
+
+  test("TEN-008: switching X-Facility-Id back to the original facility restores its own view, unaffected by the second facility's data", async () => {
+    const res = await request(orgA.app).get("/api/cycles");
+    strictEqual(res.status, 200);
+    ok(res.body.some((c: { id: number }) => c.id === seededCycleId));
+    ok(
+      !res.body.some((c: { id: number }) => c.id === facilityTwoCycleId),
+      "the original facility's view must not include the second facility's cycle",
+    );
+  });
+
+  test("TEN-008: org-scoped resources (growth profiles, accounting) are identical regardless of active facility", async () => {
+    const originalFacilityRes = await request(orgA.app).get("/api/growth-profiles");
+    const secondFacilityRes = await request(facilityATwoApp).get("/api/growth-profiles");
+    strictEqual(originalFacilityRes.status, 200);
+    strictEqual(secondFacilityRes.status, 200);
+    ok(originalFacilityRes.body.some((gp: { id: number }) => gp.id === seededGrowthProfileId));
+    ok(secondFacilityRes.body.some((gp: { id: number }) => gp.id === seededGrowthProfileId));
+
+    const originalAccountingRes = await request(orgA.app).get("/api/accounting/status");
+    const secondAccountingRes = await request(facilityATwoApp).get("/api/accounting/status");
+    strictEqual(originalAccountingRes.body.connected, secondAccountingRes.body.connected);
+  });
+
+  test("TEN-008: missing X-Facility-Id on a facility-scoped route is a 400, never a silent default", async () => {
+    const appWithNoFacility = createAuthenticatedTestApp(combinedRouter, { sub: orgA.userId });
+    const res = await request(appWithNoFacility).get("/api/cycles");
+    strictEqual(res.status, 400);
+  });
+
+  test("TEN-008: X-Facility-Id for a real facility belonging to a DIFFERENT organization is a 400, not a 404 or a leak", async () => {
+    const crossOrgApp = createAuthenticatedTestApp(combinedRouter, { sub: orgB.userId }, orgA.facilityId);
+    const res = await request(crossOrgApp).get("/api/cycles");
+    strictEqual(res.status, 400, "org B's user requesting org A's facility id must 400, never resolve org A's data");
+  });
+
+  test("TEN-008: GET /facilities lists both of org A's facilities, each with its own onboarded status", async () => {
+    const res = await request(orgA.app).get("/api/facilities");
+    strictEqual(res.status, 200);
+    strictEqual(res.body.length, 2);
+    const originalEntry = res.body.find((f: { id: number }) => f.id === orgA.facilityId);
+    const secondEntry = res.body.find((f: { id: number }) => f.id === facilityATwoId);
+    ok(originalEntry && secondEntry, "both of org A's facilities must be listed");
+  });
+
+  test("TEN-008: GET /facility-readiness is scoped to the active facility, not the org's arbitrary one", async () => {
+    const originalRes = await request(orgA.app).get("/api/facility-readiness");
+    const secondRes = await request(facilityATwoApp).get("/api/facility-readiness");
+    strictEqual(originalRes.status, 200);
+    strictEqual(secondRes.status, 200);
+    // Org A's ORIGINAL facility seeded a cycle (seededCycleId) -> "Seed your
+    // first cycle" is done there. The SECOND facility also seeded its own
+    // cycle (facilityTwoCycleId) in this same test's before() hook -> also
+    // done there, independently -- proving each facility's checklist is
+    // computed from ITS OWN data, not shared/arbitrary org-wide state.
+    const firstCycleItem = (facility: typeof originalRes.body) =>
+      facility.items.find((i: { key: string }) => i.key === "first_cycle_seeded");
+    strictEqual(firstCycleItem(originalRes.body).state, "done");
+    strictEqual(firstCycleItem(secondRes.body).state, "done");
   });
 });

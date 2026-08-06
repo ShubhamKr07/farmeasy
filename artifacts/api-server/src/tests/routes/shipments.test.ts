@@ -64,7 +64,7 @@ describe(
         { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
       );
       return {
-        app: createAuthenticatedTestApp(shipments.default),
+        app: createAuthenticatedTestApp(shipments.default, DEFAULT_TEST_USER, facilityId),
         db,
         shipmentsTable,
         facilityId,

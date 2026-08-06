@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePanel } from "@/context/PanelContext";
 import { AskMe } from "@/components/ask-me/AskMe";
+import { FacilitySwitcher } from "./FacilitySwitcher";
 import { MobileNav } from "./MobileNav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
@@ -62,6 +63,8 @@ export function TopBar() {
         <img src="/logo-mark.svg" alt="FarmSmart" className="h-8 w-8 shrink-0 md:hidden" />
 
         <AskMe />
+
+        <FacilitySwitcher />
 
         {/* Mobile/tablet only — RightSidebar (xl+) carries these on desktop. */}
         <div className="flex items-center gap-1 xl:hidden shrink-0">

@@ -1181,6 +1181,22 @@ export const CreateFacilityBody = zod.object({
 
 
 /**
+ * @summary The signed-in user's organization's full facility list (TEN-008 switcher)
+ */
+export const ListFacilitiesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "organizationId": zod.number(),
+  "facilityName": zod.string(),
+  "timezone": zod.string(),
+  "units": zod.enum(['metric', 'imperial']),
+  "currency": zod.string(),
+  "onboarded": zod.boolean()
+})
+export const ListFacilitiesResponse = zod.array(ListFacilitiesResponseItem)
+
+
+/**
  * @summary Facility-existence check for the signed-in user (wizard gate)
  */
 export const GetMyFacilityResponse = zod.union([zod.object({
@@ -1190,14 +1206,21 @@ export const GetMyFacilityResponse = zod.union([zod.object({
   "facilityName": zod.string(),
   "timezone": zod.string(),
   "units": zod.enum(['metric', 'imperial']),
-  "currency": zod.string()
+  "currency": zod.string(),
+  "onboarded": zod.boolean()
 }),zod.null()])
 
 
 /**
- * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data. Without facilityId, resumes the in-progress, not-yet-facility-created run; with it, resumes that specific facility's wizard run (TEN-008 "Add facility" re-entry).
+
  */
+export const GetWizardProgressQueryParams = zod.object({
+  "facilityId": zod.coerce.number().optional()
+})
+
 export const GetWizardProgressResponse = zod.union([zod.object({
+  "facilityId": zod.number().nullable(),
   "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
   "stepData": zod.record(zod.string(), zod.unknown())
 }),zod.null()])
@@ -1208,10 +1231,12 @@ export const GetWizardProgressResponse = zod.union([zod.object({
  */
 export const PutWizardProgressBody = zod.object({
   "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
-  "stepData": zod.record(zod.string(), zod.unknown()).optional()
+  "stepData": zod.record(zod.string(), zod.unknown()).optional(),
+  "facilityId": zod.number().optional()
 })
 
 export const PutWizardProgressResponse = zod.object({
+  "facilityId": zod.number().nullable(),
   "currentStep": zod.enum(['farm_basics', 'layout', 'sensors_accounts', 'sensors_devices', 'sensors_review', 'done']),
   "stepData": zod.record(zod.string(), zod.unknown())
 })

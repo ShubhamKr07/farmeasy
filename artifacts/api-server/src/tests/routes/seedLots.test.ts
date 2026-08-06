@@ -91,7 +91,7 @@ describe("seed_lots per-facility qr_code scoping", { skip: !dbUrl }, () => {
     ok(facilityB.id !== facilityAId, "facility B must be distinct from facility A");
 
     return {
-      app: createAuthenticatedTestApp(seedLots.default),
+      app: createAuthenticatedTestApp(seedLots.default, DEFAULT_TEST_USER, facilityAId),
       db,
       seedLotsTable,
       facilityA: { id: facilityAId },
