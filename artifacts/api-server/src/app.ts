@@ -111,27 +111,83 @@ app.use("/api", accountingPublicRouter);
 
 // Everything else requires a signed-in Clerk session (S1/S2). Per-route
 // `enforceAuth` handlers in cycles/media remain as defense-in-depth.
+//
+// ORDERING MATTERS HERE. Express's `app.use(path, mw1, mw2, router)` runs
+// `mw1`/`mw2` for EVERY request whose path matches `path` (a prefix match)
+// that reaches that point in the stack -- not just requests `router` itself
+// would actually handle. Every mount below shares the same "/api" prefix, so
+// it matches every request. When a router has no matching internal route it
+// calls `next()` and falls through to the NEXT `app.use(...)` in
+// registration order -- but a short-circuiting middleware (like
+// `requireTenantContext`, which sends a 400 instead of calling `next()`)
+// already ran unconditionally before that happened, for a router it wasn't
+// even mounted for. A request destined for a LATER router mounted with a
+// *weaker* gate (or none) can therefore get intercepted and rejected by an
+// EARLIER router's stronger gate -- this broke first-time onboarding
+// (`POST /facilities` et al.) for any brand-new user whose request happened
+// to fall through an earlier alerts/inventory/shipments/... mount first.
+// The exact same hazard applies to a router's OWN internal `router.use(mw)`
+// (no path) -- it too runs unconditionally for every request that reaches
+// that router's mount, matched route or not (verified directly: an
+// unrelated, later-mounted router's request got a 400 from an earlier
+// router's unrelated `router.use(requireTenantContext)`), so a self-gating
+// router is just as capable of blocking a *different*, later-mounted router
+// as an app.ts-level gate is.
+//
+// The fix orders every mount into three tiers, each strictly before the
+// next, so nothing later can ever be intercepted by something earlier:
+//
+//   1. Genuinely ungated, or gated only PER-ROUTE (a route-specific
+//      middleware arg, e.g. `router.get("/x", requireTenantContext, ...)` in
+//      growthProfiles.ts/seedLots.ts) -- a per-route gate only ever runs once
+//      that specific route has already matched, so it can never intercept a
+//      request meant for another router. Safe anywhere; order among these
+//      doesn't matter.
+//   2. Self-gates via an unconditional `router.use(requireTenantContext)`
+//      inside the router file itself (cycles.ts, facility-readiness.ts) --
+//      this behaves exactly like an app.ts-level gate (see above), so it
+//      must come after every tier-1 router but before tier 3.
+//   3. Relies entirely on app.ts's own `requireTenantContext` wrap in its
+//      mount call (alerts, inventory, shipments, badTrays, sensors, tasks,
+//      metrics, accounting, facilityLogs) -- these never self-gate, so
+//      nothing here may sit before an ungated/per-route-gated router.
+//
+// When adding a new router mount, place it in the earliest tier that
+// applies -- never interleave a later tier ahead of an earlier one.
+
+// Tier 1: ungated, or gated per-route only.
 app.use("/api", requireSignedIn, dashboardRouter);
+app.use("/api", requireSignedIn, layoutRouter);
+app.use("/api", requireSignedIn, sensorReadingsRouter);
+app.use("/api", requireSignedIn, cropsRouter);
+app.use("/api", requireSignedIn, userSettingsRouter);
+app.use("/api", requireSignedIn, recommendRouter);
+app.use("/api", requireSignedIn, facilitiesRouter);
+app.use("/api", requireSignedIn, wizardRouter);
+app.use("/api", requireSignedIn, sensorAccountsRouter);
+app.use("/api", requireSignedIn, wizardEventsRouter);
+
+// Tier 2: self-gate internally via router.use(requireTenantContext) --
+// behaves like an app.ts-level gate, so must follow all of tier 1.
+app.use("/api", requireSignedIn, requireTenantContext, cyclesRouter); // requireTenantContext here is redundant with cycles.ts's own router.use(requireTenantContext), kept as-is per the no-gate-changes scope of this fix
+app.use("/api", requireSignedIn, facilityReadinessRouter); // self-gates via router.use(requireTenantContext); no app.ts-level wrap
+
+// Tier 3: rely entirely on app.ts's own requireTenantContext wrap.
 app.use("/api", requireSignedIn, requireTenantContext, alertsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, inventoryRouter);
 app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
-app.use("/api", requireSignedIn, requireTenantContext, cyclesRouter);
-app.use("/api", requireSignedIn, layoutRouter);
 app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
-app.use("/api", requireSignedIn, sensorReadingsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
-app.use("/api", requireSignedIn, cropsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
-app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
-app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
-app.use("/api", requireSignedIn, facilitiesRouter);
-app.use("/api", requireSignedIn, wizardRouter);
-app.use("/api", requireSignedIn, sensorAccountsRouter);
-app.use("/api", requireSignedIn, facilityReadinessRouter);
-app.use("/api", requireSignedIn, wizardEventsRouter);
+
+// Generic catch-all router (growthProfiles/seedLots, both gated per-route
+// only -- tier 1 in substance; health/dashboard/layout/media re-mounted
+// here too). Kept last as ordinary Express convention (most-specific-first)
+// since it's the catch-all, not because it needs to be -- it carries no
+// app.ts-level requireTenantContext and would be equally safe in tier 1.
 app.use("/api", requireSignedIn, router);
 
 export default app;
