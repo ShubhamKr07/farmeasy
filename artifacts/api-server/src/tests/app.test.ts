@@ -254,4 +254,80 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
       `expected media.ts's own handler to be reached, not an earlier tenant gate: ${JSON.stringify(res.body)}`,
     );
   });
+
+  // TEN-010 Task 9: invitations.ts/members.ts are tier-2 self-gating routers
+  // (router.use(requireTenantContext, requireRole("owner","admin")) inside the
+  // router file itself) and invitationsAccept.ts is deliberately PUBLIC (no
+  // requireSignedIn at all -- the invitee has no session yet). These three
+  // cases drive the REAL app stack to prove both halves actually hold: the
+  // self-mounted requireRole gate rejects a non-owner/admin caller, an
+  // owner/admin caller succeeds, and the accept endpoint is reachable with NO
+  // Authorization header whatsoever (the regression guard for the plan
+  // correction that moved it out of the requireSignedIn group).
+  test("owner JWT with X-Facility-Id: POST /api/invitations succeeds (201) through the real app -- self-mounted requireTenantContext+requireRole gate lets owner/admin through", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    const { facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: user.userId, email: user.email },
+      { farmName: "Invitations Regression Farm (owner)", memberRole: "owner" },
+    );
+
+    const previousTransport = process.env.EMAIL_TRANSPORT;
+    process.env.EMAIL_TRANSPORT = "record"; // avoid a real network call to Resend
+
+    try {
+      const res = await request(app)
+        .post("/api/invitations")
+        .set("Authorization", `Bearer ${user.accessToken}`)
+        .set("X-Facility-Id", String(facilityId))
+        .send({ email: `invitee-${randomUUID()}@app-test.example.com`, role: "technician" });
+
+      strictEqual(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+    } finally {
+      if (previousTransport === undefined) delete process.env.EMAIL_TRANSPORT;
+      else process.env.EMAIL_TRANSPORT = previousTransport;
+    }
+  });
+
+  test("technician JWT with X-Facility-Id: POST /api/invitations is rejected 403 ROLE_FORBIDDEN through the real app -- proves the self-mounted requireRole gate works through the real app stack, not just invitations.ts's own standalone-app test", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    const { facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: user.userId, email: user.email },
+      { farmName: "Invitations Regression Farm (technician)", memberRole: "technician" },
+    );
+
+    const res = await request(app)
+      .post("/api/invitations")
+      .set("Authorization", `Bearer ${user.accessToken}`)
+      .set("X-Facility-Id", String(facilityId))
+      .send({ email: `invitee-${randomUUID()}@app-test.example.com`, role: "technician" });
+
+    strictEqual(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
+    strictEqual(res.body.code, "ROLE_FORBIDDEN", `expected code ROLE_FORBIDDEN: ${JSON.stringify(res.body)}`);
+  });
+
+  test("POST /api/invitations/accept with NO Authorization header at all is NOT 401 -- proves it's mounted PUBLIC, not behind requireSignedIn (the plan-correction regression guard: if this were mounted behind requireSignedIn like the plan brief originally specified, a brand-new invitee with no account yet could never reach it, and this would 401 instead of 400)", async () => {
+    const res = await request(app)
+      .post("/api/invitations/accept")
+      .send({ token: "bogus-invalid-token", password: "irrelevant-but-8-chars" });
+
+    strictEqual(
+      res.status,
+      400,
+      `expected 400 (invalid token, reached the real handler), got ${res.status}: ${JSON.stringify(res.body)} -- a 401 here would mean requireSignedIn is (wrongly) gating this route`,
+    );
+  });
 });

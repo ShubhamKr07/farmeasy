@@ -26,6 +26,9 @@ import wizardRouter from "./routes/wizard";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
 import wizardEventsRouter from "./routes/wizard-events";
+import invitationsRouter from "./routes/invitations";
+import invitationsAcceptRouter from "./routes/invitationsAccept";
+import membersRouter from "./routes/members";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
 import { resolveTrustProxy } from "./lib/trustProxy";
@@ -105,9 +108,13 @@ function requireSignedIn(req: Request, res: Response, next: NextFunction) {
 }
 
 // Public: health check + QuickBooks OAuth callback (Intuit redirects the
-// browser here directly; can't carry our Bearer-token auth — see accounting.ts).
+// browser here directly; can't carry our Bearer-token auth — see accounting.ts)
+// + POST /invitations/accept (TEN-010 T6: the invitee has no session yet —
+// they're POSTing {token, password} to CREATE their account, so this must NOT
+// sit behind requireSignedIn; see invitationsAccept.ts's own doc comment).
 app.use("/api", healthRouter);
 app.use("/api", accountingPublicRouter);
+app.use("/api", invitationsAcceptRouter);
 
 // Everything else requires a signed-in Clerk session (S1/S2). Per-route
 // `enforceAuth` handlers in cycles/media remain as defense-in-depth.
@@ -134,7 +141,7 @@ app.use("/api", accountingPublicRouter);
 // router is just as capable of blocking a *different*, later-mounted router
 // as an app.ts-level gate is.
 //
-// The fix orders every mount into three tiers, each strictly before the
+// The fix orders every mount into FOUR tiers, each strictly before the
 // next, so nothing later can ever be intercepted by something earlier:
 //
 //   1. Genuinely ungated, or gated only PER-ROUTE (a route-specific
@@ -144,17 +151,38 @@ app.use("/api", accountingPublicRouter);
 //      a per-route (or absent) gate only ever runs once that specific route
 //      has already matched, so it can never intercept a request meant for
 //      another router. Safe anywhere; order among these doesn't matter.
-//   2. Self-gates via an unconditional `router.use(requireTenantContext)`
-//      inside the router file itself (cycles.ts, facility-readiness.ts) --
-//      this behaves exactly like an app.ts-level gate (see above), so it
-//      must come after every tier-1 router but before tier 3.
+//
+//      NOTE: invitationsAccept.ts (TEN-010 T6, `POST /invitations/accept`) is
+//      mounted even earlier than this, as fully PUBLIC (alongside
+//      healthRouter/accountingPublicRouter, with no `requireSignedIn` at
+//      all) -- the invitee has no session yet, so it can't be tier 1 either.
+//   2. Self-gates TENANT CONTEXT ONLY via an unconditional
+//      `router.use(requireTenantContext)` inside the router file itself
+//      (cycles.ts, facility-readiness.ts) -- this behaves exactly like an
+//      app.ts-level `requireTenantContext` wrap (see above), so it must come
+//      after every tier-1 router but before tier 3. Crucially, this gate
+//      rejects nothing that a signed-in tenant member of ANY role wouldn't
+//      already be rejected for, so it's safe to sit ahead of every other
+//      router in tiers 3-4.
 //   3. Relies entirely on app.ts's own `requireTenantContext` wrap in its
 //      mount call (alerts, inventory, shipments, badTrays, sensors, tasks,
 //      metrics, accounting, facilityLogs) -- these never self-gate, so
 //      nothing here may sit before an ungated/per-route-gated router.
+//   4. Self-gates TENANT CONTEXT **+ A RESTRICTIVE ROLE** via an
+//      unconditional `router.use(requireTenantContext, requireRole(...))`
+//      inside the router file itself (invitations.ts [TEN-010 T5], members.ts
+//      [TEN-010 T7], both owner/admin-only). This is NOT interchangeable with
+//      tier 2 even though both "self-gate": a role-restrictive self-gate 403s
+//      a valid tenant member (e.g. a technician) who has every right to reach
+//      a DIFFERENT, later-mounted router -- tried mounting these in tier 2
+//      and verified broken (a technician's `GET /api/alerts` came back 403
+//      ROLE_FORBIDDEN, intercepted before ever reaching alertsRouter). So
+//      tier 4 must come after EVERY router any non-owner/admin tenant member
+//      is allowed to reach -- i.e. after all of tiers 1-3, not just tier 1.
 //
-// When adding a new router mount, place it in the earliest tier that
-// applies -- never interleave a later tier ahead of an earlier one.
+// When adding a new router mount: if it self-gates on a RESTRICTIVE ROLE (not
+// just tenant context), it belongs in tier 4, last -- never interleave it
+// ahead of tiers 1-3. Otherwise, place it in the earliest tier that applies.
 
 // Tier 1: ungated, or gated per-route only.
 app.use("/api", requireSignedIn, dashboardRouter);
@@ -200,5 +228,27 @@ app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
 app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
 app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
+
+// Tier 4: self-gate internally via router.use(requireTenantContext,
+// requireRole("owner","admin")) (TEN-010 invitations.ts/members.ts). This is
+// NOT the same hazard class as tier 2's self-gates: tier 2's
+// requireTenantContext-only self-gate rejects nothing that a legitimate
+// signed-in tenant member (any role) shouldn't already be rejected for, so it
+// only needed to sit after tier 1. A requireRole("owner","admin") self-gate is
+// stricter -- it 403s a valid technician who has every right to reach a
+// DIFFERENT, later-mounted router. Placing invitations/members in tier 2
+// (immediately after facility-readiness, before tier 3) was tried and
+// verified broken: a technician's `GET /api/alerts` came back 403
+// ROLE_FORBIDDEN instead of 200, because invitations.ts's unconditional
+// `router.use(requireRole(...))` -- which runs for every request that reaches
+// that mount point, matched by this router or not, per the ordering hazard
+// documented above -- intercepted it before alertsRouter ever ran. So these
+// two must come after EVERY router any non-owner/admin tenant member (i.e.
+// any technician) is allowed to reach -- that's all of tier 1, 2, AND 3.
+// Their own routes (/invitations, /members) don't collide with any earlier
+// router's paths, so nothing here is ever itself shadowed by an earlier
+// mount.
+app.use("/api", requireSignedIn, invitationsRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
+app.use("/api", requireSignedIn, membersRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
 
 export default app;
