@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { type UserRole, USER_ROLE_LABELS, isSupervisorOrLead } from "@workspace/api-zod";
+import { type UserRole, USER_ROLE_LABELS, isPrivileged } from "@workspace/api-zod";
 
 export type { UserRole };
 
 // Reads the custom `user_role` claim Task 1's auth hook injects into the JWT
-// (supabase/migrations/00001_custom_access_token_hook.sql). getClaims()
+// (supabase/migrations/00001_custom_access_token_hook.sql), repointed in
+// TEN-010 Task 8 from the deprecated operational axis
+// (technician|supervisor|quality_lead|facility_lead) to the org membership
+// role (owner|admin|technician) — the single source of truth. getClaims()
 // verifies the JWT locally and is the supported claims API; getSession()'s
 // claim access relied on an unchecked `as any` cast into session shape that
 // Supabase never actually guaranteed. Absent claim defaults to technician,
@@ -19,7 +22,7 @@ export async function getUserRole(): Promise<UserRole> {
 export function useUserRole(): {
   role: UserRole;
   label: string;
-  isSupervisor: boolean;
+  isPrivileged: boolean;
 } {
   const [role, setRole] = useState<UserRole>("technician");
 
@@ -30,6 +33,6 @@ export function useUserRole(): {
   return {
     role,
     label: USER_ROLE_LABELS[role] ?? "Technician",
-    isSupervisor: isSupervisorOrLead(role),
+    isPrivileged: isPrivileged(role),
   };
 }
