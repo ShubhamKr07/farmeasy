@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
-import { db, organizationMembersTable, usersTable } from "@workspace/db";
+import { organizationMembersTable, usersTable, withTenantScope } from "@workspace/db";
 import { requireTenantContext } from "../middlewares/tenantContext";
 import { requireRole } from "../middlewares/requireRole";
 
@@ -26,21 +26,23 @@ function paramUserId(req: Request): string {
 router.get("/members", async (req: Request, res: Response) => {
   try {
     const { organizationId } = req.tenant!;
-    const rows = await db
-      .select({
-        userId: organizationMembersTable.userId,
-        email: usersTable.email,
-        role: organizationMembersTable.role,
-        status: organizationMembersTable.status,
-      })
-      .from(organizationMembersTable)
-      .innerJoin(usersTable, eq(usersTable.id, organizationMembersTable.userId))
-      .where(
-        and(
-          eq(organizationMembersTable.organizationId, organizationId),
-          eq(organizationMembersTable.status, "active"),
+    const rows = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .select({
+          userId: organizationMembersTable.userId,
+          email: usersTable.email,
+          role: organizationMembersTable.role,
+          status: organizationMembersTable.status,
+        })
+        .from(organizationMembersTable)
+        .innerJoin(usersTable, eq(usersTable.id, organizationMembersTable.userId))
+        .where(
+          and(
+            eq(organizationMembersTable.organizationId, organizationId),
+            eq(organizationMembersTable.status, "active"),
+          ),
         ),
-      );
+    );
     return res.status(200).json(rows);
   } catch (err) {
     req.log.error(err);
@@ -56,18 +58,20 @@ router.patch("/members/:userId/role", async (req: Request, res: Response) => {
     const { organizationId } = req.tenant!;
     const parsed = RoleSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "role must be admin or technician" });
-    const [updated] = await db
-      .update(organizationMembersTable)
-      .set({ role: parsed.data.role })
-      .where(
-        and(
-          eq(organizationMembersTable.userId, paramUserId(req)),
-          eq(organizationMembersTable.organizationId, organizationId),
-          eq(organizationMembersTable.status, "active"),
-          ne(organizationMembersTable.role, "owner"), // owner is immutable
-        ),
-      )
-      .returning({ userId: organizationMembersTable.userId });
+    const [updated] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(organizationMembersTable)
+        .set({ role: parsed.data.role })
+        .where(
+          and(
+            eq(organizationMembersTable.userId, paramUserId(req)),
+            eq(organizationMembersTable.organizationId, organizationId),
+            eq(organizationMembersTable.status, "active"),
+            ne(organizationMembersTable.role, "owner"), // owner is immutable
+          ),
+        )
+        .returning({ userId: organizationMembersTable.userId }),
+    );
     if (!updated) return res.status(404).json({ error: "Member not found or not modifiable" });
     return res.status(200).json({ ok: true });
   } catch (err) {
@@ -80,18 +84,20 @@ router.patch("/members/:userId/role", async (req: Request, res: Response) => {
 router.delete("/members/:userId", async (req: Request, res: Response) => {
   try {
     const { organizationId } = req.tenant!;
-    const [updated] = await db
-      .update(organizationMembersTable)
-      .set({ status: "removed" })
-      .where(
-        and(
-          eq(organizationMembersTable.userId, paramUserId(req)),
-          eq(organizationMembersTable.organizationId, organizationId),
-          eq(organizationMembersTable.status, "active"),
-          ne(organizationMembersTable.role, "owner"),
-        ),
-      )
-      .returning({ userId: organizationMembersTable.userId });
+    const [updated] = await withTenantScope(req.tenant!, (tx) =>
+      tx
+        .update(organizationMembersTable)
+        .set({ status: "removed" })
+        .where(
+          and(
+            eq(organizationMembersTable.userId, paramUserId(req)),
+            eq(organizationMembersTable.organizationId, organizationId),
+            eq(organizationMembersTable.status, "active"),
+            ne(organizationMembersTable.role, "owner"),
+          ),
+        )
+        .returning({ userId: organizationMembersTable.userId }),
+    );
     if (!updated) return res.status(404).json({ error: "Member not found or not removable" });
     return res.status(200).json({ ok: true });
   } catch (err) {

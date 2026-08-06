@@ -84,11 +84,17 @@ SELECT is(
 -- policies to wrap current_setting(...) in NULLIF before casting to int --
 -- the placeholder GUC's empty-string resting state (once ever referenced on
 -- a pooled backend) otherwise throws instead of evaluating to false (Task 16
--- part 2).
+-- part 2). 00014 adds an additive current_user-scoped UPDATE policy on
+-- organization_members -- the invite-accept flow's membership UPSERT
+-- (invitationsAccept.ts, ungated) needs UPDATE for its re-join-after-removal
+-- conflict path, closing the last gap in the TEN-010 Task 7 review (T7 also
+-- rewired members.ts's GET/PATCH/DELETE onto withTenantScope, which needed
+-- no new policy since 00007's tenant-isolation policy already covers UPDATE
+-- once app.org_id is set).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  13,
-  'supabase_migrations.schema_migrations has exactly 13 rows (Supabase migrations 00001-00013)'
+  14,
+  'supabase_migrations.schema_migrations has exactly 14 rows (Supabase migrations 00001-00014)'
 );
 
 SELECT * FROM finish();
