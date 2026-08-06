@@ -17,6 +17,7 @@ import { useActiveFacility } from "@/hooks/useActiveFacility";
 import { AppShellProvider, useAppShell } from "@/context/AppShellContext";
 import AskMeFab from "@/components/AskMeFab";
 import HamburgerMenu from "@/components/HamburgerMenu";
+import { FacilityPickerScreen } from "@/components/FacilityPickerScreen";
 
 function NativeTabBar() {
   return (
@@ -117,7 +118,6 @@ function ClassicTabBar() {
 
 function AppShellHamburger() {
   const [session, setSession] = useState<Session | null>(null);
-  useActiveFacility(); // TEN-008: restores the persisted facility selection and wires setFacilityId at boot, regardless of whether the panel is open.
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -161,6 +161,29 @@ function TabShell() {
   );
 }
 
+/**
+ * TEN-008: `useActiveFacility()` lives here — a child mounted only once
+ * `TabLayout` has confirmed a session — rather than at `TabLayout`'s own
+ * top level. Mirrors admin-dashboard's `App.tsx`, where the equivalent hook
+ * is only ever called inside `FacilityGate`, itself only rendered after
+ * `AuthGate` confirms `session`. Calling it any earlier would mount the
+ * facilities query before the Supabase auth-token getter is wired up,
+ * sending the first request out unauthenticated.
+ */
+function AuthedTabLayout() {
+  const { facilities, needsPicker, selectFacility } = useActiveFacility();
+
+  if (needsPicker) {
+    return <FacilityPickerScreen facilities={facilities} onSelect={selectFacility} />;
+  }
+
+  return (
+    <AppShellProvider>
+      <TabShell />
+    </AppShellProvider>
+  );
+}
+
 export default function TabLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -185,9 +208,5 @@ export default function TabLayout() {
     return <Redirect href="/sign-in" />;
   }
 
-  return (
-    <AppShellProvider>
-      <TabShell />
-    </AppShellProvider>
-  );
+  return <AuthedTabLayout />;
 }
