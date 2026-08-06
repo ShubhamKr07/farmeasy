@@ -39,7 +39,7 @@ export function Wizard({
   onFacilityCreated,
 }: {
   facilityId: number | null;
-  onFacilityCreated: (newFacilityId: number) => void;
+  onFacilityCreated: (newFacilityId: number, organizationId: number) => void;
 }) {
   const { data: progress, isLoading } = useGetWizardProgress(
     facilityId !== null ? { facilityId } : undefined,
@@ -163,7 +163,7 @@ export function Wizard({
         <FarmBasics
           onSaved={(data) => {
             setCreatedFacilityId(data.facilityId);
-            onFacilityCreated(data.facilityId);
+            onFacilityCreated(data.facilityId, data.organizationId);
             advance();
           }}
         />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useListFacilities } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useListFacilities, getListFacilitiesQueryKey, FacilityUnits, type Facility } from "@workspace/api-client-react";
 import { setFacilityId } from "@workspace/api-client-react";
 
 const STORAGE_KEY = "farmsmart:activeFacilityId";
@@ -31,6 +32,7 @@ function readPersisted(): number | null {
  * brand-new facility instead of the active one.
  */
 export function useActiveFacility() {
+  const queryClient = useQueryClient();
   const { data: facilities, isLoading } = useListFacilities();
   const [activeFacilityId, setActiveFacilityId] = useState<number | null>(readPersisted());
   const [isAddingFacility, setIsAddingFacility] = useState(false);
@@ -61,7 +63,38 @@ export function useActiveFacility() {
   };
 
   const startAddFacility = () => setIsAddingFacility(true);
-  const finishAddFacility = (newFacilityId: number) => {
+
+  // Called the instant `POST /facilities` resolves (FarmBasics.tsx's
+  // onSaved, via Wizard.tsx), in the same render batch as advancing the
+  // wizard to the next step. `useListFacilities`'s cache is still the
+  // pre-creation list at this point — invalidateQueries would only trigger
+  // an async background refetch that resolves in a LATER render, so
+  // FacilityGate would still fail `facilities.find(f => f.id === newId)` on
+  // THIS render and fall through to <Router/>, unmounting the wizard before
+  // the refetch ever lands. Instead, write the new facility into the cache
+  // synchronously (React 18 batches this setQueryData-driven update together
+  // with the selectFacility state updates below into one render), so
+  // FacilityGate's very next render already sees it. Only `id` and
+  // `onboarded` matter for FacilityGate's own routing logic; the display
+  // fields are blank placeholders until the next real `useListFacilities`
+  // refetch (e.g. a later cache invalidation elsewhere) fills them in — an
+  // acceptable transient gap since nothing renders this facility's name
+  // before then.
+  const finishAddFacility = (newFacilityId: number, organizationId: number) => {
+    queryClient.setQueryData<Facility[]>(getListFacilitiesQueryKey(), (old) => {
+      if (old?.some((f) => f.id === newFacilityId)) return old;
+      const placeholder: Facility = {
+        id: newFacilityId,
+        organizationId,
+        name: "",
+        facilityName: "",
+        timezone: "",
+        units: FacilityUnits.metric,
+        currency: "",
+        onboarded: false,
+      };
+      return [...(old ?? []), placeholder];
+    });
     setIsAddingFacility(false);
     selectFacility(newFacilityId);
   };
