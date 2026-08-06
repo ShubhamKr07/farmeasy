@@ -89,10 +89,13 @@ export function Wizard({
   // exists yet the first time this mounts) — `hasLoadedOnce` instead just
   // means "isLoading has resolved to false at least once," set once and
   // never unset, same during-render-adjustment pattern as `resumed` above.
-  // Textually below the resume-effect block above, so on the very first load
-  // that block (guarded by `!hasLoadedOnce`, still false at that point) gets
-  // first crack at reading `progress` before this flag flips — genuine
-  // resume-from-reload is unaffected. Deliberately does NOT also force
+  // On the very first render pass, both this block and the resume-effect
+  // block above read `resumed`/`hasLoadedOnce` from the same pre-update
+  // values (both still false) — React's "adjust state during render" restart
+  // (state changed mid-render, so the whole function body re-runs once more
+  // before committing) is what lets the resume effect's setStep/setResumed
+  // land using the pre-flip values, not this block's own textual position.
+  // Genuine resume-from-reload is unaffected. Deliberately does NOT also force
   // `resumed = true` unconditionally here — doing so would make
   // `showResumeBanner` (`resumed && progress?.currentStep === step`) collapse
   // to just `progress?.currentStep === step`, which the wizard's own PUT
