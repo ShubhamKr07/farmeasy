@@ -5,39 +5,43 @@ import { calcDaysOverdue, generateShortId, seedingWeight } from "./utils.js";
 // ── calcDaysOverdue ───────────────────────────────────────────────────────────
 
 describe("calcDaysOverdue", () => {
+  // A single pinned reference instant for every boundary case below. The
+  // function reads `now` from this argument instead of its own Date.now(), so
+  // "exactly on the due date" is genuinely exact (no double-Date.now() race —
+  // see the note on calcDaysOverdue itself).
+  const NOW = Date.now();
+
   it("returns null when startedAt is null", () => {
-    assert.strictEqual(calcDaysOverdue(null, 10), null);
+    assert.strictEqual(calcDaysOverdue(null, 10, NOW), null);
   });
 
   it("returns null when due date is in the future", () => {
-    const startedAt = new Date(Date.now() - 5 * 864e5); // 5 days ago
-    assert.strictEqual(calcDaysOverdue(startedAt, 10), null); // due in 5 more days
+    const startedAt = new Date(NOW - 5 * 864e5); // 5 days ago
+    assert.strictEqual(calcDaysOverdue(startedAt, 10, NOW), null); // due in 5 more days
   });
 
   it("returns null when exactly on the due date", () => {
-    const startedAt = new Date(Date.now() - 10 * 864e5); // exactly 10 days ago
-    assert.strictEqual(calcDaysOverdue(startedAt, 10), null);
+    const startedAt = new Date(NOW - 10 * 864e5); // exactly 10 days ago → dueMs === NOW
+    assert.strictEqual(calcDaysOverdue(startedAt, 10, NOW), null);
   });
 
   it("returns correct overdue days when past due", () => {
-    const startedAt = new Date(Date.now() - 15 * 864e5); // 15 days ago, period=10 → 5 overdue
-    const result = calcDaysOverdue(startedAt, 10);
-    assert.ok(result !== null);
-    assert.ok(result >= 4 && result <= 5, `expected ~5 overdue days, got ${result}`);
+    const startedAt = new Date(NOW - 15 * 864e5); // 15 days ago, period=10 → 5 overdue
+    const result = calcDaysOverdue(startedAt, 10, NOW);
+    assert.strictEqual(result, 5);
   });
 
-  it("returns 0 days overdue when 1ms past due", () => {
+  it("returns 0 days overdue when 1s past due", () => {
     // just over due — floors to 0
-    const startedAt = new Date(Date.now() - 10 * 864e5 - 1000);
-    const result = calcDaysOverdue(startedAt, 10);
+    const startedAt = new Date(NOW - 10 * 864e5 - 1000);
+    const result = calcDaysOverdue(startedAt, 10, NOW);
     assert.strictEqual(result, 0);
   });
 
   it("handles large overdue values correctly", () => {
-    const startedAt = new Date(Date.now() - 100 * 864e5); // 100 days ago, period=10 → 90 overdue
-    const result = calcDaysOverdue(startedAt, 10);
-    assert.ok(result !== null);
-    assert.ok(result >= 89 && result <= 90);
+    const startedAt = new Date(NOW - 100 * 864e5); // 100 days ago, period=10 → 90 overdue
+    const result = calcDaysOverdue(startedAt, 10, NOW);
+    assert.strictEqual(result, 90);
   });
 });
 
