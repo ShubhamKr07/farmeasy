@@ -196,5 +196,5 @@ if (newViolations.length > 0) {
 }
 
 console.log(
-  `check-tenant-scope: clean (${SCOPED_TABLES.length} scoped tables checked, 0 new violations, ${baselineViolations.length} known baseline items deferred to MT-M1)`,
+  `check-tenant-scope: clean (${SCOPED_TABLES.length} scoped tables checked, 0 new violations, ${baselineViolations.length} known baseline items -- deferred MT-M1 debt or TEN-008's permanent bootstrap-lookup exceptions, see BASELINE_VIOLATIONS above)`,
 );
