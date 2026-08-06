@@ -6,6 +6,7 @@ import {
   requireTestDatabaseUrl,
   useDatabaseFixture,
   seedTestUser,
+  seedTenantContext,
   closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
 
@@ -25,48 +26,49 @@ import {
  * the router and `@workspace/db` are imported lazily inside `setup()` so this
  * file loads (and skips cleanly) even when no test database is configured.
  *
- * The handler resolves the signed-in user's facility via
- * `usersTable.organizationId -> facilitiesTable.organizationId` (same pattern
- * as facilities.ts/sensor-accounts.ts) and 409s "No facility yet" otherwise —
- * `setup()` seeds an organization, a facility, and a `users` row linking
- * `DEFAULT_TEST_USER.sub` to that organization so requests reach the code
- * under test instead of 409ing up front.
+ * TEN-008: the route is now scoped to `req.tenant.facilityId`, resolved by
+ * `requireTenantContext`/`resolveTenantContext` from an `organization_members`
+ * row + the client-sent `X-Facility-Id` header — not "the org's one facility"
+ * anymore. `setup()` uses `seedTenantContext` (same helper/pattern as
+ * tasks.test.ts/shipments.test.ts) to seed an organization, a facility, and an
+ * active `organization_members` row linking `DEFAULT_TEST_USER.sub` to that
+ * org, then passes the resulting `facilityId` as `createAuthenticatedTestApp`'s
+ * third argument so the test double attaches it as `X-Facility-Id`. Tests for
+ * "no facility yet" seed a user with no membership at all and omit the
+ * `facilityId` argument, so no `X-Facility-Id` header is sent and
+ * `requireTenantContext` 400s before the handler ever runs.
  */
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
   // Only `facility_readiness_events` is truncated. `facilities`/`organizations`/
-  // `users` are shared reference tables the FK graph now fans out through
-  // (TRUNCATE ... CASCADE would destroy every cycles/inventory_items/alerts/
-  // tasks/shipments/... row plus the pilot-default facility other suites
-  // resolve via `ORDER BY id LIMIT 1`). Every setup() here creates its own
-  // fresh org+facility and every assertion is keyed off that returned id or
-  // the signed-in test user's own organizationId (reset per-call by
-  // seedTestUser) — never off these tables being globally empty.
+  // `users`/`organization_members` are shared reference tables the FK graph now
+  // fans out through (TRUNCATE ... CASCADE would destroy every cycles/
+  // inventory_items/alerts/tasks/shipments/... row plus the pilot-default
+  // facility other suites resolve via `ORDER BY id LIMIT 1`). Every setup()
+  // here creates its own fresh org+facility+membership and every assertion is
+  // keyed off that returned facilityId — never off these tables being globally
+  // empty.
   const fixture = useDatabaseFixture(["facility_readiness_events"]);
 
   async function setup() {
     const facilityReadiness = await import("../../routes/facility-readiness");
-    const { db, organizationsTable, facilitiesTable, usersTable } = await import("@workspace/db");
-    const [org] = await db.insert(organizationsTable).values({ name: "Sunrise Greens" }).returning();
-    const [facility] = await db
-      .insert(facilitiesTable)
-      .values({
-        name: "Sunrise Greens",
-        organizationId: org.id,
-        facilityName: "Sunrise Greens",
-        timezone: "UTC",
-        units: "metric",
-        currency: "USD",
-      })
-      .returning();
-    await seedTestUser(db, usersTable, {
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      organizationId: org.id,
-    });
-    return { app: createAuthenticatedTestApp(facilityReadiness.default), db, org, facility };
+    const { db, organizationsTable, facilitiesTable, usersTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    const { organizationId, facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      { farmName: "Sunrise Greens", facilityName: "Sunrise Greens" },
+    );
+    return {
+      app: createAuthenticatedTestApp(facilityReadiness.default, DEFAULT_TEST_USER, facilityId),
+      db,
+      organizationId,
+      facilityId,
+    };
   }
 
   test("completedCount always equals the number of done items", async () => {
@@ -106,37 +108,33 @@ describe("GET /api/facility-readiness", { skip: !dbUrl }, () => {
     const app = createAuthenticatedTestApp(facilityReadiness.default);
 
     const res = await request(app).get("/api/facility-readiness");
-    strictEqual(res.status, 409);
+    strictEqual(res.status, 400);
   });
 });
 
 describe("POST /api/facility-readiness/events", { skip: !dbUrl }, () => {
   // See the GET describe above: only `facility_readiness_events` is
-  // truncated; the org/facility/user tables are shared reference data that
-  // must survive across suites.
+  // truncated; the org/facility/user/membership tables are shared reference
+  // data that must survive across suites.
   const fixture = useDatabaseFixture(["facility_readiness_events"]);
 
   async function setup() {
     const facilityReadiness = await import("../../routes/facility-readiness");
-    const { db, organizationsTable, facilitiesTable, usersTable } = await import("@workspace/db");
-    const [org] = await db.insert(organizationsTable).values({ name: "Sunrise Greens" }).returning();
-    const [facility] = await db
-      .insert(facilitiesTable)
-      .values({
-        name: "Sunrise Greens",
-        organizationId: org.id,
-        facilityName: "Sunrise Greens",
-        timezone: "UTC",
-        units: "metric",
-        currency: "USD",
-      })
-      .returning();
-    await seedTestUser(db, usersTable, {
-      id: DEFAULT_TEST_USER.sub,
-      email: "test-user@example.com",
-      organizationId: org.id,
-    });
-    return { app: createAuthenticatedTestApp(facilityReadiness.default), db, org, facility };
+    const { db, organizationsTable, facilitiesTable, usersTable, organizationMembersTable } = await import(
+      "@workspace/db"
+    );
+    const { organizationId, facilityId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+      { farmName: "Sunrise Greens", facilityName: "Sunrise Greens" },
+    );
+    return {
+      app: createAuthenticatedTestApp(facilityReadiness.default, DEFAULT_TEST_USER, facilityId),
+      db,
+      organizationId,
+      facilityId,
+    };
   }
 
   test("rejects an invalid eventKey", async () => {
@@ -176,6 +174,6 @@ describe("POST /api/facility-readiness/events", { skip: !dbUrl }, () => {
     const app = createAuthenticatedTestApp(facilityReadiness.default);
 
     const res = await request(app).post("/api/facility-readiness/events").send({ eventKey: "team_invited" });
-    strictEqual(res.status, 409);
+    strictEqual(res.status, 400);
   });
 });
