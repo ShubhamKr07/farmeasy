@@ -19,7 +19,7 @@ const farmBasicsSchema = z.object({
 });
 type FarmBasicsValues = z.infer<typeof farmBasicsSchema>;
 
-export function FarmBasics({ onSaved }: { onSaved: () => void }) {
+export function FarmBasics({ onSaved }: { onSaved: (data: { facilityId: number; organizationId: number }) => void }) {
   const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const createFacility = useCreateFacility();
 
@@ -32,7 +32,7 @@ export function FarmBasics({ onSaved }: { onSaved: () => void }) {
     createFacility.mutate(
       { data: { ...values, facilityName: values.facilityName || values.farmName } },
       {
-        onSuccess: onSaved,
+        onSuccess: (data) => onSaved(data),
         onError: (err) => {
           // 409 = user already has a facility (double-submit or a stale wizard
           // session) — distinct, actionable message. Anything else: generic

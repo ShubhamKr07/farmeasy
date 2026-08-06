@@ -34,11 +34,20 @@ type WizardStep = (typeof STEP_ORDER)[number];
  * in place of the normal dashboard `<Router/>` whenever the signed-in user
  * has no facility yet.
  */
-export function Wizard() {
-  const { data: progress, isLoading } = useGetWizardProgress();
+export function Wizard({
+  facilityId,
+  onFacilityCreated,
+}: {
+  facilityId: number | null;
+  onFacilityCreated: (newFacilityId: number) => void;
+}) {
+  const { data: progress, isLoading } = useGetWizardProgress(
+    facilityId !== null ? { facilityId } : undefined,
+  );
   const [step, setStep] = useState<WizardStep>("farm_basics");
   const [resumed, setResumed] = useState(false);
   const [addedDevices, setAddedDevices] = useState<AddedDevice[]>([]);
+  const [createdFacilityId, setCreatedFacilityId] = useState<number | null>(facilityId);
   const postEvent = usePostWizardEvent();
   const putProgress = usePutWizardProgress();
   const postReadinessEvent = usePostFacilityReadinessEvent();
@@ -81,7 +90,7 @@ export function Wizard() {
   // first load after a resume is harmless (same value written back).
   useEffect(() => {
     if (isLoading) return;
-    putProgress.mutate({ data: { currentStep: step } });
+    putProgress.mutate({ data: { currentStep: step, facilityId: createdFacilityId ?? undefined } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isLoading]);
 
@@ -150,7 +159,15 @@ export function Wizard() {
         )}
       </header>
       {showResumeBanner && <ResumeBanner />}
-      {step === "farm_basics" && <FarmBasics onSaved={advance} />}
+      {step === "farm_basics" && (
+        <FarmBasics
+          onSaved={(data) => {
+            setCreatedFacilityId(data.facilityId);
+            onFacilityCreated(data.facilityId);
+            advance();
+          }}
+        />
+      )}
       {step === "layout" && <LayoutGrid onSaved={advance} />}
       {step === "sensors_accounts" && <VendorAccounts onSaved={advance} onSkipAll={skipToDone} />}
       {step === "sensors_devices" && (
