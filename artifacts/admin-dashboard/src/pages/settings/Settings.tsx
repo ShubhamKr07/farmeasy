@@ -16,6 +16,8 @@ import { Settings as SettingsIcon, Wifi, WifiOff, Server, LogOut } from "lucide-
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { QuickBooksCard } from "@/pages/onboarding/steps/done/QuickBooksCard";
+import { TeamSection } from "@/pages/settings/team/TeamSection";
+import { useOrgRole } from "@/hooks/use-org-role";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -65,6 +67,7 @@ export function Settings() {
   const health = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30_000 } });
   const { data: readiness } = useGetFacilityReadiness();
   const queryClient = useQueryClient();
+  const role = useOrgRole();
   const postEvent = usePostFacilityReadinessEvent();
 
   const coreItemsDone = readiness ? readiness.items.slice(0, 4).every((i) => i.state === "done") : false;
@@ -170,6 +173,8 @@ export function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      {(role === "owner" || role === "admin") && <TeamSection />}
 
       {coreItemsDone && (
         <Card className="shadow-sm max-w-md">
