@@ -67,7 +67,7 @@ export function Settings() {
   const health = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30_000 } });
   const { data: readiness } = useGetFacilityReadiness();
   const queryClient = useQueryClient();
-  const role = useOrgRole();
+  const { role, loading: roleLoading } = useOrgRole();
   const postEvent = usePostFacilityReadinessEvent();
 
   const coreItemsDone = readiness ? readiness.items.slice(0, 4).every((i) => i.state === "done") : false;
@@ -174,7 +174,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      {(role === "owner" || role === "admin") && <TeamSection />}
+      {!roleLoading && (role === "owner" || role === "admin") && <TeamSection />}
 
       {coreItemsDone && (
         <Card className="shadow-sm max-w-md">

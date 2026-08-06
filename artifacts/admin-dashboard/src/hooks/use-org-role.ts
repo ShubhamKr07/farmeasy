@@ -10,22 +10,35 @@ export type OrgRole = "owner" | "admin" | "technician";
  * the single source of truth per ADR-005 — so this is the ORG role, not the
  * deprecated per-facility operational role the hook used to carry.
  *
- * Returns `"owner" | "admin" | "technician"`, or `null` while the role is
- * still resolving (initial load, no session, no active membership, or a
- * `getClaims()` failure). Callers that gate UI on privilege MUST treat `null`
- * as "not privileged" (hide the surface) — never assume a default — since a
- * technician or an unresolved state must never flash a privileged UI. The
- * server-side 403 (requireRole) remains the real control; this is just the
- * directing UX layer.
+ * Returns `{ role, loading }` so callers can distinguish "still resolving the
+ * claim" from "resolved to no role":
+ *  - `loading === true`: the role is not yet known — the first `getClaims()`
+ *    resolution is still in flight (initial mount, before the claim round-trip
+ *    completes). Callers MUST NOT treat this as "technician" (that would flash
+ *    a false AUTH-003 denied screen for an owner/admin) nor as a privileged
+ *    role (that would flash a privileged UI). Render a loading state and gate
+ *    on `loading === false` before branching on `role`.
+ *  - `loading === false && role === null`: the claim resolved and there is
+ *    genuinely no active org membership / recognized role for this session
+ *    (signed-out, no active membership, or an unrecognized claim value).
+ *  - `loading === false && role === "owner" | "admin" | "technician"`: the
+ *    resolved org role.
  *
  * `supabase.auth.getClaims()` is async (it verifies the JWT — a cached JWKS
  * request when asymmetric signing is configured, else a round-trip like
  * getUser). We re-resolve on every auth state change so a fresh sign-in /
  * role change is reflected without a reload, matching the
- * `use-supabase-session` subscription pattern.
+ * `use-supabase-session` subscription pattern. `loading` is `true` only until
+ * the FIRST resolution completes; subsequent re-resolutions triggered by
+ * `onAuthStateChange` update `role` in place without flipping `loading` back
+ * (the hook already holds a resolved value to display in the meantime).
+ *
+ * The server-side 403 (requireRole) remains the real control; this is just
+ * the directing UX layer.
  */
-export function useOrgRole(): OrgRole | null {
+export function useOrgRole(): { role: OrgRole | null; loading: boolean } {
   const [role, setRole] = useState<OrgRole | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -40,6 +53,7 @@ export function useOrgRole(): OrgRole | null {
       setRole(
         value === "owner" || value === "admin" || value === "technician" ? value : null,
       );
+      setLoading(false);
     };
 
     void resolve();
@@ -53,5 +67,5 @@ export function useOrgRole(): OrgRole | null {
     };
   }, []);
 
-  return role;
+  return { role, loading };
 }
