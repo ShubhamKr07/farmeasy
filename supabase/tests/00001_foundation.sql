@@ -90,11 +90,16 @@ SELECT is(
 -- conflict path, closing the last gap in the TEN-010 Task 7 review (T7 also
 -- rewired members.ts's GET/PATCH/DELETE onto withTenantScope, which needed
 -- no new policy since 00007's tenant-isolation policy already covers UPDATE
--- once app.org_id is set).
+-- once app.org_id is set). 00015 repoints custom_access_token_hook's
+-- `user_role` JWT claim from the deprecated public.users.role (operational
+-- axis) to organization_members.role (owner|admin|technician, the single
+-- source of truth per ADR-005) for the caller's ACTIVE membership, omitting
+-- the claim entirely when no active membership exists, and grants
+-- supabase_auth_admin SELECT on organization_members (Task 8).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  14,
-  'supabase_migrations.schema_migrations has exactly 14 rows (Supabase migrations 00001-00014)'
+  15,
+  'supabase_migrations.schema_migrations has exactly 15 rows (Supabase migrations 00001-00015)'
 );
 
 SELECT * FROM finish();
