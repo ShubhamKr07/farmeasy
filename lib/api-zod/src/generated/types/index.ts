@@ -61,6 +61,7 @@ export * from './facilityReadinessItem';
 export * from './facilityReadinessItemState';
 export * from './facilityReadinessResponse';
 export * from './facilityUnits';
+export * from './getWizardProgressParams';
 export * from './growthProfile';
 export * from './healthStatus';
 export * from './inventoryItem';

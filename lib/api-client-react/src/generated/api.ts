@@ -59,6 +59,7 @@ import type {
   FacilityLog,
   FacilityLogRequest,
   FacilityReadinessResponse,
+  GetWizardProgressParams,
   GrowthProfile,
   HealthStatus,
   InventoryItem,
@@ -5193,7 +5194,7 @@ export const createFacility = async (createFacilityRequest: CreateFacilityReques
 
 
 
-export const getCreateFacilityMutationOptions = <TError = ErrorType<void>,
+export const getCreateFacilityMutationOptions = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext> => {
 
@@ -5222,12 +5223,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateFacilityMutationResult = NonNullable<Awaited<ReturnType<typeof createFacility>>>
     export type CreateFacilityMutationBody = BodyType<CreateFacilityRequest>
-    export type CreateFacilityMutationError = ErrorType<void>
+    export type CreateFacilityMutationError = ErrorType<unknown>
 
     /**
  * @summary W2 — create organization, facility, and the 3 index-1 rooms in one transaction
  */
-export const useCreateFacility = <TError = ErrorType<void>,
+export const useCreateFacility = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacility>>, TError,{data: BodyType<CreateFacilityRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createFacility>>,
@@ -5237,6 +5238,107 @@ export const useCreateFacility = <TError = ErrorType<void>,
       > => {
       return useMutation(getCreateFacilityMutationOptions(options), queryClient);
     }
+
+export const getListFacilitiesUrl = () => {
+
+
+
+
+  return `/api/facilities`
+}
+
+/**
+ * @summary The signed-in user's organization's full facility list (TEN-008 switcher)
+ */
+export const listFacilities = async ( options?: RequestInit): Promise<Facility[]> => {
+
+  return customFetch<Facility[]>(getListFacilitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilitiesQueryKey = () => {
+    return [
+    `/api/facilities`
+    ] as const;
+    }
+
+
+export const getListFacilitiesQueryOptions = <TData = Awaited<ReturnType<typeof listFacilities>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilities>>> = ({ signal }) => listFacilities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFacilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilities>>>
+export type ListFacilitiesQueryError = ErrorType<unknown>
+
+
+export function useListFacilities<TData = Awaited<ReturnType<typeof listFacilities>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFacilities>>,
+          TError,
+          Awaited<ReturnType<typeof listFacilities>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFacilities<TData = Awaited<ReturnType<typeof listFacilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFacilities>>,
+          TError,
+          Awaited<ReturnType<typeof listFacilities>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFacilities<TData = Awaited<ReturnType<typeof listFacilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The signed-in user's organization's full facility list (TEN-008 switcher)
+ */
+
+export function useListFacilities<TData = Awaited<ReturnType<typeof listFacilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFacilities>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFacilitiesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetMyFacilityUrl = () => {
 
@@ -5339,20 +5441,28 @@ export function useGetMyFacility<TData = Awaited<ReturnType<typeof getMyFacility
 
 
 
-export const getGetWizardProgressUrl = () => {
+export const getGetWizardProgressUrl = (params?: GetWizardProgressParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/wizard/progress`
+  return stringifiedParams.length > 0 ? `/api/wizard/progress?${stringifiedParams}` : `/api/wizard/progress`
 }
 
 /**
- * @summary Resume support — the signed-in user's current wizard step + saved draft data
- */
-export const getWizardProgress = async ( options?: RequestInit): Promise<WizardProgress | null> => {
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data. Without facilityId, resumes the in-progress, not-yet-facility-created run; with it, resumes that specific facility's wizard run (TEN-008 "Add facility" re-entry).
 
-  return customFetch<WizardProgress | null>(getGetWizardProgressUrl(),
+ */
+export const getWizardProgress = async (params?: GetWizardProgressParams, options?: RequestInit): Promise<WizardProgress | null> => {
+
+  return customFetch<WizardProgress | null>(getGetWizardProgressUrl(params),
   {
     ...options,
     method: 'GET'
@@ -5365,23 +5475,23 @@ export const getWizardProgress = async ( options?: RequestInit): Promise<WizardP
 
 
 
-export const getGetWizardProgressQueryKey = () => {
+export const getGetWizardProgressQueryKey = (params?: GetWizardProgressParams,) => {
     return [
-    `/api/wizard/progress`
+    `/api/wizard/progress`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetWizardProgressQueryOptions = <TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getGetWizardProgressQueryOptions = <TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<void>>(params?: GetWizardProgressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetWizardProgressQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetWizardProgressQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWizardProgress>>> = ({ signal }) => getWizardProgress({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWizardProgress>>> = ({ signal }) => getWizardProgress(params, { signal, ...requestOptions });
 
 
 
@@ -5391,11 +5501,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetWizardProgressQueryResult = NonNullable<Awaited<ReturnType<typeof getWizardProgress>>>
-export type GetWizardProgressQueryError = ErrorType<unknown>
+export type GetWizardProgressQueryError = ErrorType<void>
 
 
-export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<void>>(
+ params: undefined |  GetWizardProgressParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWizardProgress>>,
           TError,
@@ -5404,8 +5514,8 @@ export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizard
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<void>>(
+ params?: GetWizardProgressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getWizardProgress>>,
           TError,
@@ -5414,20 +5524,21 @@ export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizard
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<void>>(
+ params?: GetWizardProgressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Resume support — the signed-in user's current wizard step + saved draft data
+ * @summary Resume support — the signed-in user's current wizard step + saved draft data. Without facilityId, resumes the in-progress, not-yet-facility-created run; with it, resumes that specific facility's wizard run (TEN-008 "Add facility" re-entry).
+
  */
 
-export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<unknown>>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export function useGetWizardProgress<TData = Awaited<ReturnType<typeof getWizardProgress>>, TError = ErrorType<void>>(
+ params?: GetWizardProgressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWizardProgress>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetWizardProgressQueryOptions(options)
+  const queryOptions = getGetWizardProgressQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

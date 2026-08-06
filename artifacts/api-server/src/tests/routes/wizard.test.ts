@@ -1,5 +1,6 @@
 import { describe, test } from "node:test";
 import { strictEqual, ok } from "node:assert";
+import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { createAuthenticatedTestApp, DEFAULT_TEST_USER } from "../helpers/testApp";
@@ -12,10 +13,16 @@ import {
 
 /**
  * GET/PUT /wizard/progress (onboarding wizard Task 4, WIZ-001 resume
- * support). One row per user (unique index on `wizard_progress.user_id`):
- * GET returns null until the user has saved any progress; PUT upserts
- * `currentStep` + `stepData`, merging (not clobbering) `stepData` when a
- * caller only sends `currentStep` to advance the step.
+ * support; multi-facility support TEN-008 Task 7). Post-TEN-008, rows are
+ * keyed per (user_id, facility_id) — a composite unique index for real
+ * facilities, plus a partial unique index (`facility_id IS NULL`) for the
+ * one in-progress, not-yet-facility-created run a user can have at a time.
+ * GET without `?facilityId` resolves that null-facility row; GET with it
+ * resolves a specific facility's own row (re-entering "Add facility"). PUT
+ * upserts `currentStep` + `stepData`, merging (not clobbering) `stepData`
+ * when a caller only sends `currentStep` to advance the step, and — on the
+ * first PUT to supply `facilityId` — transitions the null-facility row into
+ * that facility's row in place (never a second insert).
  *
  * Gated on TEST_DATABASE_URL, same lazy-import pattern as facilities.test.ts.
  */
@@ -32,10 +39,20 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
   const fixture = useDatabaseFixture(["wizard_progress"]);
 
   async function setup() {
-    const wizard = await import("../../routes/wizard");
+    const wizardModule = await import("../../routes/wizard");
+    // TEN-008's PUT-facilityId tests below need to actually create a
+    // facility mid-test (via POST /facilities) on the SAME app instance, so
+    // the test app mounts both routers together — mirroring app.ts, which
+    // mounts both under `/api` too — rather than just the wizard router
+    // alone as before facilityId threading existed.
+    const facilitiesModule = await import("../../routes/facilities");
     const { db, usersTable, wizardProgressTable } = await import("@workspace/db");
+    const { Router } = await import("express");
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
-    return { app: createAuthenticatedTestApp(wizard.default), db, wizardProgressTable };
+    const combinedRouter = Router();
+    combinedRouter.use(facilitiesModule.default);
+    combinedRouter.use(wizardModule.default);
+    return { app: createAuthenticatedTestApp(combinedRouter), db, wizardProgressTable };
   }
 
   test("GET returns null when the user hasn't started the wizard yet", async () => {
@@ -158,5 +175,80 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
     strictEqual(rows.length, 1, "the unique userId index must still collapse both concurrent inserts to one row");
     const stepData = rows[0].stepData as Record<string, unknown>;
     ok(stepData.farmName, "draft's farmName must survive regardless of which concurrent insert wins the conflict");
+  });
+
+  // TEN-008 Task 7: the first PUT to supply facilityId must transition the
+  // existing null-facility row in place, not insert a second row. This is
+  // the exact behavior the onConflictDoUpdate `targetWhere` fix (see
+  // wizard.ts's comment above the upsert) exists to guarantee for the
+  // ordinary (non-concurrent) case; the UPDATE-first branch in the PUT
+  // handler is what actually transitions this specific row, since it's an
+  // UPDATE keyed on (userId, facility_id IS NULL), not an upsert at all.
+  test("PUT /wizard/progress: stamping facilityId on first supply transitions the null-facility row, not a new insert", async () => {
+    const { app, db, wizardProgressTable } = await setup();
+    await request(app).put("/api/wizard/progress").send({ currentStep: "farm_basics" });
+
+    const facilityRes = await request(app)
+      .post("/api/facilities")
+      .send({ farmName: "Stamp Test Farm", timezone: "UTC", units: "metric", currency: "USD" });
+    strictEqual(facilityRes.status, 201);
+    const facilityId = facilityRes.body.facilityId as number;
+
+    const putRes = await request(app)
+      .put("/api/wizard/progress")
+      .send({ currentStep: "layout", facilityId });
+    strictEqual(putRes.status, 200);
+    strictEqual(putRes.body.facilityId, facilityId);
+    strictEqual(putRes.body.currentStep, "layout");
+
+    const rows = await db.select().from(wizardProgressTable).where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
+    strictEqual(rows.length, 1, "the null-facility row must be transitioned in place, never a second row inserted");
+  });
+
+  test("GET /wizard/progress: with facilityId resumes that facility's own row, distinct from the in-progress (facility_id IS NULL) run", async () => {
+    const { app } = await setup();
+    await request(app).put("/api/wizard/progress").send({ currentStep: "farm_basics" });
+    const facilityRes = await request(app)
+      .post("/api/facilities")
+      .send({ farmName: "Resume Test Farm", timezone: "UTC", units: "metric", currency: "USD" });
+    const facilityId = facilityRes.body.facilityId as number;
+    await request(app).put("/api/wizard/progress").send({ currentStep: "done", facilityId });
+
+    // A brand-new "Add facility" run starts a second, unassigned row.
+    const newRunRes = await request(app).get("/api/wizard/progress");
+    strictEqual(newRunRes.status, 200);
+    strictEqual(newRunRes.body, null, "no in-progress unassigned run exists yet after the first one was stamped");
+
+    const resumeRes = await request(app).get("/api/wizard/progress").query({ facilityId });
+    strictEqual(resumeRes.status, 200);
+    strictEqual(resumeRes.body.currentStep, "done");
+  });
+
+  test("GET /wizard/progress: facilityId belonging to a different organization is a 400, not a leak", async () => {
+    const { app } = await setup();
+    const otherOrgUserId = randomUUID();
+    const { seedTenantContext } = await import("../helpers/testDatabase");
+    const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import("@workspace/db");
+    // seedTenantContext returns the facilityId it just created for this
+    // brand-new synthetic user/org — used directly rather than a bare
+    // `.limit(1)` off the shared, never-truncated `facilities` table (which
+    // also holds every facility this file's other tests, and other test
+    // files, have created — an unordered `.limit(1)` could return an
+    // arbitrary one of those instead of a genuinely different org's
+    // facility, the exact property this test claims to verify).
+    const seeded = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      // Email keyed off otherOrgUserId (not a fixed literal): auth.users has
+      // a unique index on email, and this table is never truncated between
+      // runs — a fixed literal here would collide on a re-run the same way
+      // cross-tenant.test.ts's known residue issue does. randomUUID() already
+      // makes otherOrgUserId unique per run, so folding it into the email
+      // keeps this test re-runnable without manual cleanup.
+      { id: otherOrgUserId, email: `other-org-${otherOrgUserId}@wizard-test.example.com` },
+    );
+
+    const res = await request(app).get("/api/wizard/progress").query({ facilityId: seeded.facilityId });
+    strictEqual(res.status, 400);
   });
 });
