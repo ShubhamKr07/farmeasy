@@ -262,4 +262,103 @@ describe("POST /invitations/accept", { skip: !canRun }, () => {
       "a rejected accept must revert the claim so the invite can still be used/reissued",
     );
   });
+
+  test("existing Supabase user, no membership, accepts without a password -> 201, creates active membership", async () => {
+    const { app, db, invitationsTable, organizationMembersTable, organizationId } = await setup();
+
+    // Seed a real Supabase auth user directly (not via seedTenantContext, so
+    // they have NO organization_members row yet -- exercising the
+    // existing-user / no-password branch of the handler).
+    const { createClient } = await import("@supabase/supabase-js");
+    const adminClient = createClient(supabaseUrl!, supabaseServiceRoleKey!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const email = `accept-existing-nopw-${randomUUID()}@example.com`;
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email,
+      password: "Sup3rSecret!123",
+      email_confirm: true,
+    });
+    ok(!error && data.user, "seed createUser should succeed");
+    createdAuthUserIds.push(data.user!.id);
+
+    const { raw } = await seedInvite(db, invitationsTable, {
+      organizationId,
+      email,
+      role: "admin",
+    });
+
+    const res = await request(app).post("/api/invitations/accept").send({ token: raw });
+    strictEqual(res.status, 201);
+    strictEqual(res.body.role, "admin");
+
+    const [memberRow] = await db
+      .select()
+      .from(organizationMembersTable)
+      .where(
+        and(
+          eq(organizationMembersTable.userId, data.user!.id),
+          eq(organizationMembersTable.organizationId, organizationId),
+        ),
+      );
+    ok(memberRow, "organization_members row should exist");
+    strictEqual(memberRow.role, "admin");
+    strictEqual(memberRow.status, "active");
+
+    const [inviteRow] = await db
+      .select()
+      .from(invitationsTable)
+      .where(eq(invitationsTable.email, email));
+    strictEqual(inviteRow.status, "accepted");
+  });
+
+  test("re-join after removal: user with a removed membership accepts a fresh invite -> upsert reactivates them in the inviting org", async () => {
+    const { app, db, invitationsTable, organizationMembersTable, organizationId } = await setup();
+    const { usersTable, organizationsTable, facilitiesTable } = await import("@workspace/db");
+
+    const email = `accept-rejoin-${randomUUID()}@example.com`;
+    const userId = randomUUID();
+    const { organizationId: otherOrgId } = await seedTenantContext(
+      db,
+      { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+      { id: userId, email },
+      { memberRole: "technician", farmName: "Removed-From Farm" },
+    );
+    createdAuthUserIds.push(userId);
+
+    // Soft-remove their membership in the other org -- their organization_members
+    // row still occupies the plain user_id unique index.
+    await db
+      .update(organizationMembersTable)
+      .set({ status: "removed" })
+      .where(
+        and(
+          eq(organizationMembersTable.userId, userId),
+          eq(organizationMembersTable.organizationId, otherOrgId),
+        ),
+      );
+
+    const { raw } = await seedInvite(db, invitationsTable, {
+      organizationId,
+      email,
+      role: "technician",
+    });
+
+    const res = await request(app).post("/api/invitations/accept").send({ token: raw });
+    strictEqual(res.status, 201);
+
+    const memberRows = await db
+      .select()
+      .from(organizationMembersTable)
+      .where(eq(organizationMembersTable.userId, userId));
+    strictEqual(memberRows.length, 1, "exactly one organization_members row for this user");
+    strictEqual(memberRows[0].status, "active");
+    strictEqual(memberRows[0].organizationId, organizationId);
+
+    const [inviteRow] = await db
+      .select()
+      .from(invitationsTable)
+      .where(eq(invitationsTable.email, email));
+    strictEqual(inviteRow.status, "accepted");
+  });
 });

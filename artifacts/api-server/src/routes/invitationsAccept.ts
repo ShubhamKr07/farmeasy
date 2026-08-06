@@ -61,31 +61,55 @@ router.post("/invitations/accept", async (req: Request, res: Response) => {
 
     // Create the Supabase user if new (email pre-confirmed — no email sent).
     let userId = existingUser?.id ?? null;
-    if (!userId) {
-      if (!password) {
-        await db.update(invitationsTable).set({ status: "pending", acceptedAt: null }).where(eq(invitationsTable.id, invite.id));
-        return res.status(400).json({ error: "A password is required to create your account" });
+    let createdNewAuthUser = false;
+    try {
+      if (!userId) {
+        if (!password) {
+          await db.update(invitationsTable).set({ status: "pending", acceptedAt: null }).where(eq(invitationsTable.id, invite.id));
+          return res.status(400).json({ error: "A password is required to create your account" });
+        }
+        const { data, error } = await admin().auth.admin.createUser({
+          email: invite.email,
+          password,
+          email_confirm: true,
+        });
+        if (error || !data.user) {
+          req.log.error(error, "invitations/accept: createUser failed");
+          await db.update(invitationsTable).set({ status: "pending", acceptedAt: null }).where(eq(invitationsTable.id, invite.id));
+          return res.status(400).json({ error: "Could not create your account" });
+        }
+        userId = data.user.id;
+        createdNewAuthUser = true;
+        // handle_new_user() trigger creates the public.users row; nothing to do here.
       }
-      const { data, error } = await admin().auth.admin.createUser({
-        email: invite.email,
-        password,
-        email_confirm: true,
-      });
-      if (error || !data.user) {
-        await db.update(invitationsTable).set({ status: "pending", acceptedAt: null }).where(eq(invitationsTable.id, invite.id));
-        return res.status(400).json({ error: `Could not create account: ${error?.message ?? "unknown"}` });
-      }
-      userId = data.user.id;
-      // handle_new_user() trigger creates the public.users row; nothing to do here.
-    }
 
-    // Insert the membership with the invited role (active).
-    await db.insert(organizationMembersTable).values({
-      organizationId: invite.organizationId,
-      userId: userId!,
-      role: invite.role,
-      status: "active",
-    });
+      // Insert (or reactivate) the membership with the invited role (active).
+      // UPSERT on the plain user_id unique index (one org per user): this both
+      // closes a race where two near-simultaneous accepts for the same
+      // never-yet-a-member user could otherwise collide on INSERT (leaving one
+      // invite burned with no membership), and lets a previously-removed
+      // member (whose row still occupies the unique index) re-join cleanly.
+      // By this point the one-org check above has already guaranteed no
+      // ACTIVE membership exists for this user, so the upsert is safe.
+      await db
+        .insert(organizationMembersTable)
+        .values({ organizationId: invite.organizationId, userId: userId!, role: invite.role, status: "active" })
+        .onConflictDoUpdate({
+          target: organizationMembersTable.userId,
+          set: { organizationId: invite.organizationId, role: invite.role, status: "active" },
+        });
+    } catch (postClaimErr) {
+      req.log.error(postClaimErr, "invitations/accept: post-claim write failed, reverting");
+      await db.update(invitationsTable).set({ status: "pending", acceptedAt: null }).where(eq(invitationsTable.id, invite.id));
+      if (createdNewAuthUser && userId) {
+        await admin()
+          .auth.admin.deleteUser(userId)
+          .catch(() => {
+            // Best-effort orphan cleanup only -- must never mask the original error.
+          });
+      }
+      return res.status(500).json({ error: "Failed to accept invitation" });
+    }
 
     return res.status(201).json({ organizationId: invite.organizationId, role: invite.role, email: invite.email });
   } catch (err) {
