@@ -171,7 +171,16 @@ function TabShell() {
  * sending the first request out unauthenticated.
  */
 function AuthedTabLayout() {
-  const { facilities, needsPicker, selectFacility } = useActiveFacility();
+  const { facilities, isLoading, needsPicker, selectFacility } = useActiveFacility();
+
+  // Mirrors admin-dashboard's FacilityGate, which checks isLoading before
+  // needsPicker for the same reason: needsPicker/facilities both start at
+  // their empty-state defaults (false / []) until the AsyncStorage hydration
+  // read and the facilities fetch resolve, so without this guard TabShell
+  // would render (and its default tab would fire a facility-scoped request
+  // with no X-Facility-Id) for one frame on every cold launch, before
+  // needsPicker ever gets a chance to flip true.
+  if (isLoading) return null;
 
   if (needsPicker) {
     return <FacilityPickerScreen facilities={facilities} onSelect={selectFacility} />;
