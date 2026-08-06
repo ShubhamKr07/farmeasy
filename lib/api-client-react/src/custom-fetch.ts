@@ -18,6 +18,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
 let _clientVersion: string | null = null;
+let _facilityId: number | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -56,6 +57,22 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
  */
 export function setClientVersion(version: string | null): void {
   _clientVersion = version && version.trim() !== "" ? version.trim() : null;
+}
+
+/**
+ * Set the active facility id to advertise on outgoing API requests as the
+ * `X-Facility-Id` header (TEN-008). The API server's resolveTenantContext
+ * re-validates this against real organization_members/facilities rows on
+ * every request — this is purely the client's current selection, not a
+ * trusted value. Call this whenever the user switches facilities, and once
+ * at boot after restoring the persisted selection.
+ *
+ * Pass `null` to clear it (no header is attached on subsequent requests) —
+ * e.g. while no facility has been chosen yet (0 facilities, or an ambiguous
+ * 2+-facility first load with no persisted selection).
+ */
+export function setFacilityId(facilityId: number | null): void {
+  _facilityId = facilityId;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -376,6 +393,14 @@ export async function customFetch<T = unknown>(
   // header has been provided. Lets the API server log per-version adoption.
   if (_clientVersion && !headers.has("x-farmsmart-client-version")) {
     headers.set("x-farmsmart-client-version", _clientVersion);
+  }
+
+  // Advertise the active facility (TEN-008) when one is set and no explicit
+  // header has been provided — the server re-validates this on every
+  // request (see setFacilityId's doc comment above); this is not a trust
+  // boundary, just the current client selection.
+  if (_facilityId !== null && !headers.has("x-facility-id")) {
+    headers.set("x-facility-id", String(_facilityId));
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
