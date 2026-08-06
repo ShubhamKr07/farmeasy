@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useActiveFacility } from "@/hooks/useActiveFacility";
+import { useActiveFacility } from "@/context/ActiveFacilityContext";
 
 /**
  * Facility switcher row group for the profile sheet (HamburgerMenu). Renders

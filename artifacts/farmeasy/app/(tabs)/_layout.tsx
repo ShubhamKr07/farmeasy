@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { useColors } from "@/hooks/useColors";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useSignOutAndClear } from "@/hooks/useSignOutAndClear";
-import { useActiveFacility } from "@/hooks/useActiveFacility";
+import { ActiveFacilityProvider, useActiveFacility } from "@/context/ActiveFacilityContext";
 import { AppShellProvider, useAppShell } from "@/context/AppShellContext";
 import AskMeFab from "@/components/AskMeFab";
 import HamburgerMenu from "@/components/HamburgerMenu";
@@ -162,13 +162,19 @@ function TabShell() {
 }
 
 /**
- * TEN-008: `useActiveFacility()` lives here — a child mounted only once
- * `TabLayout` has confirmed a session — rather than at `TabLayout`'s own
- * top level. Mirrors admin-dashboard's `App.tsx`, where the equivalent hook
- * is only ever called inside `FacilityGate`, itself only rendered after
- * `AuthGate` confirms `session`. Calling it any earlier would mount the
- * facilities query before the Supabase auth-token getter is wired up,
- * sending the first request out unauthenticated.
+ * TEN-008: `ActiveFacilityProvider` (see `context/ActiveFacilityContext.tsx`)
+ * is mounted around this component — a child mounted only once `TabLayout`
+ * has confirmed a session — rather than at `TabLayout`'s own top level.
+ * Mirrors admin-dashboard's `App.tsx`, where the equivalent provider is only
+ * ever mounted around `FacilityGate`, itself only rendered after `AuthGate`
+ * confirms `session`. Mounting it any earlier would fire the facilities
+ * query before the Supabase auth-token getter is wired up, sending the
+ * first request out unauthenticated.
+ *
+ * The provider wraps `AuthedTabLayout` itself, not just `TabShell` below —
+ * `needsPicker`/`facilities`/`selectFacility` must be available for the
+ * facility-picker branch too, not only once `TabShell` renders (unlike
+ * `AppShellProvider`, which only ever needs to wrap `TabShell`).
  */
 function AuthedTabLayout() {
   const { facilities, isLoading, needsPicker, selectFacility } = useActiveFacility();
@@ -217,5 +223,9 @@ export default function TabLayout() {
     return <Redirect href="/sign-in" />;
   }
 
-  return <AuthedTabLayout />;
+  return (
+    <ActiveFacilityProvider>
+      <AuthedTabLayout />
+    </ActiveFacilityProvider>
+  );
 }
