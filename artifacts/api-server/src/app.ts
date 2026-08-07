@@ -30,6 +30,7 @@ import wizardEventsRouter from "./routes/wizard-events";
 import invitationsRouter from "./routes/invitations";
 import invitationsAcceptRouter from "./routes/invitationsAccept";
 import membersRouter from "./routes/members";
+import { createAuthRouter } from "./routes/auth";
 import { logger } from "./lib/logger";
 import { buildCorsOptions } from "./lib/cors";
 import { resolveTrustProxy } from "./lib/trustProxy";
@@ -113,25 +114,29 @@ function requireSignedIn(req: Request, res: Response, next: NextFunction) {
 // + POST /invitations/accept (TEN-010 T6: the invitee has no session yet —
 // they're POSTing {token, password} to CREATE their account, so this must NOT
 // sit behind requireSignedIn; see invitationsAccept.ts's own doc comment).
+// + createAuthRouter (TEN-012 Task 9: GET /auth/signup-availability +
+// POST /auth/request-access) — a brand-new prospective user with no account
+// yet hits these BEFORE they can possibly have a session, so they must mount
+// PUBLIC, above the requireSignedIn/requireVerifiedEmail gate below.
 app.use("/api", healthRouter);
 app.use("/api", accountingPublicRouter);
 app.use("/api", invitationsAcceptRouter);
+app.use("/api", createAuthRouter());
 
 // Backend email-verification gate (TEN-012 Task 6) — defense-in-depth.
 // Registered as a standalone `/api` middleware AFTER every PUBLIC router above
-// (health / accounting OAuth callback / invitations-accept — a brand-new
-// invitee with no session yet must reach accept, so it can't sit behind this
-// gate) and BEFORE every requireSignedIn-gated tier below. Because each public
-// router responds and does NOT call next() for the paths it owns, a request to
-// a public path never reaches this line; every OTHER /api request falls
-// through to here. requireSignedIn runs first (401 for no/invalid token — an
-// unauthenticated caller has no verification claim to check anyway), then
-// requireVerifiedEmail 403s only when the JWT claim is explicitly `false`
-// (absent claim passes through — see the middleware's own doc comment). A
-// VERIFIED user passes straight through to the tiers below, so the wizard
-// bootstrap (GET /wizard/progress, tier 1) stays reachable for them. When the
-// public createAuthRouter (signup-availability / request-access) is later
-// mounted, mount it ABOVE this line alongside the other public routers.
+// (health / accounting OAuth callback / invitations-accept / auth
+// signup-availability+request-access — a brand-new prospective user with no
+// session yet must reach these, so they can't sit behind this gate) and BEFORE
+// every requireSignedIn-gated tier below. Because each public router responds
+// and does NOT call next() for the paths it owns, a request to a public path
+// never reaches this line; every OTHER /api request falls through to here.
+// requireSignedIn runs first (401 for no/invalid token — an unauthenticated
+// caller has no verification claim to check anyway), then requireVerifiedEmail
+// 403s only when the JWT claim is explicitly `false` (absent claim passes
+// through — see the middleware's own doc comment). A VERIFIED user passes
+// straight through to the tiers below, so the wizard bootstrap
+// (GET /wizard/progress, tier 1) stays reachable for them.
 app.use("/api", requireSignedIn, requireVerifiedEmail);
 
 // Everything else requires a signed-in Clerk session (S1/S2). Per-route
