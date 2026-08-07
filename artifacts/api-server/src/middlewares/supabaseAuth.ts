@@ -22,7 +22,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      supabaseUser?: { sub: string; user_role?: string };
+      supabaseUser?: { sub: string; user_role?: string; email?: string };
     }
   }
 }
@@ -44,6 +44,10 @@ export async function supabaseAuthMiddleware(
     req.supabaseUser = {
       sub: payload.sub!,
       user_role: (payload as Record<string, unknown>).user_role as string | undefined,
+      // `email` is a standard Supabase/GoTrue JWT claim; surfaced here so
+      // getAuth (below) can hand it to ensureOwnerOrg at wizard bootstrap
+      // (TEN-012) — it derives the new org's name from the email's local-part.
+      email: (payload as Record<string, unknown>).email as string | undefined,
     };
   } catch {
     // Invalid/expired token — leave req.supabaseUser unset, requireSignedIn
@@ -54,9 +58,10 @@ export async function supabaseAuthMiddleware(
   next();
 }
 
-export function getAuth(req: Request): { userId: string | null; userRole: string | null } {
+export function getAuth(req: Request): { userId: string | null; userRole: string | null; email: string | null } {
   return {
     userId: req.supabaseUser?.sub ?? null,
     userRole: req.supabaseUser?.user_role ?? null,
+    email: req.supabaseUser?.email ?? null,
   };
 }

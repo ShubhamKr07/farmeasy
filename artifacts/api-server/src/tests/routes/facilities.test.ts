@@ -13,16 +13,20 @@ import {
 
 /**
  * POST /facilities + GET /facilities + GET /facilities/me (onboarding wizard
- * Task 2, TEN-001/TEN-003; multi-facility support TEN-008 Task 7).
+ * Task 2, TEN-001/TEN-003; multi-facility support TEN-008 Task 7; org
+ * provisioning moved out TEN-012 Task 5).
  *
- * POST /facilities creates an organization (first-time only), a facility,
- * and the 3 index-1 rooms (seeding/fertigation/harvesting) in a single
- * transaction. Post-TEN-008, a user with an existing active
- * organization_members row ("Add facility") reuses that same organization
- * for the new facility instead of being rejected — the one-facility-per-org
- * 409 gate is gone; TEN-001's "exactly one organization per user" is
- * unchanged (still enforced by organization_members' own unique index on
- * user_id).
+ * TEN-012: POST /facilities NO LONGER creates the organization — every
+ * account's org is provisioned lazily at the first authed wizard bootstrap
+ * (ensureOwnerOrg, from GET /wizard/progress), which always runs before W2.
+ * POST /facilities now just resolves the user's already-existing active
+ * organization_members row and creates the facility + its 3 index-1 rooms
+ * (seeding/fertigation/harvesting) in one transaction; a user with NO
+ * membership gets a 500 guard ("No organization for user") that should never
+ * fire post-bootstrap. These tests therefore seed an active owner membership
+ * first (via `seedOwnerOrg`, standing in for that bootstrap step) before every
+ * POST. TEN-001's "exactly one organization per user" is unchanged (enforced
+ * by organization_members' own unique index on user_id).
  *
  * Gated on TEST_DATABASE_URL, mirroring inventory.test.ts: the router and
  * `@workspace/db` are imported lazily inside `setup()` so this file loads
@@ -39,58 +43,122 @@ import {
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
+/**
+ * Stands in for the wizard bootstrap (ensureOwnerOrg): creates a fresh
+ * organization and an active owner membership for the given user, returning
+ * the new org id. TEN-012 moved org creation out of POST /facilities, so W2
+ * now requires this row to already exist.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function seedOwnerOrg(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adb: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  organizationsTable: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  organizationMembersTable: any,
+  userId: string,
+  name = "Pre-existing Org",
+): Promise<number> {
+  const [org] = await adb.insert(organizationsTable).values({ name }).returning();
+  await adb.insert(organizationMembersTable).values({
+    organizationId: org.id,
+    userId,
+    role: "owner",
+    status: "active",
+  });
+  return org.id;
+}
+
 describe("POST /api/facilities", { skip: !dbUrl }, () => {
   // Only `rooms` is truncated. `organizations`/`facilities`/`users` are shared
   // reference tables the FK graph now fans out through (TRUNCATE ... CASCADE
   // would destroy every cycles/inventory_items/alerts/tasks/shipments/... row
   // — plus the pilot-default facility other suites resolve via
   // `ORDER BY id LIMIT 1`). This suite's own POST always creates a fresh
-  // org+facility, and every assertion is keyed off the signed-in test user's
-  // own `organizationId` (reset to null by seedTestUser each setup) or the
-  // returned facilityId — never off these tables being globally empty.
+  // facility under a freshly-seeded org, and every assertion is keyed off the
+  // seeded `organizationId` or the returned facilityId — never off these
+  // tables being globally empty.
   const fixture = useDatabaseFixture(["rooms"]);
 
   async function setup() {
     const facilities = await import("../../routes/facilities");
-    const { db, roomsTable, usersTable, organizationMembersTable, wizardProgressTable } = await import("@workspace/db");
+    const { db, roomsTable, usersTable, organizationsTable, organizationMembersTable, wizardProgressTable } = await import("@workspace/db");
     const { eq } = await import("drizzle-orm");
+    const adb = getAdminDb() ?? db;
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
-    // POST /facilities plain-inserts into organization_members (no upsert --
-    // a real user only ever gets one membership, created once). Unlike
-    // users.organization_id (reset above by seedTestUser), organization_members
-    // is a shared table never truncated between test files -- if ANY other
-    // file's seedTenantContext call already gave this exact shared synthetic
-    // user a membership earlier in the same suite run, this insert collides
-    // on organization_members_user_id_uniq even though users.organization_id
-    // looks fresh. Delete any pre-existing row for this user first so this
-    // suite's own correctness doesn't depend on running before every other
-    // file that uses DEFAULT_TEST_USER.sub (Task 16, MT-M1).
-    await (getAdminDb() ?? db).delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
+    // organization_members is a shared table never truncated between test
+    // files -- if any other file's seedTenantContext already gave this exact
+    // shared synthetic user a membership earlier in the same suite run, a
+    // fresh insert would collide on organization_members_user_id_uniq. Delete
+    // any pre-existing row for this user first so each test starts from a
+    // known state (no membership) and `seedOwnerOrg` can create exactly one.
+    await adb.delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
     // wizard_progress is also shared/never-truncated-here; GET /facilities'
     // onboarded flag (TEN-008) resolves through it, so clear any row left by
     // an earlier test/file for this same synthetic user.
-    await (getAdminDb() ?? db).delete(wizardProgressTable).where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
-    return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable };
+    await adb.delete(wizardProgressTable).where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
+    return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable, organizationsTable, organizationMembersTable, adb };
   }
 
-  test("creates an organization, facility, and 3 rooms in one transaction", async () => {
-    const { app, db, roomsTable } = await setup();
+  test("TEN-012: creates only the facility + 3 rooms under the user's existing org (no longer creates the org)", async () => {
+    const { app, db, roomsTable, organizationsTable, organizationMembersTable, adb } = await setup();
+    const orgId = await seedOwnerOrg(adb, organizationsTable, organizationMembersTable, DEFAULT_TEST_USER.sub);
+
     const res = await request(app)
       .post("/api/facilities")
       .send({ farmName: "Sunrise Greens", timezone: "America/New_York", units: "imperial", currency: "USD" });
 
     strictEqual(res.status, 201);
     ok(res.body.facilityId);
+    strictEqual(res.body.organizationId, orgId, "the facility must attach to the pre-existing org, not a new one");
     const rooms = await db.select().from(roomsTable).where(eq(roomsTable.facilityId, res.body.facilityId));
     strictEqual(rooms.length, 3);
   });
 
+  test("TEN-012: reuses the existing org + membership — POST creates no new organization and no new membership row", async () => {
+    const { app, organizationsTable, organizationMembersTable, adb } = await setup();
+    await seedOwnerOrg(adb, organizationsTable, organizationMembersTable, DEFAULT_TEST_USER.sub);
+
+    const orgsBefore = (await adb.select().from(organizationsTable)).length;
+    const membersBefore = (
+      await adb.select().from(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub))
+    ).length;
+
+    const res = await request(app)
+      .post("/api/facilities")
+      .send({ farmName: "Reuse Farm", timezone: "UTC", units: "metric", currency: "USD" });
+    strictEqual(res.status, 201);
+
+    const orgsAfter = (await adb.select().from(organizationsTable)).length;
+    const membersAfter = (
+      await adb.select().from(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub))
+    ).length;
+    strictEqual(orgsAfter, orgsBefore, "POST /facilities must not create a new organization");
+    strictEqual(membersAfter, membersBefore, "POST /facilities must not create a new membership row");
+    strictEqual(membersAfter, 1, "the user still has exactly their one bootstrap owner membership");
+  });
+
+  test("TEN-012: 500 'No organization for user' when the user has no membership (guard that should never fire post-bootstrap)", async () => {
+    const { app } = await setup(); // membership deleted, none seeded
+
+    const res = await request(app)
+      .post("/api/facilities")
+      .send({ farmName: "Orphan Farm", timezone: "UTC", units: "metric", currency: "USD" });
+
+    strictEqual(res.status, 500);
+    strictEqual(res.body.error, "No organization for user");
+  });
+
   test("POST /facilities: a second facility for an existing org succeeds (TEN-008, no more 409)", async () => {
-    const { app, db, roomsTable } = await setup();
+    const { app, db, roomsTable, organizationsTable, organizationMembersTable, adb } = await setup();
+    const orgId = await seedOwnerOrg(adb, organizationsTable, organizationMembersTable, DEFAULT_TEST_USER.sub);
+
     const firstRes = await request(app)
       .post("/api/facilities")
       .send({ farmName: "First Farm", timezone: "UTC", units: "metric", currency: "USD" });
     strictEqual(firstRes.status, 201);
+    strictEqual(firstRes.body.organizationId, orgId);
 
     const secondRes = await request(app)
       .post("/api/facilities")
@@ -107,7 +175,9 @@ describe("POST /api/facilities", { skip: !dbUrl }, () => {
   });
 
   test("GET /facilities: lists every facility for the signed-in user's organization", async () => {
-    const { app } = await setup();
+    const { app, organizationsTable, organizationMembersTable, adb } = await setup();
+    await seedOwnerOrg(adb, organizationsTable, organizationMembersTable, DEFAULT_TEST_USER.sub);
+
     await request(app)
       .post("/api/facilities")
       .send({ farmName: "Farm One", timezone: "UTC", units: "metric", currency: "USD" });
@@ -129,19 +199,20 @@ describe("GET /api/facilities/me", { skip: !dbUrl }, () => {
 
   async function setup() {
     const facilities = await import("../../routes/facilities");
-    const { db, roomsTable, usersTable, organizationMembersTable, wizardProgressTable } = await import("@workspace/db");
+    const { db, roomsTable, usersTable, organizationsTable, organizationMembersTable, wizardProgressTable } = await import("@workspace/db");
     const { eq } = await import("drizzle-orm");
+    const adb = getAdminDb() ?? db;
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
     // See the POST describe's setup() above for why this delete is needed.
-    await (getAdminDb() ?? db).delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
+    await adb.delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
     // wizard_progress is also a shared table (never truncated by this
     // fixture — only `rooms` is) and, post-TEN-008, is exactly what GET
     // /facilities/me resolves through. Clear any row left by an earlier test
     // in this describe (or another file's use of this same synthetic user)
     // so "returns null" genuinely means "no wizard_progress row", not "a
     // stale one from a previous test happened not to match."
-    await (getAdminDb() ?? db).delete(wizardProgressTable).where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
-    return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable, wizardProgressTable };
+    await adb.delete(wizardProgressTable).where(eq(wizardProgressTable.userId, DEFAULT_TEST_USER.sub));
+    return { app: createAuthenticatedTestApp(facilities.default), db, roomsTable, organizationsTable, organizationMembersTable, wizardProgressTable, adb };
   }
 
   test("returns null when the signed-in user has no facility yet", async () => {
@@ -152,7 +223,11 @@ describe("GET /api/facilities/me", { skip: !dbUrl }, () => {
   });
 
   test("returns the user's facility after POST /facilities, once its wizard_progress row reaches done", async () => {
-    const { app, db, wizardProgressTable } = await setup();
+    const { app, db, wizardProgressTable, organizationsTable, organizationMembersTable, adb } = await setup();
+    // TEN-012: seed the owner org first (bootstrap stand-in) so W2's POST can
+    // attach the facility to it.
+    await seedOwnerOrg(adb, organizationsTable, organizationMembersTable, DEFAULT_TEST_USER.sub);
+
     const createRes = await request(app)
       .post("/api/facilities")
       .send({ farmName: "Green Acres", timezone: "UTC", units: "metric", currency: "USD" });

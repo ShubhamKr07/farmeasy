@@ -143,9 +143,25 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
     }
   });
 
-  test("brand-new user (no organization_members row) can POST /api/facilities through the real app -- the exact regression this fix prevents", async () => {
+  test("brand-new user can POST /api/facilities through the real app after the wizard bootstrap provisions their org (TEN-012)", async () => {
     const user = await createRealTestUser();
     createdUserIds.push(user.userId);
+
+    // TEN-012: POST /facilities no longer creates the org. The real client
+    // flow bootstraps it at GET /wizard/progress (ensureOwnerOrg), which the
+    // real app mounts behind requireSignedIn only (no X-Facility-Id needed).
+    // Drive that first so the subsequent POST has an org to attach to — this
+    // also still exercises the mount-ordering regression the file guards
+    // against (an earlier requireTenantContext-gated mount must not intercept
+    // POST /facilities and 400).
+    const bootstrapRes = await request(app)
+      .get("/api/wizard/progress")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+    strictEqual(
+      bootstrapRes.status,
+      200,
+      `wizard bootstrap must succeed: got ${bootstrapRes.status}: ${JSON.stringify(bootstrapRes.body)}`,
+    );
 
     const res = await request(app)
       .post("/api/facilities")

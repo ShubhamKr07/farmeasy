@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { wizardProgressTable, usersTable, organizationMembersTable, facilitiesTable } from "@workspace/db";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { getAuth } from "../middlewares/supabaseAuth";
+import { ensureOwnerOrg } from "../lib/ensureOwnerOrg";
 
 const router = Router();
 
@@ -64,9 +65,23 @@ router.get("/wizard/progress", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
     const facilityIdParam = req.query.facilityId;
+    const hasFacilityIdParam = typeof facilityIdParam === "string" && facilityIdParam.trim() !== "";
+
+    // TEN-012: lazily provision this account's owner organization at the very
+    // first authed wizard bootstrap (the first-run case — no facilityId param
+    // yet), BEFORE W2's POST /facilities, which no longer creates the org.
+    // Only the first-run (no facilityId) branch is a genuine bootstrap; a
+    // facilityId param means an existing facility's org already exists.
+    // A null-org return means this user is invite-pending (an invitation owns
+    // their eventual org) — we just proceed: getOrganizationId below already
+    // returns null for them and the client starts at step 1. ensureOwnerOrg
+    // does not throw on that path, so no extra guard is needed.
+    if (userId && !hasFacilityIdParam) {
+      await ensureOwnerOrg(userId, getAuth(req).email ?? "");
+    }
 
     let facilityCondition;
-    if (typeof facilityIdParam === "string" && facilityIdParam.trim() !== "") {
+    if (hasFacilityIdParam) {
       const facilityId = Number(facilityIdParam);
       if (!Number.isInteger(facilityId) || facilityId <= 0) {
         return res.status(400).json({ error: "Invalid facilityId" });

@@ -2,10 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import {
-  organizationsTable,
   facilitiesTable,
   roomsTable,
-  usersTable,
   organizationMembersTable,
   wizardProgressTable,
 } from "@workspace/db";
@@ -33,20 +31,20 @@ function validate<T>(schema: z.ZodSchema<T>, data: unknown, res: Response): T | 
 
 // POST /facilities — W2 farm-basics submit (WIZ-001/TEN-001/TEN-003), and
 // TEN-008's "Add facility" re-entry into the same wizard for an org that
-// already has one or more facilities. Creates an organization (first-time
-// only — see below), a facility, and its 3 index-1 rooms
-// (seeding/fertigation/harvesting) in a single transaction.
+// already has one or more facilities. Creates a facility + its 3 index-1
+// rooms (seeding/fertigation/harvesting) in a single transaction.
 //
-// First-time (no existing organization_members row for this user): creates
-// a brand-new organization too, and assigns the user as its owner.
-// TEN-008 "Add facility" (user already has an active organization_members
-// row): reuses that same organization — creates only the new facility + its
-// 3 rooms, no new organization, no new membership row (they're already a
-// member). This is what "Add facility loops the wizard for an org that
-// already exists" means at the data layer — one org, many facilities, no
-// per-user gate left (TEN-001's "exactly one organization per user" is
-// unchanged and still enforced by organization_members' own unique index on
-// user_id; TEN-008 only removes the one-*facility*-per-org assumption).
+// TEN-012: this route NO LONGER creates the organization. Every account's org
+// is now provisioned lazily at the first authed wizard bootstrap
+// (ensureOwnerOrg, called from GET /wizard/progress) — which always runs
+// before W2 — so by the time this handler runs the user is guaranteed to
+// already have an active organization_members row. We resolve organizationId
+// from that membership; the `500 No organization for user` branch is only a
+// guard that should never fire post-bootstrap (TEN-001's "exactly one
+// organization per user" is still enforced by organization_members' own
+// unique index on user_id; TEN-008's one-org-many-facilities shape is
+// unchanged). The deprecated users.organization_id write that lived here is
+// also removed, matching the column's retirement direction.
 router.post("/facilities", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
@@ -54,36 +52,21 @@ router.post("/facilities", async (req: Request, res: Response) => {
     const body = validate(CreateFacilitySchema, req.body, res);
     if (!body) return;
 
+    const [membership] = await db
+      .select({ organizationId: organizationMembersTable.organizationId })
+      .from(organizationMembersTable)
+      .where(
+        and(eq(organizationMembersTable.userId, userId!), eq(organizationMembersTable.status, "active")),
+      )
+      .limit(1);
+    if (!membership) {
+      // Should never happen: the wizard bootstrap provisions the org before
+      // this route is ever reachable.
+      return res.status(500).json({ error: "No organization for user" });
+    }
+    const organizationId = membership.organizationId;
+
     const result = await db.transaction(async (tx) => {
-      const [existingMembership] = await tx
-        .select({ organizationId: organizationMembersTable.organizationId })
-        .from(organizationMembersTable)
-        .where(
-          and(eq(organizationMembersTable.userId, userId!), eq(organizationMembersTable.status, "active")),
-        )
-        .limit(1);
-
-      let organizationId: number;
-      if (existingMembership) {
-        organizationId = existingMembership.organizationId;
-      } else {
-        const [org] = await tx
-          .insert(organizationsTable)
-          .values({ name: body.farmName })
-          .returning();
-        organizationId = org.id;
-        await tx
-          .update(usersTable)
-          .set({ organizationId: org.id })
-          .where(eq(usersTable.id, userId!));
-        await tx.insert(organizationMembersTable).values({
-          organizationId: org.id,
-          userId: userId!,
-          role: "owner",
-          status: "active",
-        });
-      }
-
       const [facility] = await tx
         .insert(facilitiesTable)
         .values({
