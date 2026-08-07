@@ -26,6 +26,7 @@ import {
 } from "@workspace/db";
 import { supabaseAdmin } from "../middlewares/supabaseAuth.js";
 import { sendPurgeWarning } from "./email/index.js";
+import { logger } from "./logger.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WARN_AGE_DAYS = 7;
@@ -35,9 +36,10 @@ const PAGE_SIZE = 1000;
 /**
  * Scan every unverified Supabase auth user and, based on account age:
  *  - age >= 10d: purge. Find the user's OWNER org; if that org has ZERO
- *    facilities, write audit `purged` FIRST, then delete the auth user
- *    (public.users -> organization_members cascade via on-delete-cascade) and
- *    delete the org row. If the org HAS >=1 facility, skip entirely — real
+ *    facilities, write audit `purged` FIRST, then delete the org row, then
+ *    delete the auth user (public.users -> organization_members cascade via
+ *    on-delete-cascade). Org-before-user so a failing org delete aborts before
+ *    the irreversible auth delete. If the org HAS >=1 facility, skip entirely — real
  *    data is never auto-deleted. If there is no owner org, still delete the
  *    auth user (audit `purged`); there is nothing else to clean.
  *  - age >= 7d (and < 10d): warn once. If no prior `warned` audit row exists
@@ -60,7 +62,7 @@ export async function purgeUnverifiedAccounts(
   const now = opts.now ?? new Date();
   const admin = opts.admin ?? supabaseAdmin;
   const sendWarning = opts.sendWarning ?? sendPurgeWarning;
-  const log = opts.log;
+  const log = opts.log ?? logger;
 
   let warned = 0;
   let purged = 0;
@@ -74,81 +76,95 @@ export async function purgeUnverifiedAccounts(
     if (users.length === 0) break;
 
     for (const user of users) {
-      // Verified accounts are spared regardless of age.
-      if (user.email_confirmed_at) continue;
-      // Without an email there is nothing to warn and no audit key worth
-      // keying on — leave it untouched.
-      if (!user.email) continue;
+      // Per-user isolation: a throw anywhere below (a bad DB row, a flaky
+      // admin/email call) is logged and skipped so it can't halt the sweep —
+      // the same failing user must not block every user after it, every run.
+      // A user that throws counts as neither warned nor purged.
+      try {
+        // Verified accounts are spared regardless of age.
+        if (user.email_confirmed_at) continue;
+        // Without an email there is nothing to warn and no audit key worth
+        // keying on — leave it untouched.
+        if (!user.email) continue;
 
-      const ageDays = (now.getTime() - new Date(user.created_at).getTime()) / DAY_MS;
+        const ageDays = (now.getTime() - new Date(user.created_at).getTime()) / DAY_MS;
 
-      if (ageDays >= PURGE_AGE_DAYS) {
-        const [membership] = await db
-          .select({ organizationId: organizationMembersTable.organizationId })
-          .from(organizationMembersTable)
-          .where(
-            and(
-              eq(organizationMembersTable.userId, user.id),
-              eq(organizationMembersTable.role, "owner"),
-              eq(organizationMembersTable.status, "active"),
-            ),
-          )
-          .limit(1);
+        if (ageDays >= PURGE_AGE_DAYS) {
+          const [membership] = await db
+            .select({ organizationId: organizationMembersTable.organizationId })
+            .from(organizationMembersTable)
+            .where(
+              and(
+                eq(organizationMembersTable.userId, user.id),
+                eq(organizationMembersTable.role, "owner"),
+                eq(organizationMembersTable.status, "active"),
+              ),
+            )
+            .limit(1);
 
-        if (membership) {
-          const [facilityCount] = await db
-            .select({ n: sql<number>`count(*)::int` })
-            .from(facilitiesTable)
-            .where(eq(facilitiesTable.organizationId, membership.organizationId));
+          if (membership) {
+            const [facilityCount] = await db
+              .select({ n: sql<number>`count(*)::int` })
+              .from(facilitiesTable)
+              .where(eq(facilitiesTable.organizationId, membership.organizationId));
 
-          if ((facilityCount?.n ?? 0) > 0) {
-            // Real data present — never auto-delete. Skip without touching a
-            // thing (no audit row, no delete).
-            log?.info(
-              { userId: user.id, organizationId: membership.organizationId },
-              "unverified purge skipped: owner org has facilities",
-            );
-            continue;
+            if ((facilityCount?.n ?? 0) > 0) {
+              // Real data present — never auto-delete. Skip without touching a
+              // thing (no audit row, no delete).
+              log?.info(
+                { userId: user.id, organizationId: membership.organizationId },
+                "unverified purge skipped: owner org has facilities",
+              );
+              continue;
+            }
+
+            // Audit BEFORE any irreversible delete.
+            await db
+              .insert(accountPurgeAuditTable)
+              .values({ userId: user.id, email: user.email, action: "purged" });
+            // Delete the org row BEFORE the auth user: if the org delete throws
+            // (e.g. a RESTRICT FK still referencing it), it fails before the
+            // irreversible auth-user delete, so the next run retries cleanly
+            // instead of leaving a deleted user + orphaned org.
+            await db.delete(organizationsTable).where(eq(organizationsTable.id, membership.organizationId));
+            await admin.auth.admin.deleteUser(user.id);
+          } else {
+            // No owner org — nothing else to clean, still remove the auth user.
+            await db
+              .insert(accountPurgeAuditTable)
+              .values({ userId: user.id, email: user.email, action: "purged" });
+            await admin.auth.admin.deleteUser(user.id);
           }
 
-          // Audit BEFORE the irreversible delete.
+          purged += 1;
+        } else if (ageDays >= WARN_AGE_DAYS) {
+          const [prior] = await db
+            .select({ id: accountPurgeAuditTable.id })
+            .from(accountPurgeAuditTable)
+            .where(
+              and(
+                eq(accountPurgeAuditTable.userId, user.id),
+                eq(accountPurgeAuditTable.action, "warned"),
+              ),
+            )
+            .limit(1);
+          if (prior) continue; // never warn twice
+
+          await sendWarning({ to: user.email });
           await db
             .insert(accountPurgeAuditTable)
-            .values({ userId: user.id, email: user.email, action: "purged" });
-          await admin.auth.admin.deleteUser(user.id);
-          // Deleting the auth user cascades to public.users ->
-          // organization_members; deleting the org row is belt-and-braces and
-          // removes the now-empty owner org itself.
-          await db.delete(organizationsTable).where(eq(organizationsTable.id, membership.organizationId));
-        } else {
-          // No owner org — nothing else to clean, still remove the auth user.
-          await db
-            .insert(accountPurgeAuditTable)
-            .values({ userId: user.id, email: user.email, action: "purged" });
-          await admin.auth.admin.deleteUser(user.id);
+            .values({ userId: user.id, email: user.email, action: "warned" });
+          warned += 1;
         }
-
-        purged += 1;
-      } else if (ageDays >= WARN_AGE_DAYS) {
-        const [prior] = await db
-          .select({ id: accountPurgeAuditTable.id })
-          .from(accountPurgeAuditTable)
-          .where(
-            and(
-              eq(accountPurgeAuditTable.userId, user.id),
-              eq(accountPurgeAuditTable.action, "warned"),
-            ),
-          )
-          .limit(1);
-        if (prior) continue; // never warn twice
-
-        await sendWarning({ to: user.email });
-        await db
-          .insert(accountPurgeAuditTable)
-          .values({ userId: user.id, email: user.email, action: "warned" });
-        warned += 1;
+        // else: younger than the warn threshold — skip.
+      } catch (err) {
+        // One user's failure is logged and skipped; the sweep continues.
+        log?.error(
+          { err, userId: user.id },
+          "unverified purge: skipping user after error",
+        );
+        continue;
       }
-      // else: younger than the warn threshold — skip.
     }
 
     if (users.length < PAGE_SIZE) break;
