@@ -74,10 +74,10 @@ Extend the existing web `AuthGate` (`admin-dashboard/src/App.tsx`, today sign-in
 
 - In-process `setInterval` (daily), same pattern as `overdue-scanner.ts`, gated by env `PURGE_UNVERIFIED_ENABLED` (default off in dev).
 - `purgeUnverifiedAccounts()`:
-  - **Warn (day 23):** unverified accounts aged ≥ 23d with no warning yet → send one warning email, record it.
-  - **Purge (day 30):** unverified accounts aged ≥ 30d → delete the Supabase user (admin API) + the org row provisioned for them (guard: only their own, only if no facility/data), write an audit row.
+  - **Warn (day 7):** unverified accounts aged ≥ 7d with no warning yet → send one warning email, record it.
+  - **Purge (day 10):** unverified accounts aged ≥ 10d → delete the Supabase user (admin API) + the org row provisioned for them (guard: only their own, only if no facility/data), write an audit row.
 - **Table** `account_purge_audit(id, user_id, email, action 'warned'|'purged', at)`.
-- **Rollback:** env-flip `PURGE_UNVERIFIED_ENABLED=false` halts it immediately; the job is otherwise additive. Point-of-no-return: the day-30 delete is irreversible — it runs only on unverified, ≥30d, data-less accounts, and is audited.
+- **Rollback:** env-flip `PURGE_UNVERIFIED_ENABLED=false` halts it immediately; the job is otherwise additive. Point-of-no-return: the day-10 delete is irreversible — it runs only on unverified, ≥10d, data-less accounts, and is audited.
 
 ---
 
@@ -87,7 +87,7 @@ Extend the existing web `AuthGate` (`admin-dashboard/src/App.tsx`, today sign-in
 2. **off / not allowlisted:** Request-access form → `access_requests` row. End.
 3. **create-account (email):** `signUp` → confirmation email → interstitial (resend / change-email). Verify link → session issued → dashboard bootstrap `GET /wizard/progress` → `ensureOwnerOrg` creates org+owner → wizard opens at W2 → `POST /facilities` creates the first facility.
 4. **create-account (OAuth):** Google redirect → verified session → same bootstrap → W2.
-5. **Never verifies:** day-23 warning email; day-30 purge (user + data-less org) + audit.
+5. **Never verifies:** day-7 warning email; day-10 purge (user + data-less org) + audit.
 
 ## Error handling
 
@@ -95,8 +95,8 @@ Extend the existing web `AuthGate` (`admin-dashboard/src/App.tsx`, today sign-in
 
 ## Testing
 
-- **Unit:** availability modes (off/allowlist/public × allowed/not); password-policy inline errors; `ensureOwnerOrg` idempotency + invite-exclusion + name derivation; `access_requests` upsert; `notifyWaitlist` (record transport); purge selection logic (spares verified, spares <30d, day-23 warn once).
-- **Integration under real `farmsmart_app` RLS:** provisioning creates exactly one org + owner; unverified JWT → 403; request-access inserts with no auth/org; purge deletes only unverified+≥30d+data-less and its org, spares everyone else.
+- **Unit:** availability modes (off/allowlist/public × allowed/not); password-policy inline errors; `ensureOwnerOrg` idempotency + invite-exclusion + name derivation; `access_requests` upsert; `notifyWaitlist` (record transport); purge selection logic (spares verified, spares <7d, day-7 warn once).
+- **Integration under real `farmsmart_app` RLS:** provisioning creates exactly one org + owner; unverified JWT → 403; request-access inserts with no auth/org; purge deletes only unverified+≥10d+data-less and its org, spares everyone else.
 - **pgTAP:** new tables (`signup_allowlist`, `access_requests`, `account_purge_audit`) exist with RLS enabled + backend policies; foundation migration-count bumped.
 - **Live email:** verification + warning emails driven Resend→Mailosaur (TEN-010 pattern), asserting delivery + no-leak.
 

@@ -385,22 +385,22 @@ export function requireVerifiedEmail(req, res, next) {
 - Consumes: Supabase admin API (`auth.admin.listUsers`/`deleteUser`), `sendPurgeWarning`, `accountPurgeAuditTable`, `ensureOwnerOrg`'s org.
 - Produces: `purgeUnverifiedAccounts(now?: Date): Promise<{ warned: number; purged: number }>`.
 
-- [ ] **Step 1: Write failing tests** (inject `now`; stub admin API + email record): spares verified accounts; spares unverified < 23d; warns unverified ≥ 23d once (audit `warned`, email sent); purges unverified ≥ 30d — deletes user + their org **only if that org has no facilities**, writes audit `purged`; never touches an org that has a facility (logs + skips).
+- [ ] **Step 1: Write failing tests** (inject `now`; stub admin API + email record): spares verified accounts; spares unverified < 7d; warns unverified ≥ 7d once (audit `warned`, email sent); purges unverified ≥ 10d — deletes user + their org **only if that org has no facilities**, writes audit `purged`; never touches an org that has a facility (logs + skips).
 
 - [ ] **Step 2: Run → fail.**
 
 - [ ] **Step 3: Implement** — enumerate unverified users (email_confirmed_at null); for each compute age from `created_at`:
-  - `≥30d`: find their owner org; if it has 0 facilities → `admin.deleteUser` + delete org (cascades membership) + audit `purged`; else skip (data present — never auto-delete real data).
-  - `≥23d` and no prior `warned` audit → `sendPurgeWarning` + audit `warned`.
+  - `≥10d`: find their owner org; if it has 0 facilities → `admin.deleteUser` + delete org (cascades membership) + audit `purged`; else skip (data present — never auto-delete real data).
+  - `≥7d` and no prior `warned` audit → `sendPurgeWarning` + audit `warned`.
   Guarded by `getSignupMode`-independent env `PURGE_UNVERIFIED_ENABLED === "true"`.
 
 - [ ] **Step 4: Wire interval** in `index.ts` (mirror overdue-scanner): `if (process.env.PURGE_UNVERIFIED_ENABLED === "true") setInterval(() => purgeUnverifiedAccounts().catch(log), 24*60*60*1000);` plus one run on boot.
 
 - [ ] **Step 5: Run → PASS.**
 
-- [ ] **Step 6: Commit** — `git commit -am "feat(auth): unverified-account purge job (warn d23, purge d30, audited) (TEN-012)"`
+- [ ] **Step 6: Commit** — `git commit -am "feat(auth): unverified-account purge job (warn d7, purge d10, audited) (TEN-012)"`
 
-**Rollback (point-of-no-return):** set `PURGE_UNVERIFIED_ENABLED=false` — halts immediately, no redeploy of code needed. The day-30 `deleteUser` + org delete is **irreversible**; it is gated to unverified + ≥30d + zero-facility orgs and every action is written to `account_purge_audit` before deletion. Code rollback = remove the `index.ts` interval + `purgeUnverified.ts`.
+**Rollback (point-of-no-return):** set `PURGE_UNVERIFIED_ENABLED=false` — halts immediately, no redeploy of code needed. The day-10 `deleteUser` + org delete is **irreversible**; it is gated to unverified + ≥10d + zero-facility orgs and every action is written to `account_purge_audit` before deletion. Code rollback = remove the `index.ts` interval + `purgeUnverified.ts`.
 
 ---
 
@@ -525,6 +525,6 @@ export function requireVerifiedEmail(req, res, next) {
 
 ## Self-review notes (author)
 
-- **Spec coverage:** flag/allowlist (T3), Create-account + inline password (T9), interstitial + resend/change-email (T10), OAuth-skips-interstitial (T10 guard), new-org-per-signup + never-join (T5), request-access no-account (T4/T11), verification enforcement client+server (T6/T10), 30-day purge + warning + audit + named job (T7/T8), waitlist notification function (T7, fired by TEN-011), password errors inline not toasts (T9/T11), RLS on new tables (T2), land at W2 (T5 bootstrap). All mapped.
+- **Spec coverage:** flag/allowlist (T3), Create-account + inline password (T9), interstitial + resend/change-email (T10), OAuth-skips-interstitial (T10 guard), new-org-per-signup + never-join (T5), request-access no-account (T4/T11), verification enforcement client+server (T6/T10), purge (warn d7/purge d10) + warning + audit + named job (T7/T8), waitlist notification function (T7, fired by TEN-011), password errors inline not toasts (T9/T11), RLS on new tables (T2), land at W2 (T5 bootstrap). All mapped.
 - **Type consistency:** `ensureOwnerOrg(userId, email) → { organizationId, created }` used identically in T5 bootstrap and T13; `{ mode, allowed }` shape identical T3↔T9; `EMAIL_UNVERIFIED` code identical T6↔T13.
 - **Deploy ordering** (T5 rollback note) is the one cross-task hazard: provisioning must ship before the `facilities.ts` org-create strip.
