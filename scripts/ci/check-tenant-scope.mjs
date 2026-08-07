@@ -30,6 +30,7 @@ const SCOPED_TABLES = [
   "accountingConnectionsTable",
   "seedLotsTable",
   "organizationMembersTable",
+  "invitationsTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
@@ -172,6 +173,19 @@ const BASELINE_VIOLATIONS = new Set([
   //   scope by at all.
   "artifacts/api-server/src/routes/invitations.ts::const existing = await db",
   "artifacts/api-server/src/routes/invitationsAccept.ts::const [member] = await db",
+  // --- (E) TEN-010 final-review: the invitations TABLE itself is now a scoped
+  //         table (added to SCOPED_TABLES so future stray access is caught),
+  //         but its RLS model is deliberately current_user-based, NOT the
+  //         app.org_id GUC that withTenantScope sets -- migration 00016 gives
+  //         invitations the same current_user='farmsmart_app' policy-per-verb
+  //         backstop as organization_members (00011/00012/00014), precisely
+  //         because the ungated accept flow (invitationsAccept.ts) can never
+  //         set an org GUC (the invitee has no tenant yet). GET /invitations's
+  //         list read is org-scoped by its own WHERE (organizationId = ...)
+  //         behind requireRole('owner','admin'); it is not, and must not be,
+  //         wrapped in withTenantScope. Only the SELECT trips the .from(...)
+  //         regex; the insert/update/delete carry the table in the verb arg.
+  "artifacts/api-server/src/routes/invitations.ts::const rows = await db",
 ]);
 
 const newViolations = [];

@@ -225,6 +225,28 @@ describe("POST /invitations/accept", { skip: !canRun }, () => {
     strictEqual(res.status, 400);
   });
 
+  test("new email + no password -> 400, invite reverted to pending (no orphaned auth user)", async () => {
+    const { app, db, invitationsTable, organizationId } = await setup();
+    const email = `accept-nopass-${randomUUID()}@example.com`;
+    const { raw } = await seedInvite(db, invitationsTable, { organizationId, email });
+
+    // No `password` in the body: the handler claims the invite, discovers it
+    // must create a brand-new auth user but has no password, and must revert
+    // the claim rather than leave the invite burned.
+    const res = await request(app).post("/api/invitations/accept").send({ token: raw });
+    strictEqual(res.status, 400);
+
+    const [inviteRow] = await db
+      .select()
+      .from(invitationsTable)
+      .where(eq(invitationsTable.email, email));
+    strictEqual(
+      inviteRow.status,
+      "pending",
+      "a no-password accept for a new user must revert the claim so the invite is still usable",
+    );
+  });
+
   test("email already an active member of another org -> 400", async () => {
     const { app, db, invitationsTable, organizationId } = await setup();
     const { usersTable, organizationsTable, facilitiesTable, organizationMembersTable } =

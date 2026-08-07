@@ -255,9 +255,11 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
     );
   });
 
-  // TEN-010 Task 9: invitations.ts/members.ts are tier-2 self-gating routers
-  // (router.use(requireTenantContext, requireRole("owner","admin")) inside the
-  // router file itself) and invitationsAccept.ts is deliberately PUBLIC (no
+  // TEN-010 Task 9: invitations.ts/members.ts are tier-4 self-gating routers,
+  // mounted LAST so their self-gate (router.use(requireTenantContext,
+  // requireRole("owner","admin")) inside the router file itself) can't
+  // intercept OTHER routers' valid non-owner/admin users. invitationsAccept.ts
+  // is deliberately PUBLIC (no
   // requireSignedIn at all -- the invitee has no session yet). These three
   // cases drive the REAL app stack to prove both halves actually hold: the
   // self-mounted requireRole gate rejects a non-owner/admin caller, an

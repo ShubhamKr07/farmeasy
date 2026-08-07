@@ -95,11 +95,15 @@ SELECT is(
 -- axis) to organization_members.role (owner|admin|technician, the single
 -- source of truth per ADR-005) for the caller's ACTIVE membership, omitting
 -- the claim entirely when no active membership exists, and grants
--- supabase_auth_admin SELECT on organization_members (Task 8).
+-- supabase_auth_admin SELECT on organization_members (Task 8). 00016 enables
+-- RLS on the invitations table and adds current_user-scoped SELECT/INSERT/
+-- UPDATE/DELETE backend policies -- the invitations table shipped with no RLS
+-- at all (the only tenant-scoped table without a backstop, and it stores invite
+-- token hashes); closes the last gap from the TEN-010 final whole-branch review.
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  15,
-  'supabase_migrations.schema_migrations has exactly 15 rows (Supabase migrations 00001-00015)'
+  16,
+  'supabase_migrations.schema_migrations has exactly 16 rows (Supabase migrations 00001-00016)'
 );
 
 SELECT * FROM finish();
