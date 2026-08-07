@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { seedDataIfEmpty } from "./routes/growthProfiles";
 import { scanOverdueCyclesAndAlert } from "./lib/overdue-scanner";
+import { purgeUnverifiedAccounts } from "./lib/purgeUnverified";
 
 const rawPort = process.env["PORT"];
 
@@ -27,6 +28,20 @@ const runScan = () =>
   );
 void runScan();
 setInterval(runScan, 5 * 60 * 1000);
+
+// Unverified-account purge (TEN-012): warn at day 7, delete the auth user +
+// its data-less auto-provisioned org at day 10, every action audited. This is
+// a DESTRUCTIVE job, so it is gated OFF by default — it only ever schedules
+// when PURGE_UNVERIFIED_ENABLED === "true". Rollback = set the flag to false
+// (halts immediately, no redeploy). Runs once on boot + daily thereafter.
+if (process.env.PURGE_UNVERIFIED_ENABLED === "true") {
+  const runPurge = () =>
+    purgeUnverifiedAccounts({ log: logger }).catch((err) =>
+      logger.error({ err }, "unverified purge failed"),
+    );
+  void runPurge();
+  setInterval(runPurge, 24 * 60 * 60 * 1000);
+}
 
 app.listen(port, (err) => {
   if (err) {
