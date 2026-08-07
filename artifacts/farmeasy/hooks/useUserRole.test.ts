@@ -25,17 +25,17 @@ before(async () => {
 });
 
 describe("getUserRole", () => {
-  it("returns the custom user_role claim when present", async () => {
-    claimsResult = { data: { claims: { user_role: "supervisor" } }, error: null };
-    assert.equal(await getUserRole(), "supervisor");
+  it("returns the custom user_role claim when present (owner)", async () => {
+    claimsResult = { data: { claims: { user_role: "owner" } }, error: null };
+    assert.equal(await getUserRole(), "owner");
   });
 
-  it("returns quality_lead and facility_lead claims verbatim", async () => {
-    claimsResult = { data: { claims: { user_role: "quality_lead" } }, error: null };
-    assert.equal(await getUserRole(), "quality_lead");
+  it("returns admin and technician claims verbatim", async () => {
+    claimsResult = { data: { claims: { user_role: "admin" } }, error: null };
+    assert.equal(await getUserRole(), "admin");
 
-    claimsResult = { data: { claims: { user_role: "facility_lead" } }, error: null };
-    assert.equal(await getUserRole(), "facility_lead");
+    claimsResult = { data: { claims: { user_role: "technician" } }, error: null };
+    assert.equal(await getUserRole(), "technician");
   });
 
   it("defaults to technician when the claim is absent", async () => {

@@ -143,6 +143,47 @@ export const organizationMembersTable = pgTable(
   ],
 );
 
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+]);
+
+// Team invitations (TEN-010). Token is 32 random bytes stored SHA-256-hashed;
+// the raw token lives only in the invite link's URL fragment. One-org-per-user
+// (organization_members_user_id_uniq) is the ultimate guard; invite-create and
+// accept both check membership first. Invited role is admin|technician only —
+// never owner (owner is creator-only, v1).
+export const invitationsTable = pgTable(
+  "invitations",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organizationsTable.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: orgMemberRoleEnum("role").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    status: invitationStatusEnum("status").notNull().default("pending"),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => usersTable.id),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at"),
+  },
+  (table) => [
+    uniqueIndex("invitations_token_hash_uniq").on(table.tokenHash),
+    index("invitations_organization_id_idx").on(table.organizationId),
+    // At most one pending invite per (org, email) — re-inviting refreshes the
+    // existing pending row rather than accumulating duplicates.
+    uniqueIndex("invitations_org_email_pending_uniq")
+      .on(table.organizationId, table.email)
+      .where(sql`${table.status} = 'pending'`),
+  ],
+);
+
 export const cropsTable = pgTable("crops", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),

@@ -1,12 +1,11 @@
-export type UserRole = "technician" | "supervisor" | "quality_lead" | "facility_lead";
+export type UserRole = "owner" | "admin" | "technician";
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
   technician: "Technician",
-  supervisor: "Supervisor",
-  quality_lead: "Quality Lead",
-  facility_lead: "Facility Lead",
 };
 
-export function isSupervisorOrLead(role: UserRole): boolean {
-  return role === "supervisor" || role === "facility_lead";
+export function isPrivileged(role: UserRole): boolean {
+  return role !== "technician";
 }

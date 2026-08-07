@@ -9,9 +9,8 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 29 Drizzle migrations should have been
--- replayed (0028_wizard_progress_facility_id_uniq.sql, TEN-008 Task 3, is the most
--- recent addition).
+-- and lib/db/scripts/migrate.mjs). All 30 Drizzle migrations should have been
+-- replayed (0029_invitations.sql, TEN-010 Task 1, is the most recent addition).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -19,8 +18,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  29,
-  'drizzle.__drizzle_migrations has exactly 29 rows (full migration history replayed)'
+  30,
+  'drizzle.__drizzle_migrations has exactly 30 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -85,11 +84,26 @@ SELECT is(
 -- policies to wrap current_setting(...) in NULLIF before casting to int --
 -- the placeholder GUC's empty-string resting state (once ever referenced on
 -- a pooled backend) otherwise throws instead of evaluating to false (Task 16
--- part 2).
+-- part 2). 00014 adds an additive current_user-scoped UPDATE policy on
+-- organization_members -- the invite-accept flow's membership UPSERT
+-- (invitationsAccept.ts, ungated) needs UPDATE for its re-join-after-removal
+-- conflict path, closing the last gap in the TEN-010 Task 7 review (T7 also
+-- rewired members.ts's GET/PATCH/DELETE onto withTenantScope, which needed
+-- no new policy since 00007's tenant-isolation policy already covers UPDATE
+-- once app.org_id is set). 00015 repoints custom_access_token_hook's
+-- `user_role` JWT claim from the deprecated public.users.role (operational
+-- axis) to organization_members.role (owner|admin|technician, the single
+-- source of truth per ADR-005) for the caller's ACTIVE membership, omitting
+-- the claim entirely when no active membership exists, and grants
+-- supabase_auth_admin SELECT on organization_members (Task 8). 00016 enables
+-- RLS on the invitations table and adds current_user-scoped SELECT/INSERT/
+-- UPDATE/DELETE backend policies -- the invitations table shipped with no RLS
+-- at all (the only tenant-scoped table without a backstop, and it stores invite
+-- token hashes); closes the last gap from the TEN-010 final whole-branch review.
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  13,
-  'supabase_migrations.schema_migrations has exactly 13 rows (Supabase migrations 00001-00013)'
+  16,
+  'supabase_migrations.schema_migrations has exactly 16 rows (Supabase migrations 00001-00016)'
 );
 
 SELECT * FROM finish();

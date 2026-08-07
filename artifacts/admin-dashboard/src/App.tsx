@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
+import { useOrgRole } from "@/hooks/use-org-role";
 import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
@@ -22,6 +23,7 @@ import { Layout } from "@/pages/layout/Layout";
 import { Profile } from "@/pages/profile/Profile";
 import { Settings } from "@/pages/settings/Settings";
 import { Wizard } from "@/pages/onboarding/Wizard";
+import { AcceptInvite } from "@/pages/accept-invite/AcceptInvite";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
 if (apiBaseUrl) setBaseUrl(apiBaseUrl);
@@ -67,6 +69,7 @@ function SupabaseAuthBridge() {
  */
 function AuthGate() {
   const { session, loading } = useSupabaseSession();
+  const { role, loading: roleLoading } = useOrgRole();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +139,19 @@ function AuthGate() {
     );
   }
 
+  // Org-role gate (AUTH-003): once a session exists, block the app shell until
+  // the role claim resolves, then direct a technician to the mobile-app-only
+  // denied screen instead of the dashboard. `useOrgRole()` is called
+  // unconditionally above; these values are simply unused in the earlier
+  // `loading` / `!session` early-return branches.
+  if (roleLoading) {
+    return <LoadingScreen />;
+  }
+
+  if (role === "technician") {
+    return <TechnicianDeniedScreen />;
+  }
+
   return (
     <ActiveFacilityProvider>
       <FacilityGate />
@@ -153,6 +169,28 @@ function LoadingScreen() {
     <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
       <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
       <span>Loading…</span>
+    </div>
+  );
+}
+
+/**
+ * AUTH-003: full-screen denied state for a technician who reaches the web
+ * dashboard. Technicians are mobile-app-only; the server 403s
+ * (`requireRole` middleware, ROLE_FORBIDDEN) are the real access control —
+ * this is purely the directing UX so a technician isn't left staring at API
+ * errors. Renders INSTEAD of <FacilityGate/>; the technician never reaches
+ * the app shell.
+ */
+function TechnicianDeniedScreen() {
+  return (
+    <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background text-center px-4">
+      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
+      <p className="text-muted-foreground max-w-sm">
+        The dashboard is for admins — open the FarmSmart mobile app.
+      </p>
+      <Button variant="outline" onClick={() => supabase.auth.signOut()}>
+        Sign out
+      </Button>
     </div>
   );
 }
@@ -262,7 +300,15 @@ function App() {
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <SupabaseAuthBridge />
           <OAuthCallbackHandler />
-          <AuthGate />
+          <Switch>
+            {/* Invitees have no session yet — /accept-invite must bypass the
+                AuthGate sign-in screen. Keep the auth bridge + OAuth handler
+                above mounted for all paths. */}
+            <Route path="/accept-invite" component={AcceptInvite} />
+            <Route>
+              <AuthGate />
+            </Route>
+          </Switch>
         </WouterRouter>
         <Toaster />
       </TooltipProvider>

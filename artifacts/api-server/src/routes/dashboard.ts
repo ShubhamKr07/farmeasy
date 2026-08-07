@@ -16,8 +16,6 @@ import { calcDaysOverdue, seedingWeight } from "../lib/utils";
 
 const router = Router();
 
-type UserRole = "technician" | "supervisor" | "quality_lead" | "facility_lead";
-
 function enforceAuth(req: Request, res: Response, next: NextFunction) {
   const { userId } = getAuth(req);
   if (!userId) {

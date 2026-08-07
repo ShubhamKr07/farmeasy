@@ -1322,3 +1322,87 @@ export const PostFacilityReadinessEventResponse = zod.object({
 })
 
 
+/**
+ * @summary Owner/admin invites a new member by email + role
+ */
+export const CreateInvitationBody = zod.object({
+  "email": zod.string().email(),
+  "role": zod.enum(['admin', 'technician'])
+})
+
+
+/**
+ * @summary List pending invitations for the caller's organization
+ */
+export const ListInvitationsResponseItem = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "role": zod.enum(['admin', 'technician']),
+  "status": zod.enum(['pending', 'accepted', 'revoked', 'expired']),
+  "expiresAt": zod.coerce.date().optional(),
+  "createdAt": zod.coerce.date().optional()
+})
+export const ListInvitationsResponse = zod.array(ListInvitationsResponseItem)
+
+
+/**
+ * @summary Revoke a pending invitation (own org only)
+ */
+export const RevokeInvitationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RevokeInvitationResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Accept an invitation by token (public, no auth — invitee may have no account yet)
+ */
+export const AcceptInvitationBody = zod.object({
+  "token": zod.string(),
+  "password": zod.string().optional()
+})
+
+
+/**
+ * @summary List active members of the caller's organization
+ */
+export const ListMembersResponseItem = zod.object({
+  "userId": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['owner', 'admin', 'technician']),
+  "status": zod.enum(['active', 'removed'])
+})
+export const ListMembersResponse = zod.array(ListMembersResponseItem)
+
+
+/**
+ * @summary Change a member's role (admin/technician only, owner is immutable)
+ */
+export const ChangeMemberRoleParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const ChangeMemberRoleBody = zod.object({
+  "role": zod.enum(['admin', 'technician'])
+})
+
+export const ChangeMemberRoleResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Soft-remove a member (owner is immutable)
+ */
+export const RemoveMemberParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const RemoveMemberResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+

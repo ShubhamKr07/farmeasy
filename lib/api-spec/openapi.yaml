@@ -38,6 +38,10 @@ tags:
     description: Vendor sensor account credentials and connection testing
   - name: wizard-events
     description: WIZ-006 fire-and-forget onboarding wizard step telemetry (view/save/abandon/skip)
+  - name: invitations
+    description: Organization member invitations
+  - name: members
+    description: Organization member management
 paths:
   /healthz:
     get:
@@ -1529,6 +1533,187 @@ paths:
         "409":
           description: Signed-in user has no facility yet
 
+  /invitations:
+    post:
+      operationId: createInvitation
+      tags: [invitations]
+      summary: Owner/admin invites a new member by email + role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvitationRequest"
+      responses:
+        "201":
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invitation"
+        "400":
+          description: Validation failed, or email already belongs to an organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not owner/admin
+    get:
+      operationId: listInvitations
+      tags: [invitations]
+      summary: List pending invitations for the caller's organization
+      responses:
+        "200":
+          description: List of pending invitations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Invitation"
+
+  /invitations/{id}:
+    delete:
+      operationId: revokeInvitation
+      tags: [invitations]
+      summary: Revoke a pending invitation (own org only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "404":
+          description: Invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      tags: [invitations]
+      summary: Accept an invitation by token (public, no auth — invitee may have no account yet)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInvitationRequest"
+      responses:
+        "201":
+          description: Invitation accepted, membership created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizationId:
+                    type: integer
+                  role:
+                    type: string
+                  email:
+                    type: string
+                required: [organizationId, role, email]
+        "400":
+          description: Invalid, expired, or already-used invitation; or validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /members:
+    get:
+      operationId: listMembers
+      tags: [members]
+      summary: List active members of the caller's organization
+      responses:
+        "200":
+          description: List of active members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Member"
+
+  /members/{userId}/role:
+    patch:
+      operationId: changeMemberRole
+      tags: [members]
+      summary: Change a member's role (admin/technician only, owner is immutable)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRoleRequest"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "404":
+          description: Member not found or not modifiable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /members/{userId}:
+    delete:
+      operationId: removeMember
+      tags: [members]
+      summary: Soft-remove a member (owner is immutable)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "404":
+          description: Member not found or not removable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -2883,3 +3068,67 @@ components:
           type: string
           enum: [leafy, herb, brassica, legume, cereal, other]
       required: [name]
+
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        role:
+          type: string
+          enum: [admin, technician]
+        status:
+          type: string
+          enum: [pending, accepted, revoked, expired]
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, email, role, status]
+
+    CreateInvitationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, technician]
+      required: [email, role]
+
+    AcceptInvitationRequest:
+      type: object
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+      required: [token]
+
+    Member:
+      type: object
+      properties:
+        userId:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, technician]
+        status:
+          type: string
+          enum: [active, removed]
+      required: [userId, email, role, status]
+
+    ChangeRoleRequest:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, technician]
+      required: [role]

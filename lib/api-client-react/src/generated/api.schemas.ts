@@ -1088,6 +1088,87 @@ export interface CropInput {
   category?: CropInputCategory;
 }
 
+export type InvitationRole = typeof InvitationRole[keyof typeof InvitationRole];
+
+
+export const InvitationRole = {
+  admin: 'admin',
+  technician: 'technician',
+} as const;
+
+export type InvitationStatus = typeof InvitationStatus[keyof typeof InvitationStatus];
+
+
+export const InvitationStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  revoked: 'revoked',
+  expired: 'expired',
+} as const;
+
+export interface Invitation {
+  id: number;
+  email: string;
+  role: InvitationRole;
+  status: InvitationStatus;
+  expiresAt?: string;
+  createdAt?: string;
+}
+
+export type CreateInvitationRequestRole = typeof CreateInvitationRequestRole[keyof typeof CreateInvitationRequestRole];
+
+
+export const CreateInvitationRequestRole = {
+  admin: 'admin',
+  technician: 'technician',
+} as const;
+
+export interface CreateInvitationRequest {
+  email: string;
+  role: CreateInvitationRequestRole;
+}
+
+export interface AcceptInvitationRequest {
+  token: string;
+  password?: string;
+}
+
+export type MemberRole = typeof MemberRole[keyof typeof MemberRole];
+
+
+export const MemberRole = {
+  owner: 'owner',
+  admin: 'admin',
+  technician: 'technician',
+} as const;
+
+export type MemberStatus = typeof MemberStatus[keyof typeof MemberStatus];
+
+
+export const MemberStatus = {
+  active: 'active',
+  removed: 'removed',
+} as const;
+
+export interface Member {
+  userId: string;
+  email: string;
+  role: MemberRole;
+  status: MemberStatus;
+}
+
+export type ChangeRoleRequestRole = typeof ChangeRoleRequestRole[keyof typeof ChangeRoleRequestRole];
+
+
+export const ChangeRoleRequestRole = {
+  admin: 'admin',
+  technician: 'technician',
+} as const;
+
+export interface ChangeRoleRequest {
+  role: ChangeRoleRequestRole;
+}
+
 export type LookupSeedLotParams = {
 qrCode: string;
 };
@@ -1205,6 +1286,24 @@ export type PostFacilityReadinessEvent200 = {
 };
 
 export type PostFacilityReadinessEvent201 = {
+  ok: boolean;
+};
+
+export type RevokeInvitation200 = {
+  ok: boolean;
+};
+
+export type AcceptInvitation201 = {
+  organizationId: number;
+  role: string;
+  email: string;
+};
+
+export type ChangeMemberRole200 = {
+  ok: boolean;
+};
+
+export type RemoveMember200 = {
   ok: boolean;
 };
 

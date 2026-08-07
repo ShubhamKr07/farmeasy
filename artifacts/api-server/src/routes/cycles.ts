@@ -31,8 +31,6 @@ const router = Router();
 // against GET /cycles).
 router.use(requireTenantContext);
 
-type UserRole = "technician" | "supervisor" | "quality_lead" | "facility_lead";
-
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 const CreateCycleSchema = z
@@ -102,13 +100,12 @@ function enforceAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-function extractRole(req: Request): UserRole {
-  const { userRole } = getAuth(req);
-  return (userRole as UserRole | null) ?? "technician";
-}
-
-function isSupervisorOrLead(role: UserRole): boolean {
-  return role === "supervisor" || role === "facility_lead";
+// TEN-010: the operational-role gates (history view, completed-cycle edits)
+// collapse onto the org role — any non-technician member (owner/admin) is
+// privileged. Reads req.tenant.role (server-resolved) rather than the JWT
+// claim.
+function isPrivileged(role: "owner" | "admin" | "technician"): boolean {
+  return role !== "technician";
 }
 
 function parseParamId(req: Request): number {
@@ -192,13 +189,12 @@ async function formatCheck(c: typeof manualChecksTable.$inferSelect) {
 
 router.get("/cycles", async (req, res) => {
   try {
-    const role = extractRole(req);
     const status = (req.query.status as string) || "ongoing";
 
-    if (status === "history" && !isSupervisorOrLead(role)) {
+    if (status === "history" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "History access is restricted to supervisors" });
+        .json({ error: "History access is restricted to admins" });
     }
 
     const rows = await withTenantScope(req.tenant!, (tx) =>
@@ -314,7 +310,6 @@ router.post("/cycles", enforceAuth, async (req, res) => {
 router.get("/cycles/:id", async (req, res) => {
   try {
     const id = parseParamId(req);
-    const role = extractRole(req);
 
     const rows = await withTenantScope(req.tenant!, (tx) =>
       tx
@@ -332,10 +327,10 @@ router.get("/cycles/:id", async (req, res) => {
       return res.status(404).json({ error: "Cycle not found" });
     }
 
-    if (rows[0].cycle.status === "completed" && !isSupervisorOrLead(role)) {
+    if (rows[0].cycle.status === "completed" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "Access to completed cycle details is restricted to supervisors" });
+        .json({ error: "Access to completed cycle details is restricted to admins" });
     }
 
     const checks = await withTenantScope(req.tenant!, (tx) =>
@@ -616,7 +611,6 @@ router.post("/cycles/:id/complete-harvest", enforceAuth, async (req, res) => {
 router.get("/cycles/:id/manual-checks", async (req, res) => {
   try {
     const id = parseParamId(req);
-    const role = extractRole(req);
 
     const [cycle] = await withTenantScope(req.tenant!, (tx) =>
       tx
@@ -630,10 +624,10 @@ router.get("/cycles/:id/manual-checks", async (req, res) => {
       return res.status(404).json({ error: "Cycle not found" });
     }
 
-    if (cycle.status === "completed" && !isSupervisorOrLead(role)) {
+    if (cycle.status === "completed" && !isPrivileged(req.tenant!.role)) {
       return res
         .status(403)
-        .json({ error: "Access to completed cycle audit log is restricted to supervisors" });
+        .json({ error: "Access to completed cycle audit log is restricted to admins" });
     }
 
     const checks = await withTenantScope(req.tenant!, (tx) =>

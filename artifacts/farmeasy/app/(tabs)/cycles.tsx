@@ -42,7 +42,7 @@ const HISTORY_STAGES: { label: string; value: StageFilter }[] = [
 export default function CyclesScreen() {
   const colors = useColors();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { isSupervisor } = useUserRole();
+  const { isPrivileged } = useUserRole();
   const [activeTab, setActiveTab] = useState<Tab>("ongoing");
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -104,7 +104,7 @@ export default function CyclesScreen() {
             Ongoing
           </Text>
         </Pressable>
-        {isSupervisor ? (
+        {isPrivileged ? (
           <Pressable
             style={[s.tab, activeTab === "history" && s.tabActive]}
             onPress={() => handleTabSwitch("history")}

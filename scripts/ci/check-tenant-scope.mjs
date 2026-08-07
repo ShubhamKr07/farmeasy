@@ -30,6 +30,7 @@ const SCOPED_TABLES = [
   "accountingConnectionsTable",
   "seedLotsTable",
   "organizationMembersTable",
+  "invitationsTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
@@ -154,6 +155,37 @@ const BASELINE_VIOLATIONS = new Set([
   //         tenant context that withTenantScope would later consume.
   "artifacts/api-server/src/routes/facilities.ts::const [membership] = await db",
   "artifacts/api-server/src/routes/wizard.ts::const [membership] = await db",
+  // --- (D) TEN-010 Task 7 review's PERMANENT org-membership bootstrap reads
+  //         (also NOT deferred debt, same category as group (C)). Both are
+  //         admitted under farmsmart_app by 00012's blanket backend SELECT
+  //         policy on organization_members, and both already carry their own
+  //         explicit WHERE filters -- withTenantScope is not an option for
+  //         either:
+  //   invitations.ts's one-org-per-user check (POST /invitations) queries
+  //   organization_members joined to users by EMAIL, across ALL
+  //   organizations -- deliberately NOT org-scoped, since the whole point is
+  //   to catch an email that already belongs to a DIFFERENT org than the
+  //   caller's.
+  //   invitationsAccept.ts's equivalent one-org check (POST
+  //   /invitations/accept) runs on the ungated accept router -- the invitee
+  //   is not yet a member of anything (that is what this request is trying
+  //   to establish), so there is no req.tenant / resolved organization to
+  //   scope by at all.
+  "artifacts/api-server/src/routes/invitations.ts::const existing = await db",
+  "artifacts/api-server/src/routes/invitationsAccept.ts::const [member] = await db",
+  // --- (E) TEN-010 final-review: the invitations TABLE itself is now a scoped
+  //         table (added to SCOPED_TABLES so future stray access is caught),
+  //         but its RLS model is deliberately current_user-based, NOT the
+  //         app.org_id GUC that withTenantScope sets -- migration 00016 gives
+  //         invitations the same current_user='farmsmart_app' policy-per-verb
+  //         backstop as organization_members (00011/00012/00014), precisely
+  //         because the ungated accept flow (invitationsAccept.ts) can never
+  //         set an org GUC (the invitee has no tenant yet). GET /invitations's
+  //         list read is org-scoped by its own WHERE (organizationId = ...)
+  //         behind requireRole('owner','admin'); it is not, and must not be,
+  //         wrapped in withTenantScope. Only the SELECT trips the .from(...)
+  //         regex; the insert/update/delete carry the table in the verb arg.
+  "artifacts/api-server/src/routes/invitations.ts::const rows = await db",
 ]);
 
 const newViolations = [];
