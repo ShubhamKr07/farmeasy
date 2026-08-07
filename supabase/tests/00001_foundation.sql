@@ -9,8 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 30 Drizzle migrations should have been
--- replayed (0029_invitations.sql, TEN-010 Task 1, is the most recent addition).
+-- and lib/db/scripts/migrate.mjs). All 31 Drizzle migrations should have been
+-- replayed (0030, TEN-012 Task 1, is the most recent addition -- adds
+-- signup_allowlist, access_requests, account_purge_audit).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -18,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  30,
-  'drizzle.__drizzle_migrations has exactly 30 rows (full migration history replayed)'
+  31,
+  'drizzle.__drizzle_migrations has exactly 31 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -100,10 +101,15 @@ SELECT is(
 -- UPDATE/DELETE backend policies -- the invitations table shipped with no RLS
 -- at all (the only tenant-scoped table without a backstop, and it stores invite
 -- token hashes); closes the last gap from the TEN-010 final whole-branch review.
+-- 00017 enables RLS on the three TEN-012 sign-up tables (signup_allowlist,
+-- access_requests, account_purge_audit) and adds current_user-scoped backend
+-- policies for the verbs each flow uses (3/3/2) -- these PII-bearing tables
+-- shipped in TEN-012 Task 1 with no RLS at all, the same class of gap 00016
+-- closed for invitations.
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  16,
-  'supabase_migrations.schema_migrations has exactly 16 rows (Supabase migrations 00001-00016)'
+  17,
+  'supabase_migrations.schema_migrations has exactly 17 rows (Supabase migrations 00001-00017)'
 );
 
 SELECT * FROM finish();
