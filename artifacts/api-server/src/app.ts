@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { supabaseAuthMiddleware, getAuth } from "./middlewares/supabaseAuth";
+import { requireVerifiedEmail } from "./middlewares/requireVerifiedEmail";
 import { resolveTenantContext, requireTenantContext } from "./middlewares/tenantContext";
 import router from "./routes";
 import healthRouter from "./routes/health";
@@ -115,6 +116,23 @@ function requireSignedIn(req: Request, res: Response, next: NextFunction) {
 app.use("/api", healthRouter);
 app.use("/api", accountingPublicRouter);
 app.use("/api", invitationsAcceptRouter);
+
+// Backend email-verification gate (TEN-012 Task 6) — defense-in-depth.
+// Registered as a standalone `/api` middleware AFTER every PUBLIC router above
+// (health / accounting OAuth callback / invitations-accept — a brand-new
+// invitee with no session yet must reach accept, so it can't sit behind this
+// gate) and BEFORE every requireSignedIn-gated tier below. Because each public
+// router responds and does NOT call next() for the paths it owns, a request to
+// a public path never reaches this line; every OTHER /api request falls
+// through to here. requireSignedIn runs first (401 for no/invalid token — an
+// unauthenticated caller has no verification claim to check anyway), then
+// requireVerifiedEmail 403s only when the JWT claim is explicitly `false`
+// (absent claim passes through — see the middleware's own doc comment). A
+// VERIFIED user passes straight through to the tiers below, so the wizard
+// bootstrap (GET /wizard/progress, tier 1) stays reachable for them. When the
+// public createAuthRouter (signup-availability / request-access) is later
+// mounted, mount it ABOVE this line alongside the other public routers.
+app.use("/api", requireSignedIn, requireVerifiedEmail);
 
 // Everything else requires a signed-in Clerk session (S1/S2). Per-route
 // `enforceAuth` handlers in cycles/media remain as defense-in-depth.

@@ -271,6 +271,67 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
     );
   });
 
+  // TEN-012 Task 6: backend email-verification gate (requireVerifiedEmail),
+  // mounted as a standalone `/api` middleware after the PUBLIC routers and
+  // before every requireSignedIn-gated tier. Two things must hold through the
+  // real app stack: a VERIFIED user passes the gate and reaches a protected
+  // route, and the PUBLIC accept route (mounted above the gate) is never
+  // intercepted by it.
+  test("verified user (email_confirm:true) passes requireVerifiedEmail and reaches GET /api/wizard/progress (200) through the real app", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const res = await request(app)
+      .get("/api/wizard/progress")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    // createRealTestUser uses email_confirm:true, so the JWT carries
+    // user_metadata.email_verified === true (verified empirically against this
+    // repo's disposable GoTrue). The verification gate must let it through to
+    // the tier-1 wizard bootstrap. A 403 { code: "EMAIL_UNVERIFIED" } here
+    // would mean the gate is wrongly blocking a verified user.
+    strictEqual(
+      res.status,
+      200,
+      `verified user must pass the email-verification gate: got ${res.status}: ${JSON.stringify(res.body)}`,
+    );
+  });
+
+  test("an UNVERIFIED session cannot be minted at all: GoTrue refuses signInWithPassword for an email_confirm:false user (this IS the primary control that makes requireVerifiedEmail defense-in-depth)", async () => {
+    // The brief asks whether an unverified token can be minted against the
+    // disposable GoTrue to assert a 403 on a protected route. It CANNOT: with
+    // email confirmation required, GoTrue never issues a session for an
+    // unconfirmed address — signInWithPassword fails with "Email not
+    // confirmed" and no access token is produced. That is precisely the
+    // PRIMARY control; requireVerifiedEmail is the secondary/defense-in-depth
+    // layer (unit-tested directly with a stubbed emailVerified:false claim in
+    // tests/middlewares/requireVerifiedEmail.test.ts, since no real
+    // unverified token exists to drive the full stack with). We assert the
+    // refusal here so this documented fact is itself covered.
+    const { createClient } = await import("@supabase/supabase-js");
+    const admin = createClient(supabaseUrl!, supabaseServiceRoleKey!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const email = `app-test-unconfirmed-${randomUUID()}@app-test.example.com`;
+    const password = `Test-${randomUUID()}!Aa1`;
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: false,
+    });
+    if (createErr || !created.user) {
+      throw new Error(`could not create unconfirmed user: ${createErr?.message}`);
+    }
+    createdUserIds.push(created.user.id);
+
+    const { data: signedIn, error: signInErr } = await admin.auth.signInWithPassword({
+      email,
+      password,
+    });
+    strictEqual(signedIn.session, null, "GoTrue must NOT issue a session for an unconfirmed user");
+    ok(signInErr, "signInWithPassword must error for an unconfirmed user (primary confirm-email control)");
+  });
+
   // TEN-010 Task 9: invitations.ts/members.ts are tier-4 self-gating routers,
   // mounted LAST so their self-gate (router.use(requireTenantContext,
   // requireRole("owner","admin")) inside the router file itself) can't
