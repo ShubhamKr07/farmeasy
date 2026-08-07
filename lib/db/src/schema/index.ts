@@ -829,3 +829,27 @@ export const facilityLogsTable = pgTable(
     index("facility_logs_type_created_at_idx").on(table.logType, table.createdAt),
   ],
 );
+
+// ── TEN-012: public sign-up ──────────────────────────────────────────────
+
+export const signupAllowlistTable = pgTable("signup_allowlist", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const accessRequestsTable = pgTable("access_requests", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  farmName: text("farm_name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  notifiedAt: timestamp("notified_at"),
+});
+
+export const accountPurgeAuditTable = pgTable("account_purge_audit", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  email: text("email").notNull(),
+  action: text("action").notNull(), // 'warned' | 'purged'
+  at: timestamp("at").notNull().defaultNow(),
+});
