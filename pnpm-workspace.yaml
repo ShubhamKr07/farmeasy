@@ -173,9 +173,12 @@ overrides:
   brace-expansion: "^1.1.16"
   "brace-expansion@>=2.0.0 <3.0.0": "^2.1.2"
   "brace-expansion@>=3.0.0": "^5.0.8"
-  # js-yaml ships two independent major-version lines
-  js-yaml: "^3.15.0"
-  "js-yaml@>=4.0.0": "^4.3.0"
+  # js-yaml ships two independent major-version lines; both bumped to the
+  # patched floor for GHSA-5p4m-2wfm-xmqj / CVE-2026-59870 (quadratic CPU in
+  # !!omap resolution) — 3.x fixed in 3.15.1, 4.x fixed in 4.3.1. The prior
+  # ^3.15.0 / ^4.3.0 floors sat exactly one patch below the fix.
+  js-yaml: "^3.15.1"
+  "js-yaml@>=4.0.0": "^4.3.1"
   shell-quote: "1.9.0"
   fast-uri: "3.1.5"
   postcss: "8.5.18"
