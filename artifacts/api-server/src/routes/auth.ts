@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
-import { db, signupAllowlistTable } from "@workspace/db";
+import { z } from "zod";
+import { db, signupAllowlistTable, accessRequestsTable } from "@workspace/db";
 import { getSignupMode } from "../lib/signupMode";
 
 const SIGNUP_AVAILABILITY_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -57,6 +58,50 @@ export function createAuthRouter(): Router {
     } catch (err) {
       req.log.error(err);
       return res.status(500).json({ error: "Failed to check sign-up availability" });
+    }
+  });
+
+  // POST /auth/request-access — public (no auth). Captures a waitlist entry
+  // while sign-up is flag-off. Writes ONLY access_requests — it never calls
+  // auth admin and never creates an org/facility/membership (Task 7 adds the
+  // notify path; Task 9 mounts this router). Email is normalized
+  // (trim + lowercase) BEFORE the email-format check AND before storing, so:
+  //   (a) a mixed-case/whitespace input still passes `.email()` validation,
+  //       and (b) the stored value matches the lowercased lookup the Task 3
+  // read side performs, and (c) the unique-email conflict below dedupes
+  // case/space variants instead of creating near-duplicate rows.
+  const RequestAccessSchema = z.object({
+    email: z
+      .string()
+      .transform((s) => s.trim().toLowerCase())
+      .pipe(z.string().email()),
+    farmName: z.string().min(1).max(120),
+  });
+
+  router.post("/auth/request-access", availabilityLimiter, async (req: Request, res: Response) => {
+    try {
+      const parsed = RequestAccessSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      }
+      const email = parsed.data.email;
+      const farmName = parsed.data.farmName;
+
+      // Upsert on the unique email; the only mutable field on a re-submit is
+      // farm_name. notified_at is deliberately left alone — Task 7 owns
+      // setting it when a requester is actually emailed.
+      await db
+        .insert(accessRequestsTable)
+        .values({ email, farmName })
+        .onConflictDoUpdate({
+          target: accessRequestsTable.email,
+          set: { farmName },
+        });
+
+      return res.status(201).json({ ok: true });
+    } catch (err) {
+      req.log.error(err);
+      return res.status(500).json({ error: "Failed to capture access request" });
     }
   });
 
