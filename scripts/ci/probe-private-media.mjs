@@ -8,10 +8,10 @@
  *   1. Establish a real authenticated Supabase Auth session exactly the way
  *      `test-supabase-signup.mjs` does: signUp a fresh identity through the
  *      anon client, poll the Mailosaur test mailbox for the confirmation OTP,
- *      redeem it via `auth.verifyOtp` to get a live session. (The OTP helpers
- *      `resolveMailosaurServerId` / `pollInboxForOtp` / `extractOtp` are
- *      copied from that file — it executes at module load, so it cannot be
- *      imported; the pattern is reused verbatim/adapted.)
+ *      redeem it via `auth.verifyOtp` to get a live session. `pollInboxForOtp`
+ *      is imported from the shared ./lib/mailosaur-otp.mjs module — the single
+ *      source of truth for Mailosaur OTP retrieval, shared with
+ *      test-supabase-signup.mjs so the two scripts can never drift apart.)
  *   2. Upload a tiny in-memory PNG through the LIVE API `POST /api/media/upload`
  *      (multipart `file`). Capture the returned bucket-relative `key`.
  *   3. Persist that `key` through the LIVE API `POST /api/facility-logs`
@@ -64,6 +64,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { deflateSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { pollInboxForOtp } from "./lib/mailosaur-otp.mjs";
 
 // ── Env prefix: STAGING | PRODUCTION (same script, both envs) ───────────────
 const PREFIX = (process.env.PROBE_ENV_PREFIX ?? "STAGING").trim().toUpperCase();
@@ -113,9 +114,11 @@ const TEST_PASSWORD =
   env(`${PREFIX}_TEST_PASSWORD`) ??
   `Probe-${PREFIX}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}!Aa1`;
 
-// OTP retrieval tuning (operational, not secrets).
+// OTP retrieval budget, surfaced only in the local log string below. The actual
+// pollInboxForOtp tuning (timeout + interval) now lives self-contained in
+// ./lib/mailosaur-otp.mjs (the single source of truth, shared with the signup
+// smoke test).
 const OTP_TIMEOUT_MS = Number(env(`${PREFIX}_OTP_TIMEOUT_MS`) ?? 90_000);
-const OTP_INTERVAL_MS = Number(env(`${PREFIX}_OTP_INTERVAL_MS`) ?? 3_000);
 
 // Optional deploy context, persisted into the final summary line ONLY. These
 // are non-sensitive identifiers (GitHub run id, git SHA, Render deploy ids).
@@ -178,78 +181,11 @@ function minimalPng() {
   ]);
 }
 
-// ── OTP helpers (copied/adapted from test-supabase-signup.mjs) ──────────────
-// test-supabase-signup.mjs runs its whole flow at module load, so it can't be
-// imported. The Mailosaur OTP-retrieval helpers are reused verbatim so the two
-// scripts agree on exactly the same mailbox/OTP contract. Swap provider here
-// and in test-supabase-signup.mjs together if the inbox provider changes.
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function resolveMailosaurServerId(token) {
-  const auth = "Basic " + Buffer.from(`${token}:`).toString("base64");
-  const res = await fetch("https://mailosaur.com/api/servers", {
-    headers: { Authorization: auth },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `Mailosaur GET /api/servers failed: HTTP ${res.status} ${body}`,
-    );
-  }
-  const json = await res.json();
-  const items = json.items ?? json.data ?? [];
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error(
-      "Mailosaur account has no servers; create one and verify the test domain.",
-    );
-  }
-  return String(items[0].id);
-}
-
-function extractOtp(body) {
-  if (!body) return null;
-  const text = String(body);
-  const labeled = text.match(/(?:code|otp|verification|token)[^\d]{0,20}(\d{6})/i);
-  if (labeled) return labeled[1];
-  const plain = text.match(/\b(\d{6})\b/);
-  return plain ? plain[1] : null;
-}
-
-async function pollInboxForOtp({ token, toEmail, sinceIso }) {
-  const serverId = await resolveMailosaurServerId(token);
-  const auth = "Basic " + Buffer.from(`${token}:`).toString("base64");
-  const url = new URL("https://mailosaur.com/api/messages");
-  url.searchParams.set("server", serverId);
-  url.searchParams.set("sentTo", toEmail);
-  url.searchParams.set("receivedAfter", sinceIso);
-  url.searchParams.set("limit", "10");
-
-  const deadline = Date.now() + OTP_TIMEOUT_MS;
-  let lastSeen = 0;
-  while (Date.now() < deadline) {
-    const res = await fetch(url, { headers: { Authorization: auth } });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(
-        `Mailosaur GET /api/messages failed: HTTP ${res.status} ${body}`,
-      );
-    }
-    const json = await res.json();
-    const items = json.items ?? json.data ?? [];
-    lastSeen = items.length;
-    for (const msg of items) {
-      const body = msg.html ?? msg.text?.body ?? msg.text ?? msg.subject ?? "";
-      const otp = extractOtp(body);
-      if (otp) return otp;
-    }
-    await sleep(OTP_INTERVAL_MS);
-  }
-  throw new Error(
-    `Timed out after ${OTP_TIMEOUT_MS}ms waiting for OTP email to ${toEmail} ` +
-      `(last inbox poll saw ${lastSeen} matching message(s)).`,
-  );
-}
+// ── OTP retrieval (shared, single source of truth) ──────────────────────────
+// pollInboxForOtp is imported from ./lib/mailosaur-otp.mjs, the single source
+// of truth shared with test-supabase-signup.mjs so the two scripts can never
+// drift apart (the probe previously ran a stale copy that read the LIST
+// summary body and timed out on the staging deploy gate).
 
 // ── Main ────────────────────────────────────────────────────────────────────
 const ts = Date.now();
@@ -295,7 +231,10 @@ try {
   const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
     email,
     token: otp,
-    type: "email",
+    // type "signup" — this is a fresh-signup confirmation OTP (the email's own
+    // verify URL carries type=signup). "email" is for existing-user OTP sign-in
+    // and would reject a fresh signup token. Mirrors test-supabase-signup.mjs.
+    type: "signup",
   });
   const session = (await supabaseAnon.auth.getSession()).data?.session;
   if (verifyError) {
