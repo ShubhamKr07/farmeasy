@@ -422,6 +422,49 @@ secrets to add.
 
 ---
 
+## Step 8: Supabase Auth email via Resend (TEN-012)
+
+TEN-012 (public sign-up) makes email verification the **primary** gate — a
+session is only issued once the address is confirmed (`requireVerifiedEmail` in
+`api-server` is defense-in-depth, not the gate). Supabase Auth (GoTrue) sends
+the sign-up confirmation, password-reset, and magic-link emails **itself**, via
+its own SMTP — the app's `email` lib (Resend, used for invites/purge-warnings)
+never touches them. So this must be configured on the **hosted project**, not in
+`supabase/config.toml` (that file only drives the local instance, which stays on
+inbucket for tests). Do it for **staging first**, then production at promotion.
+
+**Per hosted project (Dashboard → Authentication → Emails → SMTP Settings, or the
+Management API):**
+
+1. **Enable confirmations.** Authentication → Providers/Email → turn **"Confirm
+   email"** ON. Without this, GoTrue issues sessions to unverified users and the
+   whole front-door gate is moot.
+2. **Custom SMTP → Resend:**
+   - Host: `smtp.resend.com`
+   - Port: `465`
+   - Username: `resend`
+   - Password: **a Resend API key** (create one in Resend → API Keys, send
+     permission). **Enter it in the dashboard directly — never commit it.**
+   - Sender email: `noreply@farmsmart.app` (the domain already verified in
+     Resend for invites — DKIM/SPF live)
+   - Sender name: `FarmSmart`
+3. **Rate limits:** raise Authentication → Rate Limits → "Emails per hour" above
+   the default once real SMTP is in place (the default assumes Supabase's own
+   throttled sender).
+4. **Verify:** trigger a sign-up against staging and confirm the email arrives
+   from `farmsmart.app` via Resend (Resend dashboard → Logs shows the send), and
+   the confirmation link lands the user verified. TEN-012's local test proves the
+   send + link shape against inbucket; this step proves the Resend path on
+   staging.
+
+> **Status:** _pending_ — Resend SMTP + `enable_confirmations` not yet set on
+> `farmsmart-staging`. The `[auth.email.smtp]` reference values live (commented)
+> in `supabase/config.toml`. Owner action: enter the Resend key in the staging
+> dashboard (secret entry is a human step — it is an API key going into a
+> credential field).
+
+---
+
 ## Reference: full variable and secret list
 
 The complete set of 23 names configured by this runbook, in one place for

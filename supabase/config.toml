@@ -224,6 +224,12 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
+# LOCAL: kept false so tests/dev sign-ins don't require an inbox round-trip
+# (admin.createUser({email_confirm:true}) is used in tests regardless).
+# STAGING/PROD (TEN-012): MUST be true — the public sign-up front door depends
+# on "no session until verified" as its primary control (requireVerifiedEmail
+# is only defense-in-depth). Set it true in the hosted project's Auth settings,
+# NOT here (this file only configures the local instance).
 enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
@@ -234,15 +240,23 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
+# Use a production-ready SMTP server.
+# TEN-012: staging/prod route Supabase Auth email (sign-up confirmation,
+# password reset, magic link) through RESEND, from the verified farmsmart.app
+# domain — the same ESP the app uses for invites/purge-warnings, for
+# consistent deliverability + branding. GoTrue sends these messages itself
+# (our app's `email` lib never sees them), so this is the ONLY place Resend
+# gets wired for them. Set these on the HOSTED project (Dashboard → Auth → SMTP,
+# or the Management API) — NOT here: the local instance intentionally uses
+# inbucket so dev/test sign-ups never send real mail. Reference values:
 # [auth.email.smtp]
 # enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(RESEND_SMTP_API_KEY)"   # a Resend API key; entered in the dashboard, never committed
+# admin_email = "noreply@farmsmart.app"
+# sender_name = "FarmSmart"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
