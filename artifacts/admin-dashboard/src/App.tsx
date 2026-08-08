@@ -10,6 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import { useOrgRole } from "@/hooks/use-org-role";
+import { useSignupAvailability } from "@/hooks/use-signup-availability";
+import { SignUpForm } from "@/pages/auth/SignUpForm";
+import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
 import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
@@ -65,7 +68,9 @@ function SupabaseAuthBridge() {
 /**
  * Shows a Supabase-backed sign-in screen until the user is authenticated.
  * Mirrors the previous Clerk gate structure, swapping `<SignIn />` for an
- * email/password form plus a Google OAuth button.
+ * email/password form plus a Google OAuth button. TEN-012 Task 9 adds a
+ * "Create an account" toggle that switches to SignUpForm (availability-gated
+ * via useSignupAvailability, which probes the same email field).
  */
 function AuthGate() {
   const { session, loading } = useSupabaseSession();
@@ -74,6 +79,16 @@ function AuthGate() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // TEN-012 Task 9: toggle between the existing sign-in form (unchanged) and
+  // the new Create-account form. Defaults to sign-in so existing behavior is
+  // preserved for every user who never touches the toggle.
+  const [view, setView] = useState<"signin" | "signup">("signin");
+
+  // Probe sign-up availability for the email typed into the SHARED email
+  // field, so a user who typed their address to sign in already knows (once
+  // they flip to "Create an account") whether sign-up is open / allowlisted /
+  // closed. The probe is public (no bearer token) — see useSignupAvailability.
+  const { mode, allowed } = useSignupAvailability(email);
 
   if (loading) {
     return <LoadingScreen />;
@@ -92,51 +107,104 @@ function AuthGate() {
       if (signInError) setError(signInError.message);
     };
 
+    // Offer the "Create an account" toggle whenever a sign-up path exists for
+    // the typed email: open sign-up (public), an allowlisted email, OR
+    // sign-up closed (off) — in the last case the toggle still routes to the
+    // Request-access placeholder inside SignUpForm. mode === null (no email
+    // typed / probe in flight) defaults to showing the toggle so a brand-new
+    // visitor can reach Create-account immediately. An email confirmed NOT
+    // allowlisted (allowlist && !allowed) hides the toggle in the sign-in
+    // view. Force-show whenever we're already in the sign-up view so the user
+    // can always switch back to sign-in.
+    const showCreateAccountToggle =
+      view === "signup" ||
+      mode === null ||
+      mode === "public" ||
+      mode === "off" ||
+      (mode === "allowlist" && allowed);
+
     return (
       <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background">
         <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
-        <form onSubmit={signIn} className="w-full max-w-sm space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={busy}>
-            Sign in
+        {view === "signup" ? (
+          <SignUpForm
+            mode={mode}
+            allowed={allowed}
+            email={email}
+            onEmailChange={setEmail}
+          />
+        ) : (
+          <>
+            <form onSubmit={signIn} className="w-full max-w-sm space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <Button type="submit" className="w-full" disabled={busy}>
+                Sign in
+              </Button>
+            </form>
+            <div className="flex items-center gap-3 w-full max-w-sm">
+              <div className="h-px bg-border flex-1" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="h-px bg-border flex-1" />
+            </div>
+            <Button
+              variant="outline"
+              className="w-full max-w-sm"
+              onClick={() => supabase.auth.signInWithOAuth({ provider: "google" })}
+            >
+              Continue with Google
+            </Button>
+          </>
+        )}
+
+        {showCreateAccountToggle && (
+          <Button
+            variant="link"
+            className="text-sm"
+            onClick={() => setView((v) => (v === "signin" ? "signup" : "signin"))}
+          >
+            {view === "signin"
+              ? "Don't have an account? Create one"
+              : "Already have an account? Sign in"}
           </Button>
-        </form>
-        <div className="flex items-center gap-3 w-full max-w-sm">
-          <div className="h-px bg-border flex-1" />
-          <span className="text-xs text-muted-foreground">or</span>
-          <div className="h-px bg-border flex-1" />
-        </div>
-        <Button
-          variant="outline"
-          className="w-full max-w-sm"
-          onClick={() => supabase.auth.signInWithOAuth({ provider: "google" })}
-        >
-          Continue with Google
-        </Button>
+        )}
       </div>
     );
+  }
+
+  // Email-verification guard (TEN-012 T10): a signed-up-but-unverified
+  // session must see ONLY the interstitial — never the app shell and never
+  // the org-role gate below. `email_confirmed_at` stays null until the user
+  // clicks the inbox link; Google-OAuth sessions arrive already confirmed
+  // (Supabase stamps the timestamp from the verified Google email), so they
+  // skip this branch and proceed to the role/facility gates. The backend
+  // `requireVerifiedEmail` gate (Task 6) is the real security boundary;
+  // this is the directing UX. No onChangeEmail here — a session already
+  // exists, so there's no "form to go back to"; the user resends or
+  // confirms out-of-band.
+  if (session && !session.user.email_confirmed_at) {
+    return <VerifyInterstitial email={session.user.email ?? ""} />;
   }
 
   // Org-role gate (AUTH-003): once a session exists, block the app shell until

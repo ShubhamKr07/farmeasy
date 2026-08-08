@@ -9,6 +9,7 @@ import {
   useDatabaseFixture,
   seedTestUser,
   closeDatabasePoolAfterTests,
+  getAdminDb,
 } from "../helpers/testDatabase";
 
 /**
@@ -46,9 +47,25 @@ describe("GET/PUT /api/wizard/progress", { skip: !dbUrl }, () => {
     // mounts both under `/api` too — rather than just the wizard router
     // alone as before facilityId threading existed.
     const facilitiesModule = await import("../../routes/facilities");
-    const { db, usersTable, wizardProgressTable } = await import("@workspace/db");
+    const { db, usersTable, organizationsTable, organizationMembersTable, wizardProgressTable } = await import("@workspace/db");
     const { Router } = await import("express");
+    const adb = getAdminDb() ?? db;
     await seedTestUser(db, usersTable, { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" });
+    // TEN-012: POST /facilities no longer creates the org — the wizard
+    // bootstrap (ensureOwnerOrg, from GET /wizard/progress) does. Seed one
+    // active owner membership up front (delete-first, since
+    // organization_members is shared and never truncated here) so the
+    // POST /facilities calls in the tests below have an org to attach to;
+    // GET /wizard/progress's own ensureOwnerOrg call is then a no-op for this
+    // already-provisioned user.
+    await adb.delete(organizationMembersTable).where(eq(organizationMembersTable.userId, DEFAULT_TEST_USER.sub));
+    const [org] = await adb.insert(organizationsTable).values({ name: "Wizard Test Org" }).returning();
+    await adb.insert(organizationMembersTable).values({
+      organizationId: org.id,
+      userId: DEFAULT_TEST_USER.sub,
+      role: "owner",
+      status: "active",
+    });
     const combinedRouter = Router();
     combinedRouter.use(facilitiesModule.default);
     combinedRouter.use(wizardModule.default);

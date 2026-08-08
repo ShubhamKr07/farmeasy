@@ -58,6 +58,9 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     process.env.DATABASE_URL = dbUrl;
     const { db, usersTable } = await import("@workspace/db");
 
+    // TEN-012: POST /facilities no longer creates the org; ensureOwnerOrg
+    // (the wizard-bootstrap provisioner) does. Used by provisionOrg below.
+    const { ensureOwnerOrg } = await import("../../lib/ensureOwnerOrg");
     const facilitiesRouter = (await import("../../routes/facilities")).default;
     const alertsRouter = (await import("../../routes/alerts")).default;
     const tasksRouter = (await import("../../routes/tasks")).default;
@@ -104,6 +107,9 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     async function provisionOrg(email: string) {
       const userId = randomUUID();
       await seedTestUser(db, usersTable, { id: userId, email });
+      // Provision the owner org exactly as the wizard bootstrap does, since
+      // POST /facilities no longer creates it (TEN-012).
+      await ensureOwnerOrg(userId, email);
       const bootstrapApp = createAuthenticatedTestApp(combinedRouter, { sub: userId });
       const createRes = await request(bootstrapApp)
         .post("/api/facilities")

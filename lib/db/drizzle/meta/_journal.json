@@ -211,6 +211,13 @@
       "when": 1786036136074,
       "tag": "0029_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786115011785,
+      "tag": "0030_ten012_signup_tables",
+      "breakpoints": true
     }
   ]
 }

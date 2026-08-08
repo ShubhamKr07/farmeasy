@@ -7,5 +7,23 @@
     "rationale": "False positive. GHSA-mh99-v99m-4gvg (brace-expansion DoS, vulnerable range '<=5.0.7') is published against the 5.x line but the npm advisory DB semver-matches it against every brace-expansion version < 5.0.8, including the 1.x and 2.x major lines. The 1.x/2.x lines are covered by a SEPARATE advisory, GHSA-3jxr-9vmj-r5cp, which is already remediated via pnpm overrides (brace-expansion ^1.1.16 and ^2.1.2). The 5.x line is bumped to ^5.0.8 (installed 5.0.9). Installed versions in the tree are 1.1.18, 2.1.4, and 5.0.9 — all at or above their respective patched thresholds, so no version is actually exploitable. Re-evaluate when brace-expansion 1.x/2.x are removed from the tree or when the upstream advisory is rescoped.",
     "acceptanceDate": "2026-01-15",
     "expiryDate": "2026-08-30"
+  },
+  {
+    "ecosystem": "npm",
+    "ghsaId": "GHSA-w3rx-r6r6-pgpr",
+    "dependencyPath": "image-size",
+    "owner": "security-team",
+    "rationale": "image-size ICNS-parser DoS (infinite loop). Transitive BUILD-TOOL dependency only, via artifacts/farmeasy > expo/@expo/cli/metro > image-size (the React Native bundler's asset-dimension reader). Patched only in >=2.0.3; there is NO 1.x fix, and metro pins the 1.x image-size API, so forcing 2.x would break the RN bundler. Not exploitable in this repo: metro runs image-size at BUILD time against the app's own first-party bundled assets, never on untrusted/user-supplied images at runtime, and image-size ships in no api-server runtime path. Re-evaluate when metro/expo adopt image-size >=2.0.3.",
+    "acceptanceDate": "2026-08-08",
+    "expiryDate": "2026-11-08"
+  },
+  {
+    "ecosystem": "npm",
+    "ghsaId": "GHSA-5p2g-fcmc-qvqq",
+    "dependencyPath": "image-size",
+    "owner": "security-team",
+    "rationale": "image-size JXL/HEIF-parser DoS (infinite loops). Same transitive BUILD-TOOL path as GHSA-w3rx-r6r6-pgpr: artifacts/farmeasy > expo/metro > image-size, the RN bundler's asset reader. Patched only in >=2.0.3 with no 1.x fix, and metro depends on the 1.x API so a forced 2.x override would break the bundler. Not exploitable here: metro parses first-party bundled assets at build time, never untrusted runtime input, and image-size is in no api-server runtime path. Re-evaluate when metro/expo adopt image-size >=2.0.3.",
+    "acceptanceDate": "2026-08-08",
+    "expiryDate": "2026-11-08"
   }
 ]
