@@ -12,6 +12,7 @@ import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import { useOrgRole } from "@/hooks/use-org-role";
 import { useSignupAvailability } from "@/hooks/use-signup-availability";
 import { SignUpForm } from "@/pages/auth/SignUpForm";
+import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
 import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
@@ -190,6 +191,20 @@ function AuthGate() {
         )}
       </div>
     );
+  }
+
+  // Email-verification guard (TEN-012 T10): a signed-up-but-unverified
+  // session must see ONLY the interstitial — never the app shell and never
+  // the org-role gate below. `email_confirmed_at` stays null until the user
+  // clicks the inbox link; Google-OAuth sessions arrive already confirmed
+  // (Supabase stamps the timestamp from the verified Google email), so they
+  // skip this branch and proceed to the role/facility gates. The backend
+  // `requireVerifiedEmail` gate (Task 6) is the real security boundary;
+  // this is the directing UX. No onChangeEmail here — a session already
+  // exists, so there's no "form to go back to"; the user resends or
+  // confirms out-of-band.
+  if (session && !session.user.email_confirmed_at) {
+    return <VerifyInterstitial email={session.user.email ?? ""} />;
   }
 
   // Org-role gate (AUTH-003): once a session exists, block the app shell until

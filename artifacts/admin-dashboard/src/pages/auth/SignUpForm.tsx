@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SignupMode } from "@/hooks/use-signup-availability";
+import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
 
 /**
  * TEN-012 Task 9: Create-account form for the AuthGate's `!session` view.
@@ -22,8 +23,8 @@ import type { SignupMode } from "@/hooks/use-signup-availability";
  * while the policy fails, so the user never sees Supabase's own
  * "Password should be at least 8 characters" rejection.
  *
- * On a successful email `signUp`, transitions to a minimal VerifyInterstitial
- * PLACEHOLDER (Task 10 replaces it with the full resend + change-email flow).
+ * On a successful email `signUp`, transitions to the VerifyInterstitial
+ * (Task 10): the full "check your inbox" view with resend + change-email.
  */
 
 export interface SignUpFormProps {
@@ -70,17 +71,17 @@ export function SignUpForm({ mode, allowed, email, onEmailChange }: SignUpFormPr
     );
   }
 
-  // Successful email signUp: show the verification placeholder. Task 10
-  // replaces this block with the full VerifyInterstitial (resend + change
-  // email + countdown).
+  // Successful email signUp: GoTrue returned a user but no session, so the
+  // user must confirm via the inbox link. Show the full VerifyInterstitial
+  // (resend + change-email). onChangeEmail resets the interstitial state so
+  // the form re-renders below; the email field value itself stays in the
+  // parent-controlled `email` prop, so the user can edit the address there.
   if (pendingVerificationEmail) {
     return (
-      <div className="w-full max-w-sm space-y-3 rounded-md border border-dashed border-border p-4 text-center">
-        <p className="text-sm text-muted-foreground">
-          Check your inbox — we sent a verification link to {pendingVerificationEmail}
-        </p>
-        {/* TODO(TEN-012 T10): full VerifyInterstitial with resend + change-email */}
-      </div>
+      <VerifyInterstitial
+        email={pendingVerificationEmail}
+        onChangeEmail={() => setPendingVerificationEmail(null)}
+      />
     );
   }
 
