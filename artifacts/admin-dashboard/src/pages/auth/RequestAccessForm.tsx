@@ -25,8 +25,10 @@ import { requestAccess } from "@workspace/api-client-react";
  * All validation/errors are INLINE (under the relevant field or below the
  * submit button), never a toast — matching the convention already in
  * SignUpForm (field text) and VerifyInterstitial (one-shot action status).
- * Backend re-validates everything; this client-side pass is just so an empty
- * submit doesn't waste a round-trip and shows the error in the right place.
+ * Backend re-validates everything; this client-side pass only guards the
+ * empty-submit case so it doesn't waste a round-trip and shows the error in
+ * the right place (the farm-name length cap is enforced by the input's
+ * maxLength, not by a JS check).
  */
 
 export interface RequestAccessFormProps {
@@ -77,9 +79,7 @@ export function RequestAccessForm({ defaultEmail = "" }: RequestAccessFormProps)
     : null;
   const farmNameError = farmNameTouched && trimmedFarm.length === 0
     ? "Farm name is required."
-    : trimmedFarm.length > FARM_NAME_MAX
-      ? `Farm name must be ${FARM_NAME_MAX} characters or fewer.`
-      : null;
+    : null;
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -90,7 +90,6 @@ export function RequestAccessForm({ defaultEmail = "" }: RequestAccessFormProps)
     setEmailTouched(true);
     setFarmNameTouched(true);
     if (trimmedEmail.length === 0 || trimmedFarm.length === 0) return;
-    if (trimmedFarm.length > FARM_NAME_MAX) return;
 
     setBusy(true);
     try {

@@ -11,9 +11,14 @@ import { and, eq } from "drizzle-orm";
  * new, earlier boundary; the runtime invariant is that the wizard bootstrap is
  * always hit before POST /facilities.
  *
- * Idempotent under concurrency via `SELECT ... FOR UPDATE` on the user's
- * membership row inside a single transaction, plus the one-org-per-user unique
- * index on organization_members.user_id as the ultimate backstop.
+ * Idempotent under concurrency: the one-org-per-user UNIQUE index on
+ * organization_members.user_id is the PRIMARY serializer that prevents two
+ * concurrent bootstraps from creating two orgs for one user; the
+ * `SELECT ... FOR UPDATE` on the user's membership row inside this
+ * transaction is a SECONDARY guard (each concurrent tx still re-checks
+ * membership under the row lock before deciding to insert, so at most one
+ * INSERT is attempted, but the index — not the lock — is what ultimately
+ * rejects the duplicate).
  *
  * Three outcomes:
  *  - existing active membership   → { organizationId, created: false }

@@ -36,15 +36,19 @@ const PAGE_SIZE = 1000;
 /**
  * Scan every unverified Supabase auth user and, based on account age:
  *  - age >= 10d: purge. Find the user's OWNER org; if that org has ZERO
- *    facilities, write audit `purged` FIRST, then delete the org row, then
- *    delete the auth user (public.users -> organization_members cascade via
- *    on-delete-cascade). Org-before-user so a failing org delete aborts before
- *    the irreversible auth delete. If the org HAS >=1 facility, skip entirely — real
- *    data is never auto-deleted. If there is no owner org, still delete the
- *    auth user (audit `purged`); there is nothing else to clean.
- *  - age >= 7d (and < 10d): warn once. If no prior `warned` audit row exists
- *    for this user, send the purge-warning email then write audit `warned`.
- *    Never warns twice.
+ *    facilities, delete the empty org row FIRST, then write audit `purged`,
+ *    then delete the auth user (public.users -> organization_members cascade
+ *    via on-delete-cascade). Org-before-audit so a failing org delete aborts
+ *    before any audit row is written — the next run retries cleanly instead of
+ *    stranding a false `purged` row (and a duplicate on the retry). Audit still
+ *    precedes the irreversible auth-user delete. If the org HAS >=1 facility,
+ *    skip entirely — real data is never auto-deleted. If there is no owner org,
+ *    still delete the auth user (audit `purged`); there is nothing else to
+ *    clean. A user with no email is still purged (only warning needs an
+ *    address), so a no-email account is never stranded forever.
+ *  - age >= 7d (and < 10d): warn once. Requires an email address (skipped
+ *    otherwise). If no prior `warned` audit row exists for this user, send the
+ *    purge-warning email then write audit `warned`. Never warns twice.
  *  - else: skip.
  *
  * Dependencies are injectable (with real defaults) for testability: `now` to
@@ -83,9 +87,6 @@ export async function purgeUnverifiedAccounts(
       try {
         // Verified accounts are spared regardless of age.
         if (user.email_confirmed_at) continue;
-        // Without an email there is nothing to warn and no audit key worth
-        // keying on — leave it untouched.
-        if (!user.email) continue;
 
         const ageDays = (now.getTime() - new Date(user.created_at).getTime()) / DAY_MS;
 
@@ -118,26 +119,32 @@ export async function purgeUnverifiedAccounts(
               continue;
             }
 
-            // Audit BEFORE any irreversible delete.
+            // Delete the empty owner org FIRST: if it throws (e.g. a RESTRICT
+            // FK still referencing it), no audit row is written, so the next
+            // run retries cleanly instead of stranding a false `purged` row and
+            // duplicating it on retry. The org is a data-less auto-provisioned
+            // shell (zero facilities, asserted above), so deleting it is
+            // low-stakes; the audit still precedes the irreversible auth delete.
+            await db.delete(organizationsTable).where(eq(organizationsTable.id, membership.organizationId));
+            // Audit BEFORE the irreversible auth-user delete.
             await db
               .insert(accountPurgeAuditTable)
-              .values({ userId: user.id, email: user.email, action: "purged" });
-            // Delete the org row BEFORE the auth user: if the org delete throws
-            // (e.g. a RESTRICT FK still referencing it), it fails before the
-            // irreversible auth-user delete, so the next run retries cleanly
-            // instead of leaving a deleted user + orphaned org.
-            await db.delete(organizationsTable).where(eq(organizationsTable.id, membership.organizationId));
+              .values({ userId: user.id, email: user.email ?? "", action: "purged" });
             await admin.auth.admin.deleteUser(user.id);
           } else {
             // No owner org — nothing else to clean, still remove the auth user.
+            // Audit BEFORE the irreversible auth-user delete.
             await db
               .insert(accountPurgeAuditTable)
-              .values({ userId: user.id, email: user.email, action: "purged" });
+              .values({ userId: user.id, email: user.email ?? "", action: "purged" });
             await admin.auth.admin.deleteUser(user.id);
           }
 
           purged += 1;
         } else if (ageDays >= WARN_AGE_DAYS) {
+          // A warning needs somewhere to send to; a no-email account in this
+          // window is simply left until it crosses the purge threshold.
+          if (!user.email) continue;
           const [prior] = await db
             .select({ id: accountPurgeAuditTable.id })
             .from(accountPurgeAuditTable)
