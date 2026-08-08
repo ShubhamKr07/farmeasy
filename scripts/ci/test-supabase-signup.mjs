@@ -171,13 +171,24 @@ async function resolveMailosaurServerId(token) {
 /** Extract a 6-digit confirmation code from an email body. */
 function extractOtp(body) {
   if (!body) return null;
-  const text = String(body);
+  // Strip HTML tags + common entities first. Supabase's OTP templates render
+  // the 6 digits across styled cells (`<td>1</td><td>2</td>…`), which would
+  // break a `\d{6}` match against raw HTML; collapsing tags to spaces (and
+  // then stripping the spaces for the digit scan) makes a split code matchable.
+  const text = String(body)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&[a-z]+;|&#\d+;/gi, " ");
   // Prefer a code introduced by a label Supabase's template uses.
   const labeled = text.match(/(?:code|otp|verification|token)[^\d]{0,20}(\d{6})/i);
   if (labeled) return labeled[1];
   // Fallback: the first standalone 6-digit run.
   const plain = text.match(/\b(\d{6})\b/);
-  return plain ? plain[1] : null;
+  if (plain) return plain[1];
+  // Last resort: digits separated only by whitespace (styled per-digit cells
+  // collapsed above), e.g. "1 2 3 4 5 6" → "123456".
+  const spaced = text.replace(/\s+/g, "").match(/\d{6}/);
+  return spaced ? spaced[0] : null;
 }
 
 /**
@@ -209,8 +220,36 @@ async function pollInboxForOtp({ token, toEmail, sinceIso }) {
     const json = await res.json();
     const items = json.items ?? json.data ?? [];
     lastSeen = items.length;
-    for (const msg of items) {
-      const body = msg.html ?? msg.text?.body ?? msg.text ?? msg.subject ?? "";
+    for (const summary of items) {
+      // The LIST endpoint returns message *summaries* without the full body;
+      // the html/text bodies and Mailosaur's auto-detected `codes` only come
+      // from GET /api/messages/{id}. Fetch the full message so the OTP is
+      // actually present to extract.
+      let full = summary;
+      if (summary.id) {
+        const mres = await fetch(`https://mailosaur.com/api/messages/${summary.id}`, {
+          headers: { Authorization: auth },
+        });
+        if (mres.ok) {
+          full = await mres.json();
+        }
+      }
+      // Prefer Mailosaur's own code detection — it is robust to digits split
+      // across styled HTML cells, which the raw-regex path cannot see.
+      const codes = full?.text?.codes ?? full?.html?.codes ?? [];
+      for (const c of codes) {
+        const m = String(c?.value ?? "").match(/\d{6}/);
+        if (m) return m[0];
+      }
+      // Fallback: scan the full html/text/subject bodies with the tag-aware
+      // extractor. On a full Mailosaur message html/text are objects ({ body }).
+      const body =
+        full?.html?.body ??
+        full?.text?.body ??
+        full?.html ??
+        full?.text ??
+        full?.subject ??
+        "";
       const otp = extractOtp(body);
       if (otp) return otp;
     }
