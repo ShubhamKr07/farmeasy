@@ -47,12 +47,13 @@ export async function ensureOwnerOrg(
       .for("update");
     if (membership) return { organizationId: membership.organizationId, created: false };
 
-    // Invitations store the email lowercased; match that.
+    // Invitations store the email trimmed + lowercased (invitations.ts); match
+    // that exactly so an invited user is never given a spurious auto-org.
     const [invite] = await tx
       .select({ id: invitationsTable.id })
       .from(invitationsTable)
       .where(
-        and(eq(invitationsTable.email, email.toLowerCase()), eq(invitationsTable.status, "pending")),
+        and(eq(invitationsTable.email, email.trim().toLowerCase()), eq(invitationsTable.status, "pending")),
       )
       .limit(1);
     if (invite) return { organizationId: null, created: false }; // invite path owns this user
