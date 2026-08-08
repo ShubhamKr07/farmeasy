@@ -29,6 +29,36 @@ export const ReadinessCheckResponse = zod.object({
 
 
 /**
+ * Tells the client (AuthGate) whether sign-up is off, allowlisted, or public so it can render Create-account vs. a Request-access placeholder. Public (no auth). In allowlist mode, pass `email` to learn whether that specific address is allowlisted; without it (or in off/public modes) `allowed` is a fixed boolean.
+
+ * @summary Public probe of whether sign-up is open/allowlisted/closed for an email
+ */
+export const GetSignupAvailabilityQueryParams = zod.object({
+  "email": zod.coerce.string().optional()
+})
+
+export const GetSignupAvailabilityResponse = zod.object({
+  "mode": zod.enum(['off', 'allowlist', 'public']),
+  "allowed": zod.boolean()
+}).describe('Result of the public sign-up availability probe. `mode` is the global flag state; `allowed` is whether the (optional) email may sign up right now — a fixed boolean in off\/public modes, and an allowlist lookup result in allowlist mode.\n')
+
+
+/**
+ * Public (no auth). Writes ONLY access_requests — never calls auth admin and never creates an org/facility/membership. Email is normalized (trim + lowercase) and validated server-side; replies 201 `{ ok: true }` on success. 400 on validation failure.
+
+ * @summary Capture a waitlist entry while sign-up is flag-off
+ */
+export const requestAccessBodyFarmNameMax = 120;
+
+
+
+export const RequestAccessBody = zod.object({
+  "email": zod.string().email(),
+  "farmName": zod.string().min(1).max(requestAccessBodyFarmNameMax)
+}).describe('Waitlist capture body. Email is normalized (trim + lowercase) and format-validated server-side; farmName is bounded 1..120 (mirrors the server\'s zod schema in auth.ts).\n')
+
+
+/**
  * @summary Get dashboard statistics
  */
 export const GetDashboardResponse = zod.object({

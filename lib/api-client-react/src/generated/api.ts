@@ -64,6 +64,7 @@ import type {
   FacilityLog,
   FacilityLogRequest,
   FacilityReadinessResponse,
+  GetSignupAvailabilityParams,
   GetWizardProgressParams,
   GrowthProfile,
   HealthStatus,
@@ -94,6 +95,8 @@ import type {
   RecommendResponse,
   RecordReadinessEventRequest,
   RemoveMember200,
+  RequestAccessRequest,
+  RequestAccessResponse,
   ResolveLayoutQrParams,
   RevokeInvitation200,
   RoomItem,
@@ -109,6 +112,7 @@ import type {
   ShipmentInput,
   ShipmentStatusUpdate,
   ShipmentUpdate,
+  SignupAvailabilityResponse,
   SuccessResponse,
   Task,
   TaskInput,
@@ -339,6 +343,189 @@ export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessChe
 
 
 
+
+export const getGetSignupAvailabilityUrl = (params?: GetSignupAvailabilityParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/auth/signup-availability?${stringifiedParams}` : `/api/auth/signup-availability`
+}
+
+/**
+ * Tells the client (AuthGate) whether sign-up is off, allowlisted, or public so it can render Create-account vs. a Request-access placeholder. Public (no auth). In allowlist mode, pass `email` to learn whether that specific address is allowlisted; without it (or in off/public modes) `allowed` is a fixed boolean.
+
+ * @summary Public probe of whether sign-up is open/allowlisted/closed for an email
+ */
+export const getSignupAvailability = async (params?: GetSignupAvailabilityParams, options?: RequestInit): Promise<SignupAvailabilityResponse> => {
+
+  return customFetch<SignupAvailabilityResponse>(getGetSignupAvailabilityUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSignupAvailabilityQueryKey = (params?: GetSignupAvailabilityParams,) => {
+    return [
+    `/api/auth/signup-availability`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSignupAvailabilityQueryOptions = <TData = Awaited<ReturnType<typeof getSignupAvailability>>, TError = ErrorType<unknown>>(params?: GetSignupAvailabilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSignupAvailabilityQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignupAvailability>>> = ({ signal }) => getSignupAvailability(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetSignupAvailabilityQueryResult = NonNullable<Awaited<ReturnType<typeof getSignupAvailability>>>
+export type GetSignupAvailabilityQueryError = ErrorType<unknown>
+
+
+export function useGetSignupAvailability<TData = Awaited<ReturnType<typeof getSignupAvailability>>, TError = ErrorType<unknown>>(
+ params: undefined |  GetSignupAvailabilityParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSignupAvailability>>,
+          TError,
+          Awaited<ReturnType<typeof getSignupAvailability>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSignupAvailability<TData = Awaited<ReturnType<typeof getSignupAvailability>>, TError = ErrorType<unknown>>(
+ params?: GetSignupAvailabilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSignupAvailability>>,
+          TError,
+          Awaited<ReturnType<typeof getSignupAvailability>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSignupAvailability<TData = Awaited<ReturnType<typeof getSignupAvailability>>, TError = ErrorType<unknown>>(
+ params?: GetSignupAvailabilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Public probe of whether sign-up is open/allowlisted/closed for an email
+ */
+
+export function useGetSignupAvailability<TData = Awaited<ReturnType<typeof getSignupAvailability>>, TError = ErrorType<unknown>>(
+ params?: GetSignupAvailabilityParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupAvailability>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetSignupAvailabilityQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getRequestAccessUrl = () => {
+
+
+
+
+  return `/api/auth/request-access`
+}
+
+/**
+ * Public (no auth). Writes ONLY access_requests — never calls auth admin and never creates an org/facility/membership. Email is normalized (trim + lowercase) and validated server-side; replies 201 `{ ok: true }` on success. 400 on validation failure.
+
+ * @summary Capture a waitlist entry while sign-up is flag-off
+ */
+export const requestAccess = async (requestAccessRequest: RequestAccessRequest, options?: RequestInit): Promise<RequestAccessResponse> => {
+
+  return customFetch<RequestAccessResponse>(getRequestAccessUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      requestAccessRequest,)
+  }
+);}
+
+
+
+
+export const getRequestAccessMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestAccess>>, TError,{data: BodyType<RequestAccessRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestAccess>>, TError,{data: BodyType<RequestAccessRequest>}, TContext> => {
+
+const mutationKey = ['requestAccess'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestAccess>>, {data: BodyType<RequestAccessRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  requestAccess(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestAccessMutationResult = NonNullable<Awaited<ReturnType<typeof requestAccess>>>
+    export type RequestAccessMutationBody = BodyType<RequestAccessRequest>
+    export type RequestAccessMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Capture a waitlist entry while sign-up is flag-off
+ */
+export const useRequestAccess = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestAccess>>, TError,{data: BodyType<RequestAccessRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof requestAccess>>,
+        TError,
+        {data: BodyType<RequestAccessRequest>},
+        TContext
+      > => {
+      return useMutation(getRequestAccessMutationOptions(options), queryClient);
+    }
 
 export const getGetDashboardUrl = () => {
 

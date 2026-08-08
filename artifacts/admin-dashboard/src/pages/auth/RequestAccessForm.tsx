@@ -2,22 +2,25 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiUrl } from "@/hooks/use-signup-availability";
+import { requestAccess } from "@workspace/api-client-react";
 
 /**
- * TEN-012 Task 11: Request-access capture form (flag-off waitlist).
+ * TEN-012 Task 11/12: Request-access capture form (flag-off waitlist).
  *
  * Rendered by `SignUpForm` (and its routing parent) when sign-up is closed:
  *   - `mode === "off"` (global flag off), OR
  *   - `mode === "allowlist"` and the typed email isn't on the allowlist.
  *
  * Posts `{ email, farmName }` to the PUBLIC endpoint
- * `POST /api/auth/request-access` (no bearer token). The server writes only
- * the `access_requests` row — it never creates an account/org/facility — and
- * replies `201 { ok: true }` on success. The full path used below is
- * `/api/auth/request-access` because the auth router is mounted under `/api`
- * in api-server's app.ts (see the Task 9 lesson in the brief — `apiUrl(...)`
- * only prefixes the env-supplied origin, it does NOT add the `/api` segment).
+ * `POST /api/auth/request-access` (no bearer token) via the generated
+ * `requestAccess` fetcher (Task 12 codegen). The server writes only the
+ * `access_requests` row — it never creates an account/org/facility — and
+ * replies `201 { ok: true }` on success, which the fetcher returns as a
+ * parsed `RequestAccessResponse`. On a 4xx/5xx the fetcher throws the
+ * `ApiError` (custom-fetch.ts), carrying `status` and the parsed `data`
+ * body; we duck-type those (the class isn't re-exported, mirroring
+ * `TeamSection.tsx`'s invite-error handling) to map 400 → per-field /
+ * inline copy and everything else → a generic message.
  *
  * All validation/errors are INLINE (under the relevant field or below the
  * submit button), never a toast — matching the convention already in
@@ -35,6 +38,19 @@ export interface RequestAccessFormProps {
 
 // Mirror the server's zod bounds (auth.ts: RequestAccessSchema).
 const FARM_NAME_MAX = 120;
+
+/**
+ * The shape of the server's 400 body for request-access (auth.ts):
+ * `{ error: string, details: zodError.flatten() }`, where flatten() yields
+ * `{ formErrors: string[], fieldErrors: Record<string, string[]> }`. The
+ * generated `ErrorResponse` schema only models `error`, so read `details`
+ * off the parsed payload directly — same duck-typed approach TeamSection
+ * uses for its invite errors.
+ */
+interface RequestAccessValidationErrorBody {
+  error?: string;
+  details?: { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
+}
 
 export function RequestAccessForm({ defaultEmail = "" }: RequestAccessFormProps) {
   const [email, setEmail] = useState(defaultEmail);
@@ -78,45 +94,43 @@ export function RequestAccessForm({ defaultEmail = "" }: RequestAccessFormProps)
 
     setBusy(true);
     try {
-      const res = await fetch(apiUrl("/api/auth/request-access"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, farmName: trimmedFarm }),
-      });
+      // The server returns 201 { ok: true }; customFetch resolves that to the
+      // parsed body. Any non-2xx (400 validation, 429, 5xx) throws ApiError.
+      await requestAccess({ email: trimmedEmail, farmName: trimmedFarm });
+      setBusy(false);
+      setDone(true);
+    } catch (err) {
       setBusy(false);
 
-      if (res.status === 201) {
-        setDone(true);
-        return;
-      }
+      // Duck-type ApiError's `status`/`data` (the class isn't re-exported —
+      // same convention as TeamSection's describeInviteError).
+      const status =
+        typeof err === "object" && err !== null && "status" in err
+          ? (err as { status: unknown }).status
+          : undefined;
+      const data =
+        typeof err === "object" && err !== null && "data" in err
+          ? ((err as { data: unknown }).data as RequestAccessValidationErrorBody | undefined)
+          : undefined;
 
       // 400 = backend zod rejection (bad email format / farm bounds). Prefer
       // the per-field message where we can; fall back to the server's `error`.
-      if (res.status === 400) {
-        let serverMsg: string | null = null;
-        try {
-          const body = (await res.json()) as {
-            error?: string;
-            details?: { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
-          };
-          serverMsg = body.error ?? null;
-          const fe = body.details?.fieldErrors;
-          if (fe?.email?.length) setEmailTouched(true); // surface emailError shape below
-          if (fe?.farmName?.length) setFarmNameTouched(true);
-          if (serverMsg) setSubmitError(serverMsg);
-          else setSubmitError("Please check your entries and try again.");
-        } catch {
-          setSubmitError("Please check your entries and try again.");
-        }
+      if (status === 400) {
+        const fe = data?.details?.fieldErrors;
+        if (fe?.email?.length) setEmailTouched(true); // surface emailError shape below
+        if (fe?.farmName?.length) setFarmNameTouched(true);
+        const serverMsg = data?.error ?? null;
+        setSubmitError(serverMsg ?? "Please check your entries and try again.");
         return;
       }
 
-      // 429 / 5xx — anything else.
-      setSubmitError("Something went wrong. Please try again in a moment.");
-    } catch {
-      // Network failure / CORS — same generic copy, never a thrown toast.
-      setBusy(false);
-      setSubmitError("Couldn't reach the server. Check your connection and try again.");
+      // Network failure (customFetch throws a plain TypeError from fetch
+      // itself, with no `status`) vs. 429/5xx (ApiError with a status).
+      if (status === undefined) {
+        setSubmitError("Couldn't reach the server. Check your connection and try again.");
+      } else {
+        setSubmitError("Something went wrong. Please try again in a moment.");
+      }
     }
   };
 

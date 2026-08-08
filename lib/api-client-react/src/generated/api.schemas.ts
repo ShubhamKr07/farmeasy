@@ -781,6 +781,41 @@ export interface ErrorResponse {
   error: string;
 }
 
+export type SignupAvailabilityResponseMode = typeof SignupAvailabilityResponseMode[keyof typeof SignupAvailabilityResponseMode];
+
+
+export const SignupAvailabilityResponseMode = {
+  off: 'off',
+  allowlist: 'allowlist',
+  public: 'public',
+} as const;
+
+/**
+ * Result of the public sign-up availability probe. `mode` is the global flag state; `allowed` is whether the (optional) email may sign up right now — a fixed boolean in off/public modes, and an allowlist lookup result in allowlist mode.
+
+ */
+export interface SignupAvailabilityResponse {
+  mode: SignupAvailabilityResponseMode;
+  allowed: boolean;
+}
+
+/**
+ * Waitlist capture body. Email is normalized (trim + lowercase) and format-validated server-side; farmName is bounded 1..120 (mirrors the server's zod schema in auth.ts).
+
+ */
+export interface RequestAccessRequest {
+  email: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  farmName: string;
+}
+
+export interface RequestAccessResponse {
+  ok: boolean;
+}
+
 export interface TrayItem {
   id: number;
   label: string;
@@ -1168,6 +1203,10 @@ export const ChangeRoleRequestRole = {
 export interface ChangeRoleRequest {
   role: ChangeRoleRequestRole;
 }
+
+export type GetSignupAvailabilityParams = {
+email?: string;
+};
 
 export type LookupSeedLotParams = {
 qrCode: string;
