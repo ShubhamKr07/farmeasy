@@ -1,0 +1,75 @@
+# FarmSmart — Migration drift check
+#
+# Scheduled + manual check that a persistent Supabase environment (staging) has
+# NOT fallen behind the repository's migration files. The companion script
+# scripts/ci/check-migration-drift.mjs counts git-tracked migration files
+# (Drizzle lib/db/drizzle/*.sql and Supabase supabase/migrations/*.sql) and
+# compares them against the applied rows in drizzle.__drizzle_migrations and
+# supabase_migrations.schema_migrations over a read-only (SELECT-only) psql
+# connection. Any mismatch exits 1 — BEHIND (applied < repo) is the dangerous
+# drift this exists to catch; AHEAD is also reported.
+#
+# WHY THIS EXISTS: staging silently drifted 9 Drizzle migrations behind the
+# repo TWICE before, caught only by chance. This daily job turns that latent
+# gap into a loud alert: a failed (exit 1) scheduled run is the signal.
+#
+# It is read-only against the database and never writes, so a cron-triggered
+# failure is safe to surface via the standard GitHub failed-workflow
+# notification channel.
+
+name: "Migration drift check"
+
+on:
+  schedule:
+    # 07:19 UTC daily — an off-peak minute that avoids the top-of-the-hour
+    # GitHub Actions cron congestion. Adjust the minute freely; the day is
+    # what matters (run once per day is plenty for drift detection).
+    - cron: "19 7 * * *"
+  workflow_dispatch: # manual / "Run workflow" from the Actions tab
+
+permissions:
+  contents: read
+
+# Pinned tool versions reused verbatim from deploy-staging.yml so this workflow
+# and staging deploys share an identical Node/pnpm toolchain.
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "11.17.0"
+
+jobs:
+  staging-drift:
+    name: Detect staging migration drift
+    runs-on: ubuntu-latest
+    # Mirror deploy-staging.yml: these secrets (STAGING_DATABASE_URL_DIRECT /
+    # STAGING_DATABASE_CA_CERT) are consumed under the `staging` environment,
+    # so declare it here to guarantee they resolve exactly as the deploy does.
+    environment: staging
+    steps:
+      - name: Checkout (full history so git ls-files lists every tracked migration)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Read-only drift probe. DATABASE_URL/DATABASE_CA_CERT are wired to the
+      # SAME staging secrets deploy-staging.yml uses for its direct connection
+      # + CA-pinned TLS. The job failing (exit 1) on drift IS the alert.
+      - name: Check migration drift (staging)
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL_DIRECT }}
+          DATABASE_CA_CERT: ${{ secrets.STAGING_DATABASE_CA_CERT }}
+        run: node scripts/ci/check-migration-drift.mjs
