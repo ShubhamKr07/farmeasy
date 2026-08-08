@@ -17,12 +17,12 @@
   },
   "private": true,
   "devDependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.62.3",
+    "@rollup/rollup-darwin-arm64": "^4.62.4",
     "@tailwindcss/oxide-darwin-arm64": "^4.3.3",
-    "lightningcss-darwin-arm64": "1.32.0",
-    "prettier": "^3.8.3",
-    "supabase": "^2.109.1",
-    "typescript": "~5.9.3"
+    "lightningcss-darwin-arm64": "1.33.0",
+    "prettier": "^3.9.6",
+    "supabase": "^2.111.0",
+    "typescript": "~7.0.2"
   },
   "dependencies": {
     "@expo/ngrok-bin-darwin-arm64": "^2.3.42",
