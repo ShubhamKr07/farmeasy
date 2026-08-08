@@ -192,6 +192,41 @@ function extractOtp(body) {
 }
 
 /**
+ * Extract the 6-digit OTP from a full Mailosaur message, trying every place a
+ * Supabase confirmation template may put `{{ .Token }}`. The staging template
+ * renders it three ways at once: as the text of a link whose href IS the token
+ * (`<a href="930619">Here's your token</a>`), and inline in the plain-text part
+ * ("Here's your token [930619]"). Mailosaur's own `codes` detection misfires
+ * here — it classifies the token-link as a link (not a code) and instead picks
+ * "127" out of the `127.0.0.1` redirect URL — so the code-array path is guarded
+ * by a strict 6-digit test and backed by explicit link/body scans.
+ *
+ * @returns {string | null}
+ */
+function extractOtpFromMessage(full) {
+  // 1. Mailosaur auto-detected codes — 6-digit only, so noise like "127"
+  //    (from 127.0.0.1) is rejected.
+  const codes = [...(full?.text?.codes ?? []), ...(full?.html?.codes ?? [])];
+  for (const c of codes) {
+    const m = String(c?.value ?? "").match(/\b\d{6}\b/);
+    if (m) return m[0];
+  }
+  // 2. A link whose href is the bare token (template renders the OTP as a URL).
+  const links = [...(full?.html?.links ?? []), ...(full?.text?.links ?? [])];
+  for (const l of links) {
+    const m = String(l?.href ?? "").match(/^\s*(\d{6})\s*$/);
+    if (m) return m[1];
+  }
+  // 3. Scan the bodies. text.body carries the token inline ("token [930619]");
+  //    html.body may only have it in a stripped href attr, so check text first.
+  for (const body of [full?.text?.body, full?.html?.body, full?.subject]) {
+    const otp = extractOtp(body);
+    if (otp) return otp;
+  }
+  return null;
+}
+
+/**
  * Poll the test mailbox until a confirmation email for `toEmail` arrives after
  * `sinceIso`, then return the 6-digit OTP from its body.
  *
@@ -222,8 +257,8 @@ async function pollInboxForOtp({ token, toEmail, sinceIso }) {
     lastSeen = items.length;
     for (const summary of items) {
       // The LIST endpoint returns message *summaries* without the full body;
-      // the html/text bodies and Mailosaur's auto-detected `codes` only come
-      // from GET /api/messages/{id}. Fetch the full message so the OTP is
+      // the html/text bodies, links, and Mailosaur's auto-detected `codes` only
+      // come from GET /api/messages/{id}. Fetch the full message so the OTP is
       // actually present to extract.
       let full = summary;
       if (summary.id) {
@@ -234,23 +269,7 @@ async function pollInboxForOtp({ token, toEmail, sinceIso }) {
           full = await mres.json();
         }
       }
-      // Prefer Mailosaur's own code detection — it is robust to digits split
-      // across styled HTML cells, which the raw-regex path cannot see.
-      const codes = full?.text?.codes ?? full?.html?.codes ?? [];
-      for (const c of codes) {
-        const m = String(c?.value ?? "").match(/\d{6}/);
-        if (m) return m[0];
-      }
-      // Fallback: scan the full html/text/subject bodies with the tag-aware
-      // extractor. On a full Mailosaur message html/text are objects ({ body }).
-      const body =
-        full?.html?.body ??
-        full?.text?.body ??
-        full?.html ??
-        full?.text ??
-        full?.subject ??
-        "";
-      const otp = extractOtp(body);
+      const otp = extractOtpFromMessage(full);
       if (otp) return otp;
     }
     await sleep(OTP_INTERVAL_MS);
@@ -346,10 +365,13 @@ try {
   console.log(`✓ OTP retrieved from mailbox`);
 
   console.log("▶ redeeming OTP via auth.verifyOtp");
+  // type "signup" — this is a brand-new-account confirmation OTP (the email's
+  // own verify URL carries type=signup). "email" is for existing-user email
+  // OTP sign-in and would reject a fresh signup token.
   const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
     email,
     token: otp,
-    type: "email",
+    type: "signup",
   });
   const sessionAfterVerify = (await supabaseAnon.auth.getSession()).data?.session;
   if (verifyError) {
