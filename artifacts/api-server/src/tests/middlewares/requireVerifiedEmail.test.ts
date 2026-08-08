@@ -2,7 +2,17 @@
 import { describe, test } from "node:test";
 import { strictEqual, deepStrictEqual } from "node:assert";
 import type { Request, Response } from "express";
-import { requireVerifiedEmail } from "../../middlewares/requireVerifiedEmail";
+
+// requireVerifiedEmail transitively imports supabaseAuth.ts, which reads
+// SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY at MODULE scope (and constructs the
+// admin client + JWKS from them). This unit test stubs req.supabaseUser and
+// never makes a real Supabase/JWKS call, but the module-scope side effect still
+// runs on import — so the non-DB "Node.js tests" CI job (which sets no Supabase
+// env) would crash on `undefined.replace(...)`. Provide harmless dummies BEFORE
+// the import (dynamic, since a static import would hoist above these lines).
+process.env.SUPABASE_URL ??= "http://localhost:54321";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key-not-a-real-secret";
+const { requireVerifiedEmail } = await import("../../middlewares/requireVerifiedEmail.js");
 
 /**
  * Unit test for the TEN-012 Task 6 backend email-verification gate.
