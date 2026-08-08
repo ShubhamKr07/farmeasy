@@ -63,7 +63,7 @@ async function getOrganizationId(userId: string): Promise<number | null> {
 // this as an error.
 router.get("/wizard/progress", async (req: Request, res: Response) => {
   try {
-    const { userId } = getAuth(req);
+    const { userId, email } = getAuth(req);
     const facilityIdParam = req.query.facilityId;
     const hasFacilityIdParam = typeof facilityIdParam === "string" && facilityIdParam.trim() !== "";
 
@@ -77,7 +77,7 @@ router.get("/wizard/progress", async (req: Request, res: Response) => {
     // returns null for them and the client starts at step 1. ensureOwnerOrg
     // does not throw on that path, so no extra guard is needed.
     if (userId && !hasFacilityIdParam) {
-      await ensureOwnerOrg(userId, getAuth(req).email ?? "");
+      await ensureOwnerOrg(userId, email ?? "");
     }
 
     let facilityCondition;

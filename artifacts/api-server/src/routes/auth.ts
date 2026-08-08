@@ -12,17 +12,30 @@ const SIGNUP_AVAILABILITY_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 // the budget is about information disclosure, not load.
 const SIGNUP_AVAILABILITY_RATE_LIMIT = 60;
 
+const REQUEST_ACCESS_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+// A waitlist submission is a rare, one-shot action per genuine client — at
+// most a couple of retries if the network blips. The cap is a backstop
+// against a script spamming the public write path (each accepted request
+// inserts an access_requests row); 5 over 15 min is generous for a human and
+// tight for a loop.
+const REQUEST_ACCESS_RATE_LIMIT = 5;
+
 /**
- * Build a fresh auth router with its OWN rate-limit store.
+ * Build a fresh auth router with its OWN rate-limit stores.
  *
  * `app.ts` will call this once at startup (Task 9 mounts it under `/api`).
  * Tests call it per-suite — the same pattern as `createWizardEventsRouter` —
- * so each describe block gets an isolated process-local MemoryStore for
- * `availabilityLimiter`. A module-level singleton limiter would otherwise
+ * so each describe block gets an isolated process-local MemoryStore for both
+ * `availabilityLimiter` (the GET read probe) and `requestAccessLimiter` (the
+ * POST waitlist write). A module-level singleton limiter would otherwise
  * share its counters (via Node's ESM import cache) across every suite in a
  * test file, letting one suite's requests count against another's budget.
  *
- * Task 4 will add `POST /auth/request-access` inside this same factory.
+ * `POST /auth/request-access` has its OWN limiter (`requestAccessLimiter`),
+ * separate from `availabilityLimiter`: the GET is a cheap, read-only probe a
+ * client hits a few times per landing, while the POST writes a waitlist row
+ * and must never be spammed. Distinct buckets mean a burst of reads can't
+ * exhaust the (much smaller) write budget, and vice-versa.
  */
 export function createAuthRouter(): Router {
   const router = Router();
@@ -33,6 +46,20 @@ export function createAuthRouter(): Router {
     handler: (_req, res) => {
       res.status(429).json({ error: "Too many requests. Please try again later." });
     },
+    legacyHeaders: false,
+  });
+
+  // Separate bucket from availabilityLimiter: a waitlist submit is a rare
+  // write (it inserts an access_requests row), so it gets a much smaller
+  // budget than the read-only availability probe — keeping a burst of reads
+  // from exhausting the write budget (or vice-versa).
+  const requestAccessLimiter = rateLimit({
+    windowMs: REQUEST_ACCESS_RATE_LIMIT_WINDOW_MS,
+    limit: REQUEST_ACCESS_RATE_LIMIT,
+    handler: (_req, res) => {
+      res.status(429).json({ error: "Too many requests. Please try again later." });
+    },
+    standardHeaders: true,
     legacyHeaders: false,
   });
 
@@ -78,7 +105,7 @@ export function createAuthRouter(): Router {
     farmName: z.string().min(1).max(120),
   });
 
-  router.post("/auth/request-access", availabilityLimiter, async (req: Request, res: Response) => {
+  router.post("/auth/request-access", requestAccessLimiter, async (req: Request, res: Response) => {
     try {
       const parsed = RequestAccessSchema.safeParse(req.body);
       if (!parsed.success) {
