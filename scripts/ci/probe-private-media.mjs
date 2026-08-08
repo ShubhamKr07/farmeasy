@@ -200,6 +200,8 @@ let userId = null; // auth.users id == public.users id
 let profileCreated = false;
 let storageKey = null; // the bucket-relative key returned by /media/upload
 let facilityLogId = null; // the id of the probe-created facility_logs row
+let seededOrgId = null; // org seeded so the probe user has an accessible facility
+let facilityId = null; // the seeded facility whose id goes in X-Facility-Id
 
 const checks = [];
 
@@ -274,6 +276,35 @@ try {
     );
   }
 
+  // TEN-008 scopes facility-logs per-request: POST /api/facility-logs requires
+  // an X-Facility-Id header naming a facility the caller is an ACTIVE member of
+  // (resolveTenantContext joins organization_members↔facilities). A fresh probe
+  // identity has none, so seed an org + active owner membership + one facility
+  // via the service-role client. (The media upload itself needs no facility
+  // context — only the facility-log persist does.)
+  console.log("▶ seeding org + owner membership + facility for tenant context");
+  const { data: orgRows, error: orgErr } = await supabaseAdmin
+    .from("organizations")
+    .insert({ name: `probe-${ts}-${rand}` })
+    .select("id");
+  if (orgErr || !orgRows?.[0]?.id) {
+    throw new Error(`could not seed org for the probe: ${orgErr?.message ?? "no id returned"}`);
+  }
+  seededOrgId = orgRows[0].id;
+  const { error: memErr } = await supabaseAdmin
+    .from("organization_members")
+    .insert({ organization_id: seededOrgId, user_id: userId, role: "owner", status: "active" });
+  if (memErr) throw new Error(`could not seed membership for the probe: ${memErr.message}`);
+  const { data: facRows, error: facErr } = await supabaseAdmin
+    .from("facilities")
+    .insert({ name: "Probe Facility", organization_id: seededOrgId, facility_name: "Probe", timezone: "UTC" })
+    .select("id");
+  if (facErr || !facRows?.[0]?.id) {
+    throw new Error(`could not seed facility for the probe: ${facErr?.message ?? "no id returned"}`);
+  }
+  facilityId = facRows[0].id;
+  console.log(`✓ seeded org ${seededOrgId} + owner membership + facility ${facilityId}`);
+
   // Shared authenticated headers for the live API.
   const authHeaders = {
     Authorization: `Bearer ${accessToken}`,
@@ -319,7 +350,7 @@ try {
   console.log("▶ persisting key via POST /api/facility-logs (waste)");
   const logRes = await fetch(`${API_URL}/api/facility-logs`, {
     method: "POST",
-    headers: { ...authHeaders, "Content-Type": "application/json" },
+    headers: { ...authHeaders, "Content-Type": "application/json", "X-Facility-Id": String(facilityId) },
     body: JSON.stringify({
       logType: "waste",
       data: {
@@ -451,6 +482,20 @@ try {
       );
     } else {
       console.log(`✓ cleanup: deleted facility_logs row ${facilityLogId}`);
+    }
+  }
+  if (seededOrgId) {
+    // Delete the org AFTER the facility_logs row above (which references the
+    // facility). The org delete cascades the seeded facility + membership
+    // (both FK organization_id ON DELETE CASCADE).
+    const { error: delOrgErr } = await supabaseAdmin
+      .from("organizations")
+      .delete()
+      .eq("id", seededOrgId);
+    if (delOrgErr) {
+      console.error(`⚠ cleanup: failed to delete seeded org ${seededOrgId}: ${delOrgErr.message}`);
+    } else {
+      console.log(`✓ cleanup: deleted seeded org ${seededOrgId} (cascaded facility + membership)`);
     }
   }
   if (storageKey) {
