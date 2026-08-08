@@ -17,12 +17,17 @@
  *   3. Task 1's `on_auth_user_created` trigger provisioned exactly ONE
  *      `public.users` profile for the new identity, with role `technician` —
  *      regardless of the `facility_lead` value the client tried to inject.
- *   4. An authenticated client cannot select a role by writing
- *      `public.users` (the profile table has no client UPDATE grant).
- *   5. After refreshing claims, the custom `user_role` JWT claim (read via the
- *      supported `auth.getClaims()` API, not an `as any` session cast) is
- *      `technician`.
- *   6. Signing out and back in with the password still yields `technician`.
+ *   4. An authenticated client cannot escalate its role by writing
+ *      `public.users`: migration 00004 dropped the client UPDATE policy, so
+ *      the write is RLS-filtered to zero rows (no error) and the role, re-read
+ *      via the service-role client, is unchanged.
+ *   5. For this membership-less fresh signup the custom `user_role` JWT claim
+ *      (read via the supported `auth.getClaims()` API) is ABSENT — TEN-010's
+ *      hook derives it from `organization_members.role` and omits it when
+ *      there is no active membership.
+ *   6. After seeding an active owner membership and re-authenticating, the
+ *      `user_role` claim becomes `owner` — proving the hook reads
+ *      `organization_members.role` end-to-end.
  *   7. The identity + profile are deleted in a `finally` block, leaving staging
  *      clean (FK `public.users(id) -> auth.users(id) ON DELETE CASCADE` means
  *      deleting the Auth user would cascade, but both are removed explicitly).
@@ -286,7 +291,7 @@ async function pollInboxForOtp({ token, toEmail, sinceIso }) {
  * refresh the session first so a freshly-minted token re-runs the access-token
  * hook against the trigger-created profile.
  */
-async function assertClaimRole({ label, refresh }) {
+async function assertClaimRole({ label, refresh, expected }) {
   if (refresh) {
     const { error: refreshError } = await supabaseAnon.auth.refreshSession();
     if (refreshError) {
@@ -298,7 +303,10 @@ async function assertClaimRole({ label, refresh }) {
     throw new Error(`getClaims() failed during "${label}": ${error.message}`);
   }
   const claimRole = data?.claims?.user_role;
-  const ok = claimRole === EXPECTED_ROLE;
+  // `expected === undefined` means the claim must be ABSENT — the correct
+  // post-TEN-010 state for a user with no active org membership (the hook
+  // omits user_role rather than defaulting it).
+  const ok = claimRole === expected;
   // Diagnostic dump (off unless DEBUG): show the decoded JWT payload.
   if (!ok && process.env.DEBUG) {
     const { data: sess } = await supabaseAnon.auth.getSession();
@@ -310,14 +318,9 @@ async function assertClaimRole({ label, refresh }) {
       }
     }
   }
-  return {
-    name: label,
-    ok,
-    detail:
-      claimRole === undefined
-        ? "claim 'user_role' is ABSENT (access-token hook not firing / not registered)"
-        : `expected '${EXPECTED_ROLE}', got '${claimRole}'`,
-  };
+  const want = expected === undefined ? "ABSENT (no active membership)" : `'${expected}'`;
+  const got = claimRole === undefined ? "ABSENT" : `'${claimRole}'`;
+  return { name: label, ok, detail: `expected user_role ${want}, got ${got}` };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -332,6 +335,7 @@ const signupStartedIso = new Date(ts).toISOString();
 
 let userId = null; // auth.users id == public.users id
 let profileCreated = false; // tracked so finally knows whether to attempt profile delete
+let seededOrgId = null; // org seeded to prove the membership->claim path; cleaned in finally
 const checks = [];
 
 try {
@@ -431,35 +435,76 @@ try {
     }
   }
 
-  // 4. Assert an authenticated client cannot SELECT/escalate a role by writing
-  //    the profile row — public.users has no client UPDATE grant, so an update
-  //    through the anon (authenticated) client must be rejected. (We have a
-  //    real session on the anon client now.)
-  console.log("▶ checking client cannot write role via authenticated session");
+  // 4. Assert an authenticated client cannot escalate its role by writing the
+  //    profile row. Migration 00004 DROPPED the client UPDATE policy on
+  //    public.users (only a backend `current_user='farmsmart_app'` policy
+  //    remains, added in 00009), so a client UPDATE matches zero rows under
+  //    RLS. IMPORTANT: PostgREST does NOT return an error for an RLS-filtered
+  //    UPDATE — it reports success with 0 rows affected. So the block must be
+  //    proven by RE-READING the role with the service-role client and
+  //    asserting it is unchanged, never by checking for an error (which never
+  //    comes and previously produced a false "escalation hole" failure).
+  console.log("▶ checking client cannot escalate role via authenticated session");
   const { error: writeError } = await supabaseAnon
     .from("users")
     .update({ role: INJECTED_ROLE })
     .eq("id", userId);
-  const writeBlocked = !!writeError;
+  const { data: afterRows, error: reReadError } = await supabaseAdmin
+    .from("users")
+    .select("role")
+    .eq("id", userId);
+  if (reReadError) {
+    throw new Error(`could not re-read role to verify escalation block: ${reReadError.message}`);
+  }
+  const roleAfter = afterRows?.[0]?.role;
+  const escalationBlocked = roleAfter === EXPECTED_ROLE;
   checks.push({
-    name: "authenticated client cannot update profile role",
-    ok: writeBlocked,
-    detail: writeError
-      ? `denied as expected (${writeError.code ?? writeError.message})`
-      : "update was NOT denied — client can mutate role!",
+    name: "authenticated client cannot escalate profile role",
+    ok: escalationBlocked,
+    detail: escalationBlocked
+      ? `role still '${roleAfter}' after client UPDATE attempt ` +
+        (writeError
+          ? `(update errored: ${writeError.code ?? writeError.message})`
+          : "(update silently filtered to 0 rows under RLS — no error, as expected)")
+      : `role is now '${roleAfter}' after a client UPDATE — REAL ESCALATION HOLE (expected still '${EXPECTED_ROLE}')`,
   });
-  if (writeBlocked) {
-    console.log(`✓ client role update denied (${writeError.code ?? writeError.message})`);
+  if (escalationBlocked) {
+    console.log(`✓ role unchanged ('${roleAfter}') — client cannot escalate`);
   } else {
-    console.error("✗ client was able to update profile role (RLS/grant hole)");
+    console.error(`✗ role escalated to '${roleAfter}' — RLS/grant hole`);
   }
 
-  // 5. Refresh claims then read user_role via getClaims().
-  console.log("▶ refreshing session and reading user_role claim via getClaims()");
-  checks.push(await assertClaimRole({ label: "user_role claim == technician (post-refresh)", refresh: true }));
+  // 5. A fresh signup has NO org membership yet — TEN-012 lazy-provisions the
+  //    owner org at wizard bootstrap, not at signup. TEN-010's access-token
+  //    hook derives user_role from organization_members.role and OMITS the
+  //    claim when there is no active membership, so it MUST be absent here. (A
+  //    'technician' claim would mean the hook still reads the deprecated
+  //    public.users.role path.)
+  console.log("▶ refreshing session; user_role claim must be ABSENT (no membership yet)");
+  checks.push(await assertClaimRole({
+    label: "user_role claim ABSENT for a membership-less fresh signup",
+    refresh: true,
+    expected: undefined,
+  }));
 
-  // 6. Sign out / sign back in and re-assert the claim on a fresh session.
-  console.log("▶ signing out, then signing back in with password");
+  // 6. Seed an ACTIVE owner membership via the service-role client, then sign
+  //    out / back in so a freshly-minted token re-runs the hook. The hook must
+  //    now surface user_role = the membership role — proving it reads
+  //    organization_members.role end-to-end, not merely that it omits.
+  console.log("▶ seeding an owner membership, then re-authenticating to re-run the hook");
+  const { data: orgRows, error: orgErr } = await supabaseAdmin
+    .from("organizations")
+    .insert({ name: `signup-smoke-${ts}-${rand}` })
+    .select("id");
+  if (orgErr || !orgRows?.[0]?.id) {
+    throw new Error(`could not seed org for the claim check: ${orgErr?.message ?? "no id returned"}`);
+  }
+  seededOrgId = orgRows[0].id;
+  const { error: memErr } = await supabaseAdmin
+    .from("organization_members")
+    .insert({ organization_id: seededOrgId, user_id: userId, role: "owner", status: "active" });
+  if (memErr) throw new Error(`could not seed membership for the claim check: ${memErr.message}`);
+
   const { error: signOutError } = await supabaseAnon.auth.signOut();
   if (signOutError) {
     // Non-fatal: the subsequent signInWithPassword establishes a fresh session.
@@ -469,8 +514,12 @@ try {
     await supabaseAnon.auth.signInWithPassword({ email, password: TEST_PASSWORD });
   if (signInError) throw new Error(`signInWithPassword failed: ${signInError.message}`);
   if (!signInData.session) throw new Error("signInWithPassword returned no session");
-  console.log("✓ signed back in");
-  checks.push(await assertClaimRole({ label: "user_role claim == technician (post sign-out/in)", refresh: false }));
+  console.log("✓ signed back in with an active membership");
+  checks.push(await assertClaimRole({
+    label: "user_role claim == owner after membership seeded (hook reads organization_members.role)",
+    refresh: false,
+    expected: "owner",
+  }));
 
   // ── Summary ──────────────────────────────────────────────────────────────
   const failed = checks.filter((c) => !c.ok);
@@ -500,6 +549,21 @@ try {
   process.exitCode = 1;
 } finally {
   // ── Cleanup (always best-effort) ─────────────────────────────────────────
+  // Delete the seeded org first (its FK cascades the seeded membership, whose
+  // user_id FK would otherwise be removed by the auth-user cascade anyway —
+  // but the org row itself has no such cascade, so remove it explicitly).
+  if (seededOrgId) {
+    const { error: delOrgErr } = await supabaseAdmin
+      .from("organizations")
+      .delete()
+      .eq("id", seededOrgId);
+    if (delOrgErr) {
+      console.error(`⚠ cleanup: failed to delete seeded org ${seededOrgId}: ${delOrgErr.message}`);
+    } else {
+      console.log(`✓ cleanup: deleted seeded org ${seededOrgId}`);
+    }
+  }
+
   // Delete the profile row first (no FK from auth -> profile), then the Auth
   // identity. The ON DELETE CASCADE FK would handle the profile on Auth delete
   // alone, but removing both explicitly guarantees no orphan survives a partial
