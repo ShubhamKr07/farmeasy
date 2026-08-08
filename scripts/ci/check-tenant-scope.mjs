@@ -186,6 +186,15 @@ const BASELINE_VIOLATIONS = new Set([
   //         wrapped in withTenantScope. Only the SELECT trips the .from(...)
   //         regex; the insert/update/delete carry the table in the verb arg.
   "artifacts/api-server/src/routes/invitations.ts::const rows = await db",
+  // --- (F) TEN-012 unverified-account purge (lib/purgeUnverified.ts) — a
+  //         scheduled sweep, NOT a request in any tenant scope, so there is no
+  //         req.tenant / app.org_id to wrap it in (same category as group (C)/
+  //         (D)'s bootstrap lookups). It looks up each unverified user's OWNER
+  //         org by userId to decide whether to delete a data-less provisioned
+  //         org; admitted under farmsmart_app by 00012's backend SELECT policy
+  //         on organization_members. The org DELETE it then performs is
+  //         admitted by 00018's backend DELETE policy on organizations.
+  "artifacts/api-server/src/lib/purgeUnverified.ts::const [membership] = await db",
 ]);
 
 const newViolations = [];
