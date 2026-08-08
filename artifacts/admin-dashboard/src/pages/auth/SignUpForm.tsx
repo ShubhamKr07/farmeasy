@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SignupMode } from "@/hooks/use-signup-availability";
 import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
+import { RequestAccessForm } from "@/pages/auth/RequestAccessForm";
 
 /**
  * TEN-012 Task 9: Create-account form for the AuthGate's `!session` view.
@@ -62,11 +63,12 @@ export function SignUpForm({ mode, allowed, email, onEmailChange }: SignUpFormPr
   // placeholder instead of the form. Keeps SignUpForm self-defensive.
   if (mode === "off" || (mode === "allowlist" && !allowed)) {
     return (
-      <div className="w-full max-w-sm space-y-3 rounded-md border border-dashed border-border p-4 text-center">
-        <p className="text-sm text-muted-foreground">
-          Sign-up is currently by request. We'll review your account.
+      <div className="flex flex-col items-center gap-2 w-full">
+        <p className="text-sm text-muted-foreground w-full max-w-sm text-center">
+          Sign-up is currently by request. Tell us a bit about your farm and
+          we'll email you when it opens up.
         </p>
-        {/* TODO(TEN-012 T11): RequestAccessForm */}
+        <RequestAccessForm defaultEmail={email} />
       </div>
     );
   }
