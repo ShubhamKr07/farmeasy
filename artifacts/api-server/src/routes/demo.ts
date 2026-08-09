@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from "express";
-import { sql, and, eq } from "drizzle-orm";
+import { sql, and, eq, like } from "drizzle-orm";
 import {
   db,
   organizationsTable,
   organizationMembersTable,
   facilitiesTable,
   wizardProgressTable,
+  growthProfilesTable,
   seedDemoOrg,
 } from "@workspace/db";
 import { getAuth } from "../middlewares/supabaseAuth";
@@ -146,6 +147,60 @@ router.post("/demo/provision", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error(err);
     return res.status(500).json({ error: "Failed to provision demo" });
+  }
+});
+
+// POST /demo/graduate — reset-in-place. NOT flag-gated (a demo user must
+// always be able to escape the demo, even if DEMO_FORK_ENABLED is later
+// switched off). Requires an explicit {confirm:true} body (irreversible:
+// deletes the demo facility and every cascaded row under it). A no-op (200,
+// no writes) when the org isn't currently a demo, so a second/duplicate call
+// is always safe.
+router.post("/demo/graduate", async (req: Request, res: Response) => {
+  try {
+    const { userId } = getAuth(req);
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ error: "Confirmation required" });
+    }
+    const organizationId = await getOwnerOrg(userId!);
+    if (!organizationId) {
+      return res.status(403).json({ error: "No owner organization" });
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.org_id', ${organizationId.toString()}, true)`);
+
+      const [org] = await tx
+        .select({ isDemo: organizationsTable.isDemo })
+        .from(organizationsTable)
+        .where(eq(organizationsTable.id, organizationId))
+        .for("update");
+      if (!org?.isDemo) return; // no-op: not a demo org (idempotent)
+
+      // facilities has no RLS (separate 15-table remediation item, see the
+      // 00019 migration's own comment) — this DELETE runs on farmsmart_app's
+      // plain table grant, scoped by this app-layer WHERE clause on the
+      // server-resolved owner org, the same trust model every existing
+      // facilities SELECT/INSERT already uses. ON DELETE CASCADE tears down
+      // every facility-scoped demo row seeded by seedDemoOrg.
+      await tx.delete(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+
+      // The two seeded growth_profiles are org-scoped, not facility-scoped
+      // (see seedDemoOrg's own cascade-audit comment), so they survive the
+      // facility delete above — remove them explicitly so a graduated real
+      // farm starts with a clean growth-profile list instead of two stray
+      // "(demo)"-suffixed rows.
+      await tx
+        .delete(growthProfilesTable)
+        .where(and(eq(growthProfilesTable.organizationId, organizationId), like(growthProfilesTable.name, "%(demo)")));
+
+      await tx.update(organizationsTable).set({ isDemo: false }).where(eq(organizationsTable.id, organizationId));
+    });
+
+    return res.status(200).json({});
+  } catch (err) {
+    req.log.error(err);
+    return res.status(500).json({ error: "Failed to graduate demo" });
   }
 });
 

@@ -2,7 +2,7 @@ import { describe, test, afterEach } from "node:test";
 import { strictEqual, ok } from "node:assert";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
@@ -172,6 +172,89 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
 
       const res = await request(app).post("/api/demo/provision").send({});
       strictEqual(res.status, 403);
+    });
+  });
+
+  describe("POST /api/demo/graduate", () => {
+    async function provisionDemo() {
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { userId, organizationId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId);
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 200);
+      return { app, userId, organizationId, facilityId: res.body.facilityId as number };
+    }
+
+    test("graduates a demo org: deletes the facility + cascaded rows, cleans demo growth profiles, org+membership survive", async () => {
+      const { app, organizationId, facilityId } = await provisionDemo();
+
+      const res = await request(app).post("/api/demo/graduate").send({ confirm: true });
+      strictEqual(res.status, 200);
+
+      const {
+        organizationsTable,
+        organizationMembersTable,
+        facilitiesTable,
+        cyclesTable,
+        seedLotsTable,
+        sensorsTable,
+        facilityLogsTable,
+        growthProfilesTable,
+      } = await import("@workspace/db");
+
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      ok(org, "the organization row itself must survive graduate");
+      strictEqual(org.isDemo, false);
+
+      const [membership] = await fixture.db
+        .select()
+        .from(organizationMembersTable)
+        .where(and(eq(organizationMembersTable.organizationId, organizationId), eq(organizationMembersTable.role, "owner")));
+      ok(membership, "the owner membership must survive graduate");
+      strictEqual(membership.status, "active");
+
+      const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+      strictEqual(facilities.length, 0, "the demo facility must be gone");
+
+      const cycles = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      strictEqual(cycles.length, 0, "cycles must cascade away");
+      const seedLots = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
+      strictEqual(seedLots.length, 0, "seed_lots must cascade away");
+      const sensors = await fixture.db.select().from(sensorsTable).where(eq(sensorsTable.facilityId, facilityId));
+      strictEqual(sensors.length, 0, "sensors must cascade away");
+      const facilityLogs = await fixture.db.select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, facilityId));
+      strictEqual(facilityLogs.length, 0, "facility_logs must cascade away");
+
+      const growthProfiles = await fixture.db
+        .select()
+        .from(growthProfilesTable)
+        .where(eq(growthProfilesTable.organizationId, organizationId));
+      strictEqual(growthProfiles.length, 0, "the demo growth profiles are explicitly removed on graduate");
+    });
+
+    test("second graduate is a safe no-op", async () => {
+      const { app, organizationId } = await provisionDemo();
+      await request(app).post("/api/demo/graduate").send({ confirm: true });
+
+      const res = await request(app).post("/api/demo/graduate").send({ confirm: true });
+      strictEqual(res.status, 200);
+
+      const { organizationsTable } = await import("@workspace/db");
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      strictEqual(org.isDemo, false);
+    });
+
+    test("confirm:false: 400, no state change", async () => {
+      const { app, organizationId, facilityId } = await provisionDemo();
+
+      const res = await request(app).post("/api/demo/graduate").send({ confirm: false });
+      strictEqual(res.status, 400);
+
+      const { organizationsTable, facilitiesTable } = await import("@workspace/db");
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      strictEqual(org.isDemo, true, "graduate must not run without an explicit confirm:true");
+      const [facility] = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.id, facilityId));
+      ok(facility, "the demo facility must still exist");
     });
   });
 });
