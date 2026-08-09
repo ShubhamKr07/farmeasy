@@ -24,6 +24,7 @@ import recommendRouter from "./routes/recommend";
 import facilityLogsRouter from "./routes/facilityLogs";
 import facilitiesRouter from "./routes/facilities";
 import wizardRouter from "./routes/wizard";
+import demoRouter from "./routes/demo";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
 import wizardEventsRouter from "./routes/wizard-events";
@@ -216,6 +217,7 @@ app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
+app.use("/api", requireSignedIn, demoRouter); // TEN-013: no requireTenantContext — the demo fork runs before any facility exists, mirroring wizardRouter above
 app.use("/api", requireSignedIn, sensorAccountsRouter);
 app.use("/api", requireSignedIn, wizardEventsRouter);
 // Generic catch-all router (routes/index.ts: health/dashboard/layout

@@ -1,0 +1,177 @@
+import { describe, test, afterEach } from "node:test";
+import { strictEqual, ok } from "node:assert";
+import { randomUUID } from "node:crypto";
+import request from "supertest";
+import { eq } from "drizzle-orm";
+import { createAuthenticatedTestApp } from "../helpers/testApp";
+import {
+  requireTestDatabaseUrl,
+  useDatabaseFixture,
+  seedTestUser,
+  closeDatabasePoolAfterTests,
+  getAdminDb,
+} from "../helpers/testDatabase";
+
+/**
+ * GET /demo/status, POST /demo/provision, POST /demo/graduate (TEN-013 Tasks
+ * 6-7). Every test seeds its own org via a random UUID user, so — like
+ * seedDemoOrg.test.ts and wizard.test.ts's cross-org cases — the shared,
+ * never-truncated `organizations`/`facilities`/`organization_members` tables
+ * never need resetting between tests: every assertion is scoped to the
+ * organizationId/facilityId the test itself created.
+ */
+const dbUrl = requireTestDatabaseUrl();
+closeDatabasePoolAfterTests();
+
+describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
+  const fixture = useDatabaseFixture([]);
+
+  const origFlag = process.env.DEMO_FORK_ENABLED;
+  afterEach(() => {
+    if (origFlag === undefined) delete process.env.DEMO_FORK_ENABLED;
+    else process.env.DEMO_FORK_ENABLED = origFlag;
+  });
+
+  /**
+   * Seeds an active OWNER membership for a brand-new org with NO facility —
+   * the real fork's actual pre-condition (TEN-012's ensureOwnerOrg has run,
+   * W2's POST /facilities has not). Deliberately not seedTenantContext (which
+   * always creates a facility too).
+   */
+  async function seedOwnerOrgNoFacility(): Promise<{ userId: string; organizationId: number }> {
+    const { usersTable, organizationsTable, organizationMembersTable } = await import("@workspace/db");
+    const userId = randomUUID();
+    await seedTestUser(fixture.db, usersTable, { id: userId, email: `demo-test-${userId}@ten013-test.example.com` });
+    const adb = getAdminDb() ?? fixture.db;
+    const [org] = await adb.insert(organizationsTable).values({ name: `Demo Test Org ${userId}` }).returning();
+    await adb.insert(organizationMembersTable).values({
+      organizationId: org.id,
+      userId,
+      role: "owner",
+      status: "active",
+    });
+    return { userId, organizationId: org.id };
+  }
+
+  async function buildApp(userId: string, mountFacilities = false) {
+    const demoModule = await import("../../routes/demo");
+    if (!mountFacilities) {
+      return createAuthenticatedTestApp(demoModule.default, { sub: userId });
+    }
+    const facilitiesModule = await import("../../routes/facilities");
+    const { Router } = await import("express");
+    const combinedRouter = Router();
+    combinedRouter.use(demoModule.default);
+    combinedRouter.use(facilitiesModule.default);
+    return createAuthenticatedTestApp(combinedRouter, { sub: userId });
+  }
+
+  describe("POST /api/demo/provision", () => {
+    test("flag off: 403, writes nothing", async () => {
+      delete process.env.DEMO_FORK_ENABLED;
+      const { userId, organizationId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId);
+
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 403);
+
+      const { organizationsTable, facilitiesTable } = await import("@workspace/db");
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      strictEqual(org.isDemo, false);
+      const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+      strictEqual(facilities.length, 0);
+    });
+
+    test("flag on, fresh owner org: provisions, seeds, marks the demo facility onboarded", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { userId, organizationId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId, true);
+
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 200);
+      const facilityId = res.body.facilityId as number;
+      ok(facilityId > 0);
+
+      const { organizationsTable, facilitiesTable, cyclesTable, seedLotsTable } = await import("@workspace/db");
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      strictEqual(org.isDemo, true);
+
+      const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+      strictEqual(facilities.length, 1, "exactly one facility for a fresh provision");
+
+      const cycles = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      ok(cycles.length > 0, "cycles should have been seeded");
+      const seedLots = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
+      ok(seedLots.length > 0, "seed_lots should have been seeded");
+
+      const statusRes = await request(app).get("/api/demo/status");
+      strictEqual(statusRes.status, 200);
+      strictEqual(statusRes.body.enabled, true);
+      strictEqual(statusRes.body.isDemo, true);
+      strictEqual(statusRes.body.demoFacilityId, facilityId);
+
+      // Design decision (per Task 6): provision also stamps a wizard_progress
+      // row at currentStep:"done" for the demo facility, so GET /facilities'
+      // own onboarded-derivation (routes/facilities.ts: wizard_progress rows
+      // with currentStep==="done") reports it onboarded — landing the demo
+      // user directly on the dashboard, not back in the wizard.
+      const facilitiesListRes = await request(app).get("/api/facilities");
+      strictEqual(facilitiesListRes.status, 200);
+      const demoFacility = facilitiesListRes.body.find((f: { id: number }) => f.id === facilityId);
+      ok(demoFacility, "demo facility should appear in GET /facilities");
+      strictEqual(demoFacility.onboarded, true, "the demo facility must report onboarded:true");
+    });
+
+    test("second provision is idempotent: same facilityId, no duplicate facility, no re-seed", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { userId, organizationId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId);
+
+      const first = await request(app).post("/api/demo/provision").send({});
+      strictEqual(first.status, 200);
+      const facilityId = first.body.facilityId as number;
+
+      const { facilitiesTable, cyclesTable } = await import("@workspace/db");
+      const cyclesAfterFirst = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+
+      const second = await request(app).post("/api/demo/provision").send({});
+      strictEqual(second.status, 200);
+      strictEqual(second.body.facilityId, facilityId);
+
+      const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+      strictEqual(facilities.length, 1, "no duplicate facility on a second provision");
+      const cyclesAfterSecond = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      strictEqual(cyclesAfterSecond.length, cyclesAfterFirst.length, "no re-seed on a second provision");
+    });
+
+    test("no active owner membership: 403", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { usersTable } = await import("@workspace/db");
+      const userId = randomUUID();
+      await seedTestUser(fixture.db, usersTable, { id: userId, email: `demo-no-org-${userId}@ten013-test.example.com` });
+      const app = await buildApp(userId);
+
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 403);
+    });
+
+    test("non-owner (technician) active membership: 403", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { usersTable, organizationsTable, organizationMembersTable } = await import("@workspace/db");
+      const userId = randomUUID();
+      await seedTestUser(fixture.db, usersTable, { id: userId, email: `demo-technician-${userId}@ten013-test.example.com` });
+      const adb = getAdminDb() ?? fixture.db;
+      const [org] = await adb.insert(organizationsTable).values({ name: `Technician Org ${userId}` }).returning();
+      await adb.insert(organizationMembersTable).values({
+        organizationId: org.id,
+        userId,
+        role: "technician",
+        status: "active",
+      });
+      const app = await buildApp(userId);
+
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 403);
+    });
+  });
+});
