@@ -29,6 +29,17 @@ if (!connectionString) {
 // opt-in env flag that is set ONLY in .github/workflows/verify-prod-db-role.yml.
 // The application's real data path keeps strict CA-pinning (lib/db/src/ssl.ts);
 // this flag never touches it.
+// Strip any sslmode/ssl* query params so the explicit `ssl` object below is the
+// SOLE SSL authority. Otherwise pg-connection-string parses `sslmode=require`
+// from the URL as `verify-full` and re-enables cert verification, overriding
+// rejectUnauthorized:false (and defeating the insecure-TLS mode). Regex, not a
+// URL round-trip, so the password's characters are never re-encoded.
+const cleanConnectionString = connectionString
+  .replace(/([?&])(sslmode|ssl|sslrootcert|sslcert|sslkey)=[^&]*/gi, "$1")
+  .replace(/[?&]+$/g, "")
+  .replace(/([?&])&+/g, "$1")
+  .replace(/\?&/g, "?");
+
 const insecureTls = process.env.DB_ROLE_CHECK_INSECURE_TLS === "true";
 let ssl;
 if (insecureTls) {
@@ -42,7 +53,7 @@ if (insecureTls) {
   ssl = buildSslConfig(connectionString);
 }
 
-const client = new pg.Client({ connectionString, ssl });
+const client = new pg.Client({ connectionString: cleanConnectionString, ssl });
 await client.connect();
 const { rows } = await client.query(
   "SELECT current_user AS role, rolbypassrls FROM pg_roles WHERE rolname = current_user",
