@@ -31,7 +31,9 @@
 - `lib/db/src/seed/seedDemoOrg.ts` — canonical demo dataset (shared by the endpoint and the CLI).
 - `artifacts/api-server/src/lib/demoFork.ts` — `DEMO_FORK_ENABLED` flag reader.
 - `artifacts/api-server/src/routes/demo.ts` — `GET /demo/status`, `POST /demo/provision`, `POST /demo/graduate`.
-- `artifacts/api-server/src/routes/demo.test.ts` — route unit/integration tests.
+- `artifacts/api-server/src/tests/routes/demo.test.ts` — route integration tests (node:test, DB-backed).
+- `artifacts/api-server/src/tests/lib/demoFork.test.ts` — flag-reader unit test (node:test).
+- `artifacts/api-server/src/tests/db/seedDemoOrg.test.ts` — seed + cascade-teardown integration test (node:test, DB-backed).
 - `artifacts/admin-dashboard/src/hooks/use-demo-status.ts` — client hook wrapping `GET /demo/status`.
 - `artifacts/admin-dashboard/src/pages/onboarding/steps/ForkChoice.tsx` — the W2 fork screen.
 - `artifacts/admin-dashboard/src/components/layout/DemoBanner.tsx` — persistent demo banner + graduate CTA.
@@ -45,6 +47,34 @@
 - `artifacts/api-server/src/app.ts` — mount `demoRouter` in tier 1.
 - `artifacts/admin-dashboard/src/pages/onboarding/Wizard.tsx` — insert the fork pre-step.
 - `artifacts/admin-dashboard/src/components/layout/AppLayout.tsx` — render `<DemoBanner/>`.
+
+---
+
+## Test Harness Conventions (READ FIRST — the whole plan depends on these)
+
+This repo does **NOT use vitest** for api-server. Match the existing conventions exactly:
+
+- **Runner:** `node:test` + `node:assert`, discovered by `artifacts/api-server/scripts/run-tests.mjs` (globs `**/*.test.ts`). Run the whole suite with `pnpm --filter @workspace/api-server run test`. There is no per-file vitest command.
+- **Test location:** all api-server tests live under `artifacts/api-server/src/tests/` — `tests/lib/`, `tests/routes/`, `tests/isolation/`. **Never** co-locate a `*.test.ts` next to the source file.
+- **`lib/db` has no test runner.** Any DB-backed test for `seedDemoOrg` MUST live in the api-server suite (which owns the DB harness), not in `lib/db`.
+- **DB-backed suites** follow the pattern in `src/tests/routes/wizard.test.ts`: `import { describe, test } from "node:test"; import { strictEqual, ok } from "node:assert";`, then
+  ```ts
+  const dbUrl = requireTestDatabaseUrl();
+  closeDatabasePoolAfterTests();
+  describe("…", { skip: !dbUrl }, () => {
+    const fixture = useDatabaseFixture(["<tables to truncate>"]);
+    // seedTestUser / seedTenantContext / getAdminDb from helpers/testDatabase
+    // createAuthenticatedTestApp, DEFAULT_TEST_USER from helpers/testApp
+    // supertest(app) for HTTP
+  });
+  ```
+  Skipping on missing `TEST_DATABASE_URL` keeps the local `run test` job green DB-free.
+- **Pure-unit tests** (no DB, e.g. the flag reader) also use `node:test`/`node:assert` and live under `src/tests/lib/`.
+- **The one end-to-end proof command** for migrations + RLS (pgTAP) + routes is:
+  ```bash
+  bash scripts/ci/test-disposable-supabase.sh
+  ```
+  It spins a disposable local Supabase stack (docker + supabase CLI, both present in this env), replays the full Drizzle + Supabase migration history, runs the pgTAP suite (`supabase/tests/`), then the api-server `node:test` suite with `REQUIRE_TEST_DATABASE=true`, and stops its own stack on exit. This is how Task 2's pgTAP, Task 4/6/7's DB tests, and Task 11's isolation proof are all validated. It owns the containers it starts — do not touch unrelated containers.
 
 ---
 
@@ -154,12 +184,12 @@ Use `SELECT plan(N)` with the exact count you write, and `SELECT * FROM finish()
 
 - [ ] **Step 3: Bump the foundation Supabase count.** In `supabase/tests/00001_foundation.sql`, change the `supabase_migrations.schema_migrations` assertion from `18` to `19`, its message (`00001-00018` → `00001-00019`), and append a comment line describing `00019` (demo-fork backend UPDATE on organizations + DELETE on facilities).
 
-- [ ] **Step 4: Run the pgTAP suite against a disposable DB.**
+- [ ] **Step 4: Run the pgTAP suite via the disposable stack.** The disposable script replays all migrations (Drizzle + Supabase, including this `00019`) then runs `supabase test db` over `supabase/tests/`:
 
-Run: `supabase test db --db-url "$TEST_DATABASE_URL" "$(git rev-parse --show-toplevel)/supabase/tests"`
-Expected: all files pass, including `00001_foundation.sql` (now 32/19) and `00019_demo_fork_rls.test.sql`.
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -60`
+Expected: all pgTAP files pass, including `00001_foundation.sql` (now 32/19) and `00019_demo_fork_rls.test.sql`. (docker + supabase CLI are present in this env; the script starts and stops its own stack.)
 
-(If `$TEST_DATABASE_URL` isn't available in this environment, report BLOCKED with the exact command so the controller can supply a disposable DB — do NOT weaken the assertions to make them pass.)
+(Do NOT weaken assertions to make them pass. If the disposable stack fails to start, report BLOCKED with the tail output.)
 
 - [ ] **Step 5: Commit.**
 
@@ -174,44 +204,48 @@ git commit -m "feat(db): backend RLS for demo is_demo flip + facility delete (TE
 
 **Files:**
 - Create: `artifacts/api-server/src/lib/demoFork.ts`
-- Create: `artifacts/api-server/src/lib/demoFork.test.ts`
+- Create: `artifacts/api-server/src/tests/lib/demoFork.test.ts` (node:test, no DB)
 
 **Interfaces:**
 - Produces: `isDemoForkEnabled(): boolean`. Task 6/9 gate on it.
 
-- [ ] **Step 1: Write the failing test.** Create `artifacts/api-server/src/lib/demoFork.test.ts`:
+- [ ] **Step 1: Write the failing test.** Create `artifacts/api-server/src/tests/lib/demoFork.test.ts` (pure unit, `node:test` — no DB gate needed). Note the import path reaches up out of `src/tests/lib/` into `src/lib/`:
 
 ```ts
-import { describe, it, expect, afterEach } from "vitest";
-import { isDemoForkEnabled } from "./demoFork";
+import { describe, test, afterEach } from "node:test";
+import { strictEqual } from "node:assert";
+import { isDemoForkEnabled } from "../../lib/demoFork";
 
 describe("isDemoForkEnabled", () => {
   const orig = process.env.DEMO_FORK_ENABLED;
-  afterEach(() => { process.env.DEMO_FORK_ENABLED = orig; });
+  afterEach(() => {
+    if (orig === undefined) delete process.env.DEMO_FORK_ENABLED;
+    else process.env.DEMO_FORK_ENABLED = orig;
+  });
 
-  it("defaults to false when unset", () => {
+  test("defaults to false when unset", () => {
     delete process.env.DEMO_FORK_ENABLED;
-    expect(isDemoForkEnabled()).toBe(false);
+    strictEqual(isDemoForkEnabled(), false);
   });
-  it("is false for any non-'true' value", () => {
+  test("is false for any non-'true' value", () => {
     process.env.DEMO_FORK_ENABLED = "1";
-    expect(isDemoForkEnabled()).toBe(false);
+    strictEqual(isDemoForkEnabled(), false);
     process.env.DEMO_FORK_ENABLED = "yes";
-    expect(isDemoForkEnabled()).toBe(false);
+    strictEqual(isDemoForkEnabled(), false);
   });
-  it("is true only for 'true' (case-insensitive)", () => {
+  test("is true only for 'true' (case-insensitive)", () => {
     process.env.DEMO_FORK_ENABLED = "TRUE";
-    expect(isDemoForkEnabled()).toBe(true);
+    strictEqual(isDemoForkEnabled(), true);
     process.env.DEMO_FORK_ENABLED = "true";
-    expect(isDemoForkEnabled()).toBe(true);
+    strictEqual(isDemoForkEnabled(), true);
   });
 });
 ```
 
 - [ ] **Step 2: Run it to confirm it fails.**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/lib/demoFork.test.ts`
-Expected: FAIL (module not found).
+Run: `pnpm --filter @workspace/api-server run test 2>&1 | grep -A3 demoFork`
+Expected: FAIL (module `../../lib/demoFork` not found). (The runner globs all `*.test.ts`; grep isolates this file's result.)
 
 - [ ] **Step 3: Implement.** Create `artifacts/api-server/src/lib/demoFork.ts`:
 
@@ -235,13 +269,13 @@ export function isDemoForkEnabled(): boolean {
 
 - [ ] **Step 4: Run the test to confirm it passes.**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/lib/demoFork.test.ts`
-Expected: PASS (3 tests).
+Run: `pnpm --filter @workspace/api-server run test 2>&1 | grep -A3 demoFork`
+Expected: PASS (3 subtests under `isDemoForkEnabled`).
 
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add artifacts/api-server/src/lib/demoFork.ts artifacts/api-server/src/lib/demoFork.test.ts
+git add artifacts/api-server/src/lib/demoFork.ts artifacts/api-server/src/tests/lib/demoFork.test.ts
 git commit -m "feat(api): DEMO_FORK_ENABLED flag reader (TEN-013)"
 ```
 
@@ -252,22 +286,28 @@ git commit -m "feat(api): DEMO_FORK_ENABLED flag reader (TEN-013)"
 **Files:**
 - Create: `lib/db/src/seed/seedDemoOrg.ts`
 - Modify: `lib/db/src/index.ts` (barrel — export `seedDemoOrg`; match the existing export style)
-- Create: `lib/db/src/seed/seedDemoOrg.test.ts` (integration; runs against a disposable DB)
+- Create: `artifacts/api-server/src/tests/db/seedDemoOrg.test.ts` (`node:test`, DB-backed — `lib/db` has no runner, so the integration test lives in the api-server suite that owns the DB harness; there is already a `src/tests/db/` dir, e.g. `signupTables.test.ts`)
 
 **Interfaces:**
-- Consumes: a Drizzle transaction `tx` on which the caller has ALREADY set `app.org_id` and `app.facility_id` (so RLS admits the inserts), and `{ organizationId, facilityId }`.
-- Produces: `export async function seedDemoOrg(tx, ctx: { organizationId: number; facilityId: number }): Promise<void>`. `tx` type is the same `Parameters<Parameters<typeof db.transaction>[0]>[0]` used by `withTenantScope` (`lib/db/src/scope.ts`) — import/reuse that type alias, do not re-widen to `any`.
+- Consumes: a Drizzle transaction `tx` on which the caller has ALREADY set `app.org_id` and `app.facility_id` (so RLS admits the inserts), and `{ organizationId, facilityId, userId }`.
+- Produces: `export async function seedDemoOrg(tx, ctx: { organizationId: number; facilityId: number; userId: string }): Promise<void>`. `userId` is required because `facility_logs.userId` is `NOT NULL`. `tx` type is the same `Parameters<Parameters<typeof db.transaction>[0]>[0]` used by `withTenantScope` (`lib/db/src/scope.ts`) — import/reuse that type alias, do not re-widen to `any`.
 
 **Cascade audit (do this first, record findings in a top-of-file comment):** every table `seedDemoOrg` writes MUST be removable by deleting the parent facility via `ON DELETE CASCADE`. Confirmed cascade-safe children of `facilities`: `seed_lots`, `cycles`, `sensors` (→ `sensor_readings` cascade), `alerts`, `tasks`, `inventory_items`, `facility_logs`, `rooms`, `growth_profiles` (org-scoped, cascades from `organizations`). **Forbidden (restrict child of `cycles`):** `manual_checks`, `bad_tray_entries` — do NOT seed either. `stock_movements` (inventory child, cascade) and `cycle_seed_lots` (cascade) are safe but out of scope for v1's seed. Reference data (`growth_profiles`) is created fresh for the demo org here (it is org-scoped and `NOT NULL organization_id`), never copied from another org.
 
-- [ ] **Step 1: Write the failing integration test.** Create `lib/db/src/seed/seedDemoOrg.test.ts` that, against a disposable DB: creates an org + owner user + a facility, opens a transaction setting `app.org_id`/`app.facility_id`, calls `seedDemoOrg(tx, { organizationId, facilityId })`, then asserts — scoped to that facility — that `seed_lots`, `cycles`, `sensors`, `sensor_readings`, `alerts`, `tasks`, `inventory_items`, `facility_logs`, and 2 `growth_profiles` rows exist with counts > 0, AND that `manual_checks` / `bad_tray_entries` have 0 rows for that org (cascade-safety guard). Then `DELETE FROM facilities WHERE id = facilityId` succeeds without an FK error and leaves every seeded child table at 0 rows for that facility (proves the cascade teardown).
+- [ ] **Step 1: Write the failing integration test.** Create `artifacts/api-server/src/tests/db/seedDemoOrg.test.ts` following the `node:test` DB-backed pattern (see Test Harness Conventions above and `src/tests/db/signupTables.test.ts`):
+  - `const dbUrl = requireTestDatabaseUrl(); closeDatabasePoolAfterTests();`
+  - `describe("seedDemoOrg", { skip: !dbUrl }, () => { … })`.
+  - Use `useDatabaseFixture([...])` and `seedTenantContext(handle.db, {...}, { id, email }, { memberRole: "owner" })` (returns `{ organizationId, facilityId }`) to create the org+facility+owner. Grab the owner `userId` from the seeded user id.
+  - Open a `handle.db.transaction`, `SELECT set_config('app.org_id', …, true)` and `set_config('app.facility_id', …, true)` inside it, call `seedDemoOrg(tx, { organizationId, facilityId, userId })`.
+  - Assert — scoped to that facility — that `seed_lots`, `cycles`, `sensors`, `sensor_readings`, `alerts`, `tasks`, `inventory_items`, `facility_logs`, and 2 `growth_profiles` rows have counts > 0, AND `manual_checks` / `bad_tray_entries` counts are 0 for that org (cascade-safety guard).
+  - Then run `DELETE FROM facilities WHERE id = facilityId` (via `getAdminDb() ?? handle.db`, since a bare farmsmart_app delete needs Task 2's policy + `app.org_id` set) and assert it succeeds without an FK error and leaves every seeded facility-child table at 0 rows (proves the cascade teardown).
 
-(If the db package has no existing integration-test harness/`$TEST_DATABASE_URL` wiring, model this on the nearest existing db-package test; if none exists, report BLOCKED to the controller rather than inventing a harness — the endpoint tests in Task 6/7 also exercise this path end-to-end.)
+Note the import for the module under test is `import { seedDemoOrg } from "@workspace/db";` (barrel export from Step 4).
 
 - [ ] **Step 2: Run it to confirm it fails.**
 
-Run: `pnpm --filter @workspace/db exec vitest run src/seed/seedDemoOrg.test.ts`
-Expected: FAIL (module not found).
+Run: `pnpm --filter @workspace/api-server run test 2>&1 | grep -A3 seedDemoOrg`
+Expected: FAIL (`seedDemoOrg` is not exported yet). (Without `TEST_DATABASE_URL` the describe is skipped — run the real assertion via the disposable script in Step 5.)
 
 - [ ] **Step 3: Implement the seed module.** Create `lib/db/src/seed/seedDemoOrg.ts`. Reuse the concrete cycle/seed-lot literals already in `scripts/src/seed-demo-data.ts` (the `d001`–`d010` cycle set and the QR seed-lot set) rather than reinventing them. Structure:
 
@@ -298,7 +338,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 export async function seedDemoOrg(
   tx: Tx,
-  { organizationId, facilityId }: { organizationId: number; facilityId: number },
+  { organizationId, facilityId, userId }: { organizationId: number; facilityId: number; userId: string },
 ): Promise<void> {
   // 1. Two org-scoped growth profiles the demo cycles reference (predictable
   //    overdue behaviour, same as the CLI's p1/p5). Columns per
@@ -320,9 +360,8 @@ export async function seedDemoOrg(
   // 6. tasks (facilityId) — 2 rows.
   // 7. inventory_items (facilityId) — 3 rows; respect the
   //    `currentQty <= maxQty` CHECK.
-  // 8. facility_logs (facilityId, userId, data jsonb, logType) — 3 recent rows.
-  //    facility_logs.userId is NOT NULL — thread the demo owner's userId in via
-  //    the ctx (extend the signature to accept userId if needed for this table).
+  // 8. facility_logs (facilityId, userId, data jsonb, logType) — 3 recent rows,
+  //    using the required `userId` from the ctx (facility_logs.userId NOT NULL).
 }
 ```
 
@@ -332,20 +371,22 @@ export async function seedDemoOrg(
 - `facility_logs.userId` is `NOT NULL` — extend the ctx to `{ organizationId, facilityId, userId }` and pass the demo owner's user id.
 - `alerts` has a partial unique index on `(title, location) WHERE status='current'` — give current alerts distinct titles.
 
-Extend the interface signature to `{ organizationId; facilityId; userId }` since `facility_logs` needs it; update this task's Interfaces block accordingly and thread `userId` from Task 6's resolved membership.
+(The `userId` param is already reflected in this task's Interfaces block above; thread `userId` from Task 6's resolved membership when the endpoint calls this.)
 
 - [ ] **Step 4: Export from the barrel.** In `lib/db/src/index.ts`, add `export { seedDemoOrg } from "./seed/seedDemoOrg.js";` (match the file's existing export punctuation/extension convention).
 
-- [ ] **Step 5: Run the test to confirm it passes.**
+- [ ] **Step 5: Run the test to confirm it passes (against the disposable stack).** Task 2's migration must already be present. Run the full disposable proof, which provides `TEST_DATABASE_URL` so the skipped describe now executes:
 
-Run: `pnpm --filter @workspace/db exec vitest run src/seed/seedDemoOrg.test.ts`
-Expected: PASS (seeded counts > 0; facility delete cascades cleanly).
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -40`
+Expected: the api-server suite passes, including `seedDemoOrg` (seeded counts > 0; facility delete cascades cleanly). pgTAP from Task 2 also runs here.
+
+(A fast inner-loop alternative once a disposable stack is already up: export its `TEST_DATABASE_URL`/`REQUIRE_TEST_DATABASE=true`/`SUPABASE_*` and run `pnpm --filter @workspace/api-server run test` directly — but the committed proof is the script above.)
 
 - [ ] **Step 6: Typecheck + commit.**
 
 ```bash
 pnpm run typecheck
-git add lib/db/src/seed/seedDemoOrg.ts lib/db/src/seed/seedDemoOrg.test.ts lib/db/src/index.ts
+git add lib/db/src/seed/seedDemoOrg.ts artifacts/api-server/src/tests/db/seedDemoOrg.test.ts lib/db/src/index.ts
 git commit -m "feat(db): shared seedDemoOrg demo dataset module (TEN-013)"
 ```
 
@@ -409,7 +450,7 @@ git commit -m "refactor(scripts): seed-demo-data delegates to seedDemoOrg + prod
 
 **Files:**
 - Create: `artifacts/api-server/src/routes/demo.ts`
-- Create: `artifacts/api-server/src/routes/demo.test.ts`
+- Create: `artifacts/api-server/src/tests/routes/demo.test.ts` (`node:test`, DB-backed)
 - Modify: `artifacts/api-server/src/app.ts` (import + mount `demoRouter` in tier 1, alongside `wizardRouter`)
 
 **Interfaces:**
@@ -420,7 +461,7 @@ git commit -m "refactor(scripts): seed-demo-data delegates to seedDemoOrg + prod
 
 **Design (mirror `ensureOwnerOrg`/`wizard.ts`, NOT `req.tenant`):** at the fork there is no facility, so resolve the org from the caller's active OWNER membership directly. Provision runs one `db.transaction`, setting GUCs inside it (like `withTenantScope`, but `app.facility_id` is set AFTER the facility row is created):
 
-- [ ] **Step 1: Write failing route tests.** Create `artifacts/api-server/src/routes/demo.test.ts` (supertest against the app, or the project's existing route-test harness — check how `wizard`/`facilities` routes are tested first). Cases:
+- [ ] **Step 1: Write failing route tests.** Create `artifacts/api-server/src/tests/routes/demo.test.ts` following the `node:test` DB-backed pattern of `src/tests/routes/wizard.test.ts`: `requireTestDatabaseUrl()`, `closeDatabasePoolAfterTests()`, `describe(..., { skip: !dbUrl })`, `useDatabaseFixture([...])`, `createAuthenticatedTestApp(...)` + `DEFAULT_TEST_USER`, `supertest(app)`. Seed the owner via `seedTenantContext(handle.db, {...}, user, { memberRole: "owner" })` — but note provision creates its OWN facility, so for the fresh-provision case seed only the org+owner membership WITHOUT a pre-existing facility (adapt `seedTenantContext`, or insert org + owner membership directly via `getAdminDb()`), matching the real fork state (empty owner org, no facility). Toggle `process.env.DEMO_FORK_ENABLED` per case and restore it in `afterEach`. Cases:
   - flag off ⇒ `POST /demo/provision` returns 403 and writes nothing;
   - flag on, fresh owner org ⇒ 200, org `is_demo=true`, exactly one facility, seeded rows present (spot-check `cycles`/`seed_lots` counts), `GET /demo/status` ⇒ `{ enabled:true, isDemo:true, demoFacilityId:<id> }`;
   - second `POST /demo/provision` ⇒ 200, same `facilityId`, no duplicate facility (idempotent);
@@ -428,8 +469,8 @@ git commit -m "refactor(scripts): seed-demo-data delegates to seedDemoOrg + prod
 
 - [ ] **Step 2: Run to confirm failure.**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/routes/demo.test.ts`
-Expected: FAIL (route not mounted).
+Run: `pnpm --filter @workspace/api-server run test 2>&1 | grep -A3 "demo"`
+Expected: FAIL (route not mounted / not found). (Real DB assertions run via the disposable script in Step 5; without `TEST_DATABASE_URL` the describe skips.)
 
 - [ ] **Step 3: Implement `routes/demo.ts`.**
 
@@ -517,16 +558,16 @@ app.use("/api", requireSignedIn, demoRouter);
 
 Tier 1 is correct: `/demo/*` carries no `requireTenantContext` (it must run for a user with no facility yet), and its handlers self-resolve the org. Place it among the tier-1 mounts (lines ~211–220), NOT in tiers 2–4.
 
-- [ ] **Step 5: Run the tests.**
+- [ ] **Step 5: Run the tests (disposable stack).**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/routes/demo.test.ts`
-Expected: PASS.
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -60`
+Expected: api-server suite passes, including the `demo` provision/status cases. (Flag-off case runs DB-free too, but the seeded assertions need the stack.)
 
 - [ ] **Step 6: Typecheck + commit.**
 
 ```bash
 pnpm run typecheck
-git add artifacts/api-server/src/routes/demo.ts artifacts/api-server/src/routes/demo.test.ts artifacts/api-server/src/app.ts
+git add artifacts/api-server/src/routes/demo.ts artifacts/api-server/src/tests/routes/demo.test.ts artifacts/api-server/src/app.ts
 git commit -m "feat(api): GET /demo/status + POST /demo/provision (TEN-013)"
 ```
 
@@ -536,17 +577,17 @@ git commit -m "feat(api): GET /demo/status + POST /demo/provision (TEN-013)"
 
 **Files:**
 - Modify: `artifacts/api-server/src/routes/demo.ts`
-- Modify: `artifacts/api-server/src/routes/demo.test.ts`
+- Modify: `artifacts/api-server/src/tests/routes/demo.test.ts`
 
 **Interfaces:**
 - Produces: `POST /api/demo/graduate` → body `{ confirm: true }` required; `200 {}` on success; `400` if `confirm !== true`; `409`/`200-noop` if the org isn't currently a demo. **Not** flag-gated (a demo user must always be able to escape — see the demoFork.ts note).
 
-- [ ] **Step 1: Add failing tests.** In `demo.test.ts`: after provisioning a demo org, `POST /demo/graduate {confirm:true}` ⇒ 200, org `is_demo=false`, the demo facility and ALL its facility-scoped rows are gone (assert `cycles`/`seed_lots`/`sensors`/`facility_logs` counts = 0 for that org), and the org row + owner membership survive; a second graduate is a safe no-op; `{confirm:false}` ⇒ 400 and no state change.
+- [ ] **Step 1: Add failing tests.** In `src/tests/routes/demo.test.ts` (same file, new `describe` block): after provisioning a demo org, `POST /demo/graduate {confirm:true}` ⇒ 200, org `is_demo=false`, the demo facility and ALL its facility-scoped rows are gone (assert `cycles`/`seed_lots`/`sensors`/`facility_logs` counts = 0 for that org), and the org row + owner membership survive; a second graduate is a safe no-op; `{confirm:false}` ⇒ 400 and no state change.
 
 - [ ] **Step 2: Run to confirm failure.**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/routes/demo.test.ts -t graduate`
-Expected: FAIL.
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | grep -A3 graduate`
+Expected: FAIL (handler not implemented). (Graduate's assertions are all DB-backed, so they only execute under the disposable stack.)
 
 - [ ] **Step 3: Implement the handler in `routes/demo.ts`.**
 
@@ -577,16 +618,16 @@ router.post("/demo/graduate", async (req: Request, res: Response) => {
 
 (Also delete any org-level demo rows if the seed ever adds them — v1's seed is entirely facility-scoped + org-scoped `growth_profiles`. `growth_profiles` cascades from `organizations`, so it survives graduate since the org survives; if the demo profiles should be removed on graduate, delete `growth_profiles WHERE organization_id = org AND name LIKE '%(demo)'` in the same tx. Decide and note explicitly — recommended: delete the two `(demo)` profiles so a graduated real farm starts clean.)
 
-- [ ] **Step 4: Run the tests.**
+- [ ] **Step 4: Run the tests (disposable stack).**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run src/routes/demo.test.ts`
-Expected: PASS (all provision + graduate cases).
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -60`
+Expected: api-server suite passes — all provision + graduate cases green, and the pgTAP `00019` proof (Task 2) still passes in the same run.
 
 - [ ] **Step 5: Typecheck + commit.**
 
 ```bash
 pnpm run typecheck
-git add artifacts/api-server/src/routes/demo.ts artifacts/api-server/src/routes/demo.test.ts
+git add artifacts/api-server/src/routes/demo.ts artifacts/api-server/src/tests/routes/demo.test.ts
 git commit -m "feat(api): POST /demo/graduate reset-in-place (TEN-013)"
 ```
 
@@ -691,29 +732,29 @@ git commit -m "feat(dashboard): persistent demo banner + graduate CTA (TEN-013)"
 ### Task 11: Cross-tenant isolation proof + flag-off regression
 
 **Files:**
-- Modify: `artifacts/api-server/src/routes/demo.test.ts` (add isolation cases)
-- Reference/extend: the existing `farmsmart_app` RLS proof harness used for TEN-012 (find it under `scripts/ci/` — the private-media / signup RLS proofs — and add a demo case if that is where end-to-end RLS is proven under the real role).
+- Modify: `artifacts/api-server/src/tests/routes/demo.test.ts` (add isolation cases)
+- Optionally add: `artifacts/api-server/src/tests/isolation/demo-cross-tenant.test.ts` if the isolation cases fit the existing `src/tests/isolation/cross-tenant.test.ts` harness better than the route test file (check that file first and follow whichever pattern is cleaner).
 
 **Interfaces:**
 - Consumes: everything above.
 
-- [ ] **Step 1: Add cross-tenant tests.** In `demo.test.ts`: user B (a different org's owner) calling `GET /demo/status` sees only THEIR own org's `isDemo` (never A's), and `POST /demo/graduate` as B never deletes A's demo facility. Provision by A then, as B, assert A's demo rows are untouched. Assert end-state (row presence/absence), not error codes, for the RLS-scoped paths.
+- [ ] **Step 1: Add cross-tenant tests.** In `src/tests/routes/demo.test.ts` (or `src/tests/isolation/demo-cross-tenant.test.ts`), `node:test` DB-backed: user B (a different org's owner, seeded via a second `seedTenantContext`/admin insert) calling `GET /demo/status` sees only THEIR own org's `isDemo` (never A's), and `POST /demo/graduate` as B never deletes A's demo facility. Provision by A then, as B, assert A's demo rows are untouched. Assert end-state (row presence/absence), not error codes, for the RLS-scoped paths (per the RLS-denied-writes rule).
 
-- [ ] **Step 2: Add the flag-off regression.** With `DEMO_FORK_ENABLED` unset: `POST /demo/provision` ⇒ 403 and no rows written; `GET /demo/status` ⇒ `enabled:false`; and (dashboard) the fork never renders so `Wizard` opens on `farm_basics`. A unit test asserting the 403 + a note to manually verify the UI path is sufficient here.
+- [ ] **Step 2: Add the flag-off regression.** With `DEMO_FORK_ENABLED` unset (restore in `afterEach`): `POST /demo/provision` ⇒ 403 and no rows written; `GET /demo/status` ⇒ `enabled:false`. The 403 assertion is DB-free (the guard returns before any query); the "no rows written" check needs the stack. Add a code comment that the dashboard flag-off UI path (fork never renders, `Wizard` opens on `farm_basics`) is verified manually / by the Task 9 build, not here.
 
-- [ ] **Step 3: Run the full api-server suite.**
+- [ ] **Step 3: Run the full api-server suite via the disposable stack.**
 
-Run: `pnpm --filter @workspace/api-server exec vitest run`
-Expected: PASS (no regressions in wizard/facilities/tenantContext tests).
+Run: `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -80`
+Expected: PASS — the whole api-server `node:test` suite (no regressions in wizard/facilities/tenantContext) plus the new demo isolation + flag-off cases, and every pgTAP file. Report the total test count from the tail output.
 
-- [ ] **Step 4: If a `farmsmart_app` end-to-end RLS proof script exists, extend it.** Add a demo provision+graduate case run under the non-BYPASSRLS role against a disposable Supabase, matching the TEN-012 proof's structure. Report the green count.
-
-- [ ] **Step 5: Commit.**
+- [ ] **Step 4: Commit.**
 
 ```bash
-git add artifacts/api-server/src/routes/demo.test.ts
+git add artifacts/api-server/src/tests/routes/demo.test.ts artifacts/api-server/src/tests/isolation/demo-cross-tenant.test.ts
 git commit -m "test(api): demo cross-tenant isolation + flag-off regression (TEN-013)"
 ```
+
+(Drop the `isolation/…` path from the `git add` if you kept everything in the route test file.)
 
 ---
 
