@@ -59,6 +59,9 @@ import type {
   CycleDetail,
   DashboardStats,
   DeleteResult,
+  DemoGraduateRequest,
+  DemoProvisionResult,
+  DemoStatus,
   ErrorResponse,
   Facility,
   FacilityLog,
@@ -5816,6 +5819,254 @@ export const usePutWizardProgress = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPutWizardProgressMutationOptions(options), queryClient);
+    }
+
+export const getGetDemoStatusUrl = () => {
+
+
+
+
+  return `/api/demo/status`
+}
+
+/**
+ * Always available (never flag-gated) — a user already in a demo org must always be able to see their own state, even if DEMO_FORK_ENABLED is later switched off. A caller with no owner org yet (brand-new user at W2) is a normal state, not a failure: isDemo is false and demoFacilityId is null.
+
+ * @summary Whether the demo fork is enabled and whether the caller's own org is currently a demo
+ */
+export const getDemoStatus = async ( options?: RequestInit): Promise<DemoStatus> => {
+
+  return customFetch<DemoStatus>(getGetDemoStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDemoStatusQueryKey = () => {
+    return [
+    `/api/demo/status`
+    ] as const;
+    }
+
+
+export const getGetDemoStatusQueryOptions = <TData = Awaited<ReturnType<typeof getDemoStatus>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDemoStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDemoStatus>>> = ({ signal }) => getDemoStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDemoStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getDemoStatus>>>
+export type GetDemoStatusQueryError = ErrorType<unknown>
+
+
+export function useGetDemoStatus<TData = Awaited<ReturnType<typeof getDemoStatus>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDemoStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getDemoStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDemoStatus<TData = Awaited<ReturnType<typeof getDemoStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDemoStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getDemoStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDemoStatus<TData = Awaited<ReturnType<typeof getDemoStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Whether the demo fork is enabled and whether the caller's own org is currently a demo
+ */
+
+export function useGetDemoStatus<TData = Awaited<ReturnType<typeof getDemoStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDemoStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetDemoStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPostDemoProvisionUrl = () => {
+
+
+
+
+  return `/api/demo/provision`
+}
+
+/**
+ * Flag-gated (403 when DEMO_FORK_ENABLED is off). Resolves the org from the caller's active OWNER membership, never from client input. Idempotent — an already-demo org returns its existing demo facility with no re-seed.
+
+ * @summary Seed the caller's own empty org with a demo dataset ("Explore a demo" at W2)
+ */
+export const postDemoProvision = async ( options?: RequestInit): Promise<DemoProvisionResult> => {
+
+  return customFetch<DemoProvisionResult>(getPostDemoProvisionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPostDemoProvisionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postDemoProvision>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postDemoProvision>>, TError,void, TContext> => {
+
+const mutationKey = ['postDemoProvision'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postDemoProvision>>, void> = () => {
+
+
+          return  postDemoProvision(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostDemoProvisionMutationResult = NonNullable<Awaited<ReturnType<typeof postDemoProvision>>>
+
+    export type PostDemoProvisionMutationError = ErrorType<void>
+
+    /**
+ * @summary Seed the caller's own empty org with a demo dataset ("Explore a demo" at W2)
+ */
+export const usePostDemoProvision = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postDemoProvision>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postDemoProvision>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getPostDemoProvisionMutationOptions(options), queryClient);
+    }
+
+export const getPostDemoGraduateUrl = () => {
+
+
+
+
+  return `/api/demo/graduate`
+}
+
+/**
+ * Not flag-gated — a demo user must always be able to escape the demo. Requires an explicit confirm:true body. Deletes the demo facility (cascading every seeded row under it) and flips organizations.is_demo back to false. A no-op (200, no writes) when the org isn't currently a demo, so a duplicate call is always safe.
+
+ * @summary Reset the demo org in place — delete the demo facility and flip is_demo off
+ */
+export const postDemoGraduate = async (demoGraduateRequest: DemoGraduateRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getPostDemoGraduateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      demoGraduateRequest,)
+  }
+);}
+
+
+
+
+export const getPostDemoGraduateMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postDemoGraduate>>, TError,{data: BodyType<DemoGraduateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postDemoGraduate>>, TError,{data: BodyType<DemoGraduateRequest>}, TContext> => {
+
+const mutationKey = ['postDemoGraduate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postDemoGraduate>>, {data: BodyType<DemoGraduateRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postDemoGraduate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostDemoGraduateMutationResult = NonNullable<Awaited<ReturnType<typeof postDemoGraduate>>>
+    export type PostDemoGraduateMutationBody = BodyType<DemoGraduateRequest>
+    export type PostDemoGraduateMutationError = ErrorType<void>
+
+    /**
+ * @summary Reset the demo org in place — delete the demo facility and flip is_demo off
+ */
+export const usePostDemoGraduate = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postDemoGraduate>>, TError,{data: BodyType<DemoGraduateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postDemoGraduate>>,
+        TError,
+        {data: BodyType<DemoGraduateRequest>},
+        TContext
+      > => {
+      return useMutation(getPostDemoGraduateMutationOptions(options), queryClient);
     }
 
 export const getListSensorAccountsUrl = () => {
