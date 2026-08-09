@@ -55,4 +55,6 @@ jobs:
       - name: Assert BYPASSRLS is false for the prod runtime role
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          # CA-pinned TLS for the hosted Supabase pooler (buildSslConfig reads it).
+          DATABASE_CA_CERT: ${{ secrets.PRODUCTION_DATABASE_CA_CERT }}
         run: node scripts/ci/verify-db-role.mjs

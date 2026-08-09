@@ -6,14 +6,25 @@
 // RLS policy written in this milestone:
 //   DATABASE_URL=... node scripts/ci/verify-db-role.mjs
 import pg from "pg";
+import { buildSslConfig } from "../../lib/db/src/ssl.ts";
 
-const connectionString = process.env.DATABASE_URL;
+// Strip whitespace (Render pastes env vars line-wrapped; a URL contains none) —
+// mirrors scripts/ci/check-migration-drift.mjs / verify-staging-supabase.mjs.
+const connectionString = process.env.DATABASE_URL?.replace(/\s/g, "");
 if (!connectionString) {
   console.error("DATABASE_URL must be set");
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString });
+// CA-pinned TLS via the repo's shared buildSslConfig (reads DATABASE_CA_CERT):
+// local/disposable -> ssl:false; hosted -> { ca, rejectUnauthorized:true }.
+// Without this, connecting to a hosted Supabase pooler fails with
+// SELF_SIGNED_CERT_IN_CHAIN because new pg treats sslmode=require as verify-full
+// and Supabase's cert is signed by a private root not in the system trust store.
+const client = new pg.Client({
+  connectionString,
+  ssl: buildSslConfig(connectionString),
+});
 await client.connect();
 const { rows } = await client.query(
   "SELECT current_user AS role, rolbypassrls FROM pg_roles WHERE rolname = current_user",
