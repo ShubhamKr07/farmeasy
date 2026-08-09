@@ -24,7 +24,7 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture([]);
+  const fixture = useDatabaseFixture(["organizations", "facilities", "cycles", "seed_lots", "sensors", "sensor_readings", "alerts", "tasks", "inventory_items", "facility_logs", "growth_profiles", "users", "organization_members"]);
 
   const origFlag = process.env.DEMO_FORK_ENABLED;
   afterEach(() => {
@@ -255,6 +255,142 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       strictEqual(org.isDemo, true, "graduate must not run without an explicit confirm:true");
       const [facility] = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.id, facilityId));
       ok(facility, "the demo facility must still exist");
+    });
+  });
+
+  describe("Cross-tenant isolation (TEN-013 Task 11)", () => {
+    test("user B's GET /demo/status never reflects org A's isDemo/demo facility", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+
+      // Provision org A as a demo
+      const { userId: userA, organizationId: orgAId } = await seedOwnerOrgNoFacility();
+      const appA = await buildApp(userA);
+      const provisionRes = await request(appA).post("/api/demo/provision").send({});
+      strictEqual(provisionRes.status, 200);
+      const demoFacilityA = provisionRes.body.facilityId as number;
+
+      // Seed org B as a separate owner org
+      const { userId: userB, organizationId: orgBId } = await seedOwnerOrgNoFacility();
+      const appB = await buildApp(userB);
+
+      // B's status should show their own org (not demo, no facility)
+      const bStatusRes = await request(appB).get("/api/demo/status");
+      strictEqual(bStatusRes.status, 200);
+      strictEqual(bStatusRes.body.enabled, true);
+      strictEqual(bStatusRes.body.isDemo, false, "org B's status must not reflect org A's demo state");
+      strictEqual(bStatusRes.body.demoFacilityId, null, "org B must not see org A's demo facility");
+
+      // Verify A's status still shows demo
+      const aStatusRes = await request(appA).get("/api/demo/status");
+      strictEqual(aStatusRes.status, 200);
+      strictEqual(aStatusRes.body.isDemo, true);
+      strictEqual(aStatusRes.body.demoFacilityId, demoFacilityA);
+    });
+
+    test("after org A provisions, org B's POST /demo/graduate leaves A's demo facility and cascaded rows fully intact", async () => {
+      process.env.DEMO_FORK_ENABLED = "true";
+
+      // Provision org A as a demo
+      const { userId: userA, organizationId: orgAId } = await seedOwnerOrgNoFacility();
+      const appA = await buildApp(userA);
+      const provisionRes = await request(appA).post("/api/demo/provision").send({});
+      strictEqual(provisionRes.status, 200);
+      const demoFacilityA = provisionRes.body.facilityId as number;
+
+      // Verify A has seeded data
+      const { cyclesTable, seedLotsTable, sensorsTable, facilityLogsTable } = await import("@workspace/db");
+      const cyclesBeforeB = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
+      ok(cyclesBeforeB.length > 0, "org A's facility should have seeded cycles");
+
+      // Seed org B
+      const { userId: userB, organizationId: orgBId } = await seedOwnerOrgNoFacility();
+      const appB = await buildApp(userB);
+
+      // B attempts to graduate (which should be a no-op, since B is not a demo org)
+      const graduateRes = await request(appB).post("/api/demo/graduate").send({ confirm: true });
+      strictEqual(graduateRes.status, 200, "graduate must succeed even when not a demo org (idempotent)");
+
+      // Assert A's demo facility and ALL its cascaded rows are fully intact
+      const cyclesAfterB = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
+      strictEqual(cyclesAfterB.length, cyclesBeforeB.length, "org A's cycles must not be affected by org B's graduate");
+
+      const seedLotsAfterB = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, demoFacilityA));
+      ok(seedLotsAfterB.length > 0, "org A's seed_lots must still exist");
+
+      const sensorsAfterB = await fixture.db.select().from(sensorsTable).where(eq(sensorsTable.facilityId, demoFacilityA));
+      ok(sensorsAfterB.length > 0, "org A's sensors must still exist");
+
+      const logsAfterB = await fixture.db.select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, demoFacilityA));
+      ok(logsAfterB.length > 0, "org A's facility_logs must still exist");
+
+      // Verify A is still a demo org
+      const { organizationsTable } = await import("@workspace/db");
+      const [orgA] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, orgAId));
+      strictEqual(orgA.isDemo, true, "org A must still be marked as demo after org B's graduate");
+    });
+
+    test("RLS regression: UPDATE organizations SET is_demo with wrong app.org_id affects 0 rows", async () => {
+      // This test directly exercises the RLS UPDATE policy (Task 2) by attempting
+      // to flip org A's is_demo with B's app.org_id set, proving the policy denies
+      // the write. The policy is the regression canary for the GUC-set-before-write
+      // ordering if it ever drifts.
+      const { db, organizationsTable } = await import("@workspace/db");
+      const { sql } = await import("drizzle-orm");
+
+      // Provision org A
+      process.env.DEMO_FORK_ENABLED = "true";
+      const { userId: userA, organizationId: orgAId } = await seedOwnerOrgNoFacility();
+      const appA = await buildApp(userA);
+      const provisionRes = await request(appA).post("/api/demo/provision").send({});
+      strictEqual(provisionRes.status, 200);
+
+      // Seed org B
+      const { userId: userB, organizationId: orgBId } = await seedOwnerOrgNoFacility();
+
+      // Attempt to update org A's is_demo with B's app.org_id set
+      const updateRowCount = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT set_config('app.org_id', ${orgBId.toString()}, true)`);
+        const updateResult = await tx
+          .update(organizationsTable)
+          .set({ isDemo: false })
+          .where(eq(organizationsTable.id, orgAId));
+        // Drizzle's update returns an object; we need to check if rows were affected
+        // by re-reading the org to confirm is_demo was NOT flipped
+        return updateResult;
+      });
+
+      // Re-read org A as a superuser to confirm is_demo was NOT changed
+      const adb = getAdminDb() ?? fixture.db;
+      const [orgA] = await adb.select().from(organizationsTable).where(eq(organizationsTable.id, orgAId));
+      strictEqual(orgA.isDemo, true, "org A's is_demo must remain true after failed RLS UPDATE (RLS policy must deny the write)");
+    });
+  });
+
+  describe("Flag-off regression (TEN-013 Task 11)", () => {
+    test("with DEMO_FORK_ENABLED unset: POST /demo/provision → 403, no rows written", async () => {
+      delete process.env.DEMO_FORK_ENABLED;
+      const { userId, organizationId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId);
+
+      const res = await request(app).post("/api/demo/provision").send({});
+      strictEqual(res.status, 403);
+
+      // Verify no demo facility was created
+      const { organizationsTable, facilitiesTable } = await import("@workspace/db");
+      const [org] = await fixture.db.select().from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+      strictEqual(org.isDemo, false, "is_demo must not be set when flag is off");
+      const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
+      strictEqual(facilities.length, 0, "no facility should be created when flag is off");
+    });
+
+    test("with DEMO_FORK_ENABLED unset: GET /demo/status → enabled:false", async () => {
+      delete process.env.DEMO_FORK_ENABLED;
+      const { userId } = await seedOwnerOrgNoFacility();
+      const app = await buildApp(userId);
+
+      const res = await request(app).get("/api/demo/status");
+      strictEqual(res.status, 200);
+      strictEqual(res.body.enabled, false, "enabled must be false when flag is unset");
     });
   });
 });
