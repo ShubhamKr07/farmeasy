@@ -22,6 +22,29 @@ enforced for the backend's own connection.
 > scoped `farmsmart_recommender` role (see the parked follow-up on the TEN-013
 > task).
 
+> **⚠ Blast radius — do NOT reset the `postgres` password as part of this.**
+> This rotation only *creates a new role* (`farmsmart_app`); it never touches the
+> `postgres`/`service_role` password. If you (or anyone) run Supabase's **"Reset
+> database password"** on the prod project, you invalidate **every** connection
+> string still authenticating as `postgres` — all at once, silently, until the
+> next deploy:
+>
+> - `PRODUCTION_DATABASE_URL_DIRECT` (the migrations secret) → prod promotion
+>   fails at **"Apply production migrations"** with `password authentication
+>   failed for user "postgres"`.
+> - **`farmsmart-recommender`'s runtime `DATABASE_URL`** (still on the elevated
+>   role, deliberately un-rotated above) → its next deploy fails at startup with
+>   `asyncpg.exceptions.InvalidPasswordError` in `app/main.py` lifespan →
+>   `app/db.py get_pool()`, so the deploy goes `update_failed` and Render keeps
+>   the last-good instance live (prod stale, not down).
+> - Any other consumer still using the `postgres` credential.
+>
+> **If a `postgres` password reset is ever unavoidable, rotate all of these in
+> the same change** (the DIRECT migrations secret + the recommender runtime
+> `DATABASE_URL` + anything else on `postgres`) — do not deploy in between.
+> Incident of record: 2026-08-09, both casualties hit on the promotion of
+> `5e759cd` before the creds were re-synced.
+
 ---
 
 ## Step 1 — Create the role + grants in the PROD Supabase project
@@ -57,7 +80,9 @@ Render → **`farmsmart-api`** service → **Environment** → edit `DATABASE_UR
 - **Before overwriting, copy the current `postgres` value somewhere** — that is
   the rollback token.
 - Leave the GitHub secret `PRODUCTION_DATABASE_URL_DIRECT` (migrations, needs an
-  elevated role) **unchanged**.
+  elevated role) **unchanged** — *unless* the `postgres` password itself was
+  reset (see the Blast-radius warning above), in which case this secret AND the
+  recommender's runtime `DATABASE_URL` must be re-synced in the same change.
 
 Saving the env var triggers a `farmsmart-api` redeploy.
 

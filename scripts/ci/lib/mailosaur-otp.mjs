@@ -62,19 +62,40 @@ export async function resolveMailosaurServerId(token) {
   return String(items[0].id);
 }
 
+/**
+ * Remove URLs (and href/src attribute values) from a body string, replacing
+ * each with a space. Digits living inside a URL — Resend click-tracking ids,
+ * `redirect_to`/`token_hash` params, `127.0.0.1` ports — must NEVER be mistaken
+ * for the 6-digit OTP. Since TEN-012 routed Supabase Auth email through Resend,
+ * confirmation emails carry click-tracking URLs whose numeric segments are the
+ * exact source of the intermittent "Token has expired or is invalid" failures.
+ */
+function stripUrls(text) {
+  return String(text ?? "")
+    .replace(/\b(?:href|src)\s*=\s*["'][^"']*["']/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\bwww\.\S+/gi, " ");
+}
+
 /** Extract a 6-digit confirmation code from an email body. */
 export function extractOtp(body) {
   if (!body) return null;
-  // Strip HTML tags + common entities first. Supabase's OTP templates render
-  // the 6 digits across styled cells (`<td>1</td><td>2</td>…`), which would
-  // break a `\d{6}` match against raw HTML; collapsing tags to spaces (and
-  // then stripping the spaces for the digit scan) makes a split code matchable.
-  const text = String(body)
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&[a-z]+;|&#\d+;/gi, " ");
+  // Strip HTML tags + common entities, THEN strip URLs. Tag-stripping alone
+  // leaves bare URLs in visible text / plain-text parts, whose digit runs would
+  // otherwise be matched as the code. Supabase's OTP templates also render the
+  // 6 digits across styled cells (`<td>1</td><td>2</td>…`), so collapsing tags
+  // to spaces (and later stripping the spaces for the digit scan) keeps a split
+  // code matchable.
+  const text = stripUrls(
+    String(body)
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&[a-z]+;|&#\d+;/gi, " "),
+  );
   // Prefer a code introduced by a label Supabase's template uses.
-  const labeled = text.match(/(?:code|otp|verification|token)[^\d]{0,20}(\d{6})/i);
+  const labeled = text.match(
+    /(?:code|otp|verification|token)[^\d]{0,20}(\d{6})/i,
+  );
   if (labeled) return labeled[1];
   // Fallback: the first standalone 6-digit run.
   const plain = text.match(/\b(\d{6})\b/);
@@ -86,36 +107,75 @@ export function extractOtp(body) {
 }
 
 /**
+ * Collect every URL referenced anywhere in a Mailosaur message: link hrefs plus
+ * bare URLs and href/src attributes in the text/html bodies. Used to reject any
+ * candidate 6-digit code that is merely a substring of a URL.
+ */
+function collectUrls(full) {
+  const urls = [];
+  const links = [...(full?.html?.links ?? []), ...(full?.text?.links ?? [])];
+  for (const l of links) if (l?.href) urls.push(String(l.href));
+  for (const body of [full?.text?.body, full?.html?.body]) {
+    const s = String(body ?? "");
+    for (const m of s.matchAll(/https?:\/\/\S+/gi)) urls.push(m[0]);
+    for (const m of s.matchAll(/\b(?:href|src)\s*=\s*["']([^"']*)["']/gi))
+      urls.push(m[1]);
+  }
+  return urls;
+}
+
+/**
  * Extract the 6-digit OTP from a full Mailosaur message, trying every place a
- * Supabase confirmation template may put `{{ .Token }}`. The staging template
- * renders it three ways at once: as the text of a link whose href IS the token
- * (`<a href="930619">Here's your token</a>`), and inline in the plain-text part
- * ("Here's your token [930619]"). Mailosaur's own `codes` detection misfires
- * here — it classifies the token-link as a link (not a code) and instead picks
- * "127" out of the `127.0.0.1` redirect URL — so the code-array path is guarded
- * by a strict 6-digit test and backed by explicit link/body scans.
+ * Supabase confirmation template may put `{{ .Token }}`: inline in the
+ * plain-text part ("Here's your token [930619]"), as the text of a link whose
+ * href IS the token (`<a href="930619">`), and in Mailosaur's auto-detected
+ * `codes` array.
+ *
+ * Candidate order is deliberate. The plain-text body is tried FIRST because it
+ * has no click-tracking markup; the `codes` array is tried LAST and any
+ * candidate that is merely a substring of a URL in the message is rejected.
+ * That guards two misfires: Mailosaur picking "127" from a `127.0.0.1` redirect,
+ * and — since TEN-012 routed Supabase Auth email through Resend — Mailosaur
+ * auto-detecting a 6-digit Resend click-tracking id as a "code". Trusting that
+ * misfire returned a non-token value that verifyOtp rejected as expired/invalid,
+ * the intermittent deploy-staging gate failure this ordering fixes.
  *
  * @returns {string | null}
  */
 export function extractOtpFromMessage(full) {
-  // 1. Mailosaur auto-detected codes — 6-digit only, so noise like "127"
-  //    (from 127.0.0.1) is rejected.
-  const codes = [...(full?.text?.codes ?? []), ...(full?.html?.codes ?? [])];
-  for (const c of codes) {
-    const m = String(c?.value ?? "").match(/\b\d{6}\b/);
-    if (m) return m[0];
-  }
-  // 2. A link whose href is the bare token (template renders the OTP as a URL).
+  // Every URL in the message. A 6-digit value that is only a substring of one of
+  // these is a tracking id / redirect param / port — never the OTP.
+  const urls = collectUrls(full);
+  const inUrl = (code) => code != null && urls.some((u) => u.includes(code));
+
+  // 1. Strongest signal: a code in the PLAIN-TEXT body. The text/* part carries
+  //    the Supabase template's inline "token [nnnnnn]" and has no click-tracking
+  //    markup; extractOtp strips any bare URLs, so a tracking id cannot win here.
+  //    This deliberately runs BEFORE the codes[] path — Resend tracking URLs make
+  //    Mailosaur mis-detect a URL's digits as a "code", which is exactly the
+  //    misfire that returned an expired/invalid token to verifyOtp.
+  const fromText = extractOtp(full?.text?.body);
+  if (fromText && !inUrl(fromText)) return fromText;
+
+  // 2. A link whose href is the bare token (older template renders OTP as a URL).
   const links = [...(full?.html?.links ?? []), ...(full?.text?.links ?? [])];
   for (const l of links) {
     const m = String(l?.href ?? "").match(/^\s*(\d{6})\s*$/);
     if (m) return m[1];
   }
-  // 3. Scan the bodies. text.body carries the token inline ("token [930619]");
-  //    html.body may only have it in a stripped href attr, so check text first.
-  for (const body of [full?.text?.body, full?.html?.body, full?.subject]) {
+
+  // 3. Mailosaur auto-detected codes — 6-digit only AND not a substring of any
+  //    URL, so noise like "127" (127.0.0.1) or a Resend tracking id is rejected.
+  const codes = [...(full?.text?.codes ?? []), ...(full?.html?.codes ?? [])];
+  for (const c of codes) {
+    const m = String(c?.value ?? "").match(/\b\d{6}\b/);
+    if (m && !inUrl(m[0])) return m[0];
+  }
+
+  // 4. Last resort: scan the HTML body / subject (tags + URLs stripped).
+  for (const body of [full?.html?.body, full?.subject]) {
     const otp = extractOtp(body);
-    if (otp) return otp;
+    if (otp && !inUrl(otp)) return otp;
   }
   return null;
 }
@@ -156,9 +216,12 @@ export async function pollInboxForOtp({ token, toEmail, sinceIso }) {
       // actually present to extract.
       let full = summary;
       if (summary.id) {
-        const mres = await fetch(`https://mailosaur.com/api/messages/${summary.id}`, {
-          headers: { Authorization: auth },
-        });
+        const mres = await fetch(
+          `https://mailosaur.com/api/messages/${summary.id}`,
+          {
+            headers: { Authorization: auth },
+          },
+        );
         if (mres.ok) {
           full = await mres.json();
         }

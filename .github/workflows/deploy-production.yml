@@ -256,6 +256,24 @@ jobs:
       # all-or-nothing (the step runs whenever PRODUCTION_MAILBOX_API_TOKEN
       # exists; if the rest of the set is missing the probe then runs and fails
       # loudly, which WOULD fail promotion — provision the full set together).
+      # Loud-skip guard: a SILENTLY skipped production isolation probe is false
+      # confidence — a green promotion that never proved the prod media bucket is
+      # private. Until the PRODUCTION_ probe-secret set is provisioned, make every
+      # promotion announce, visibly, that the probe did NOT run (job-summary +
+      # workflow warning annotation). This does not block promotion; it removes
+      # the invisibility that the comment below flagged as "a bigger deal".
+      - name: Warn when production private-media probe is not configured
+        if: ${{ env.HAS_MAILBOX_TOKEN != 'true' }}
+        run: |
+          set -euo pipefail
+          msg="Production private-media probe SKIPPED — PRODUCTION_MAILBOX_API_TOKEN (and the rest of the PRODUCTION_ probe-secret set) is not provisioned in the 'production' GitHub environment. This promotion shipped WITHOUT the private-bucket / signed-URL isolation proof that gates staging. Provision the full set (PRODUCTION_SUPABASE_URL / _ANON_KEY / _SERVICE_ROLE_KEY / _API_URL / _TEST_EMAIL_DOMAIN / _MAILBOX_API_TOKEN, + optional _TEST_PASSWORD) all-or-nothing to enable it; see docs/runbooks/staging-bootstrap.md."
+          echo "::warning title=Production isolation probe NOT run::${msg}"
+          {
+            echo "### ⚠ Production private-media probe SKIPPED"
+            echo
+            echo "${msg}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run private-media probe (production gate)
         if: ${{ env.HAS_MAILBOX_TOKEN == 'true' }}
         env:
