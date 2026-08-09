@@ -1,0 +1,58 @@
+# Verify prod DB role (BYPASSRLS check)
+#
+# One-shot, manual (workflow_dispatch) check that the PRODUCTION runtime database
+# role does NOT have BYPASSRLS — i.e. that the farmsmart-api DATABASE_URL has been
+# rotated from postgres/service_role to the least-privilege farmsmart_app role, so
+# the RLS policies applied to prod are actually enforced.
+#
+# It runs scripts/ci/verify-db-role.mjs, which connects with DATABASE_URL and
+# EXITS 1 if the connected role bypasses RLS (green = BYPASSRLS: false).
+#
+# REQUIRES a `production`-environment secret PRODUCTION_DATABASE_URL set to the
+# SAME farmsmart_app runtime connection string used by the Render service (the
+# transaction-pooler string, carrying sslmode=require). See
+# docs/runbooks/prod-rls-role-rotation.md, Step 3.
+
+name: "Verify prod DB role (BYPASSRLS check)"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "11.17.0"
+
+jobs:
+  verify:
+    name: Assert prod runtime role does not bypass RLS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # verify-db-role.mjs exits 1 if the connected role has BYPASSRLS, so the
+      # job failing IS the "not rotated yet / wrong role" signal.
+      - name: Assert BYPASSRLS is false for the prod runtime role
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: node scripts/ci/verify-db-role.mjs
