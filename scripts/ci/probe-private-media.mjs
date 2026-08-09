@@ -69,7 +69,18 @@ import { pollInboxForOtp } from "./lib/mailosaur-otp.mjs";
 // ── Env prefix: STAGING | PRODUCTION (same script, both envs) ───────────────
 const PREFIX = (process.env.PROBE_ENV_PREFIX ?? "STAGING").trim().toUpperCase();
 
-const env = (name) => process.env[name]?.replace(/\s/g, "");
+// Whitespace-strip, then treat an empty/whitespace-only value as ABSENT
+// (return undefined) so `?? default` fallbacks actually fire. GitHub Actions
+// injects a referenced-but-unset secret as an empty string, not undefined —
+// e.g. `PRODUCTION_TEST_PASSWORD: ${{ secrets.PRODUCTION_TEST_PASSWORD }}` with
+// no such secret set env to "". Without this, `env(...) ?? generated` kept the
+// "" (nullish coalescing does not catch empty string) and signUp got an empty
+// password ("Signup requires a valid password"). Empty also correctly counts as
+// missing for the required-var check below.
+const env = (name) => {
+  const v = process.env[name]?.replace(/\s/g, "");
+  return v ? v : undefined;
+};
 
 const SUPABASE_URL = env(`${PREFIX}_SUPABASE_URL`);
 const SUPABASE_ANON_KEY = env(`${PREFIX}_SUPABASE_ANON_KEY`);
