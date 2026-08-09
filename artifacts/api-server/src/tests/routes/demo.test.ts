@@ -24,7 +24,7 @@ const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
 
 describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
-  const fixture = useDatabaseFixture(["organizations", "facilities", "cycles", "seed_lots", "sensors", "sensor_readings", "alerts", "tasks", "inventory_items", "facility_logs", "growth_profiles", "users", "organization_members"]);
+  const fixture = useDatabaseFixture([]);
 
   const origFlag = process.env.DEMO_FORK_ENABLED;
   afterEach(() => {
