@@ -87,6 +87,22 @@ jobs:
         run: pnpm --filter @workspace/api-server run test
       - name: Run farmeasy tests
         run: pnpm --filter @workspace/farmeasy run test
+      - name: Run CI-script self-tests
+        # Pure-synthetic self-tests for the deploy-gate helpers (no DB, no
+        # network). Discovered via `find` so a new *.self-test.mjs is gated
+        # automatically, and so discovery is portable (no bash globstar needed).
+        # Fails closed if nothing matches.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find scripts/ci -name '*.self-test.mjs' | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no *.self-test.mjs files matched — failing closed" >&2
+            exit 1
+          fi
+          printf 'running %d self-test file(s):\n' "${#files[@]}"
+          printf '  - %s\n' "${files[@]}"
+          node --test "${files[@]}"
 
   # ── 3. database-integration ───────────────────────────────────────────────
   # Replays the full migration history into a disposable local Supabase stack
