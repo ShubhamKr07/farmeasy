@@ -9,9 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 31 Drizzle migrations should have been
--- replayed (0030, TEN-012 Task 1, is the most recent addition -- adds
--- signup_allowlist, access_requests, account_purge_audit).
+-- and lib/db/scripts/migrate.mjs). All 32 Drizzle migrations should have been
+-- replayed (0031, TEN-013, is the most recent addition -- adds
+-- organizations.is_demo).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -19,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  31,
-  'drizzle.__drizzle_migrations has exactly 31 rows (full migration history replayed)'
+  32,
+  'drizzle.__drizzle_migrations has exactly 32 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -109,11 +109,15 @@ SELECT is(
 -- public.organizations so the TEN-012 unverified-account purge can delete the
 -- data-less org it provisioned, under the real non-BYPASSRLS farmsmart_app role
 -- (organizations had backend SELECT + INSERT policies but no DELETE — caught by
--- the TEN-012 farmsmart_app RLS proof, the BYPASSRLS CI DB masked it).
+-- the TEN-012 farmsmart_app RLS proof, the BYPASSRLS CI DB masked it). 00019
+-- adds a current_user- and app.org_id-scoped UPDATE policy on organizations
+-- so TEN-013's demo-fork provision/graduate endpoints can flip
+-- organizations.is_demo under the real non-BYPASSRLS role (organizations
+-- had backend SELECT/INSERT/DELETE but no UPDATE).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  18,
-  'supabase_migrations.schema_migrations has exactly 18 rows (Supabase migrations 00001-00018)'
+  19,
+  'supabase_migrations.schema_migrations has exactly 19 rows (Supabase migrations 00001-00019)'
 );
 
 SELECT * FROM finish();

@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetWizardProgress,
   usePostWizardEvent,
   usePutWizardProgress,
   usePostFacilityReadinessEvent,
   RecordReadinessEventRequestEventKey,
+  getListFacilitiesQueryKey,
+  getListFacilitiesQueryOptions,
+  usePostDemoProvision,
 } from "@workspace/api-client-react";
 import { FarmBasics } from "./steps/FarmBasics";
+import { ForkChoice } from "./steps/ForkChoice";
 import { LayoutGrid } from "./steps/LayoutGrid";
 import { VendorAccounts } from "./steps/sensors/VendorAccounts";
 import { DeviceRegistry } from "./steps/sensors/DeviceRegistry";
@@ -15,6 +20,7 @@ import { SensorReview } from "./steps/sensors/SensorReview";
 import { Done } from "./steps/Done";
 import { StepIndicator } from "./components/StepIndicator";
 import { ResumeBanner } from "./components/ResumeBanner";
+import { useDemoStatus } from "@/hooks/use-demo-status";
 
 const STEP_ORDER = [
   "farm_basics",
@@ -52,6 +58,28 @@ export function Wizard({
   const postEvent = usePostWizardEvent();
   const putProgress = usePutWizardProgress();
   const postReadinessEvent = usePostFacilityReadinessEvent();
+
+  // TEN-013 Task 9: the W2 demo fork. `useDemoStatus()` and the provision
+  // mutation are called unconditionally (Rules of Hooks) — kept above the
+  // isLoading early return below for the same reason the telemetry hooks
+  // are. `showFork` is a local, mutable flag: initialized from the demo
+  // status (only show the fork as a PRE-step when the fork is enabled, the
+  // user has no facility yet, isn't already in a demo, and has nothing to
+  // resume), and flipped off the moment the user picks "real" so we fall
+  // through to the normal farm_basics form. The demo branch provisions and
+  // exits the wizard directly (see `handleForkChoice`).
+  const queryClient = useQueryClient();
+  const demoStatus = useDemoStatus();
+  const provisionDemo = usePostDemoProvision();
+  const showForkInitially =
+    demoStatus.enabled && facilityId === null && !demoStatus.isDemo && !resumed;
+  const [showFork, setShowFork] = useState(showForkInitially);
+  // The POST /demo/provision is in flight — drives the ForkChoice buttons'
+  // disabled state and the spinner on the demo button. Same lifecycle as the
+  // mutation's own isPending, lifted into a state flag so `handleForkChoice`
+  // can also drive it before awaiting mutateAsync (no flicker between the
+  // click and React noticing the mutation started).
+  const [provisioning, setProvisioning] = useState(false);
 
   // Adjust state during render (React's documented pattern for syncing local
   // state from a query result — "You Might Not Need an Effect"), guarded by
@@ -192,6 +220,49 @@ export function Wizard({
   // comment above: no wizard step is URL-addressable), not a route.
   const goToDevices = () => setStep("sensors_devices");
 
+  // TEN-013 Task 9: the fork's two branches.
+  //  - "real" just hides the fork (falls through to farm_basics below).
+  //  - "demo" provisions the demo org in place, then needs to hand the
+  //    newly-created facility to FacilityGate the SAME way FarmBasics does —
+  //    via `onFacilityCreated(facilityId, organizationId)`. POST
+  //    /demo/provision only returns `{ facilityId }` (no organizationId), so
+  //    we invalidate + refetch `useListFacilities` to read the real Facility
+  //    row (which carries organizationId) back. Then advance the wizard: the
+  //    demo seeds a complete facility, so the wizard jumps straight to
+  //    "done" rather than walking the real-farm steps.
+  const handleForkChoice = async (choice: "real" | "demo") => {
+    if (choice === "real") {
+      setShowFork(false);
+      return;
+    }
+    setProvisioning(true);
+    try {
+      const { facilityId: newFacilityId } = await provisionDemo.mutateAsync();
+      // The provisioned facility is now persisted server-side, but the
+      // facilities query cache still holds the pre-provision (empty) list.
+      // Invalidate then fetchQuery to read the fresh list synchronously and
+      // extract organizationId — mirrors use-active-facility's
+      // finishAddFacility reasoning (the cache can't be trusted mid-flight).
+      await queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() });
+      const facilities = await queryClient.fetchQuery(getListFacilitiesQueryOptions());
+      const created = facilities.find((f) => f.id === newFacilityId);
+      const organizationId = created?.organizationId;
+      if (organizationId === undefined) {
+        // Shouldn't happen (provision just created the facility), but guard
+        // against a cache/query race: don't hand FacilityGate a placeholder
+        // org id. OnFacilityCreated isn't called; provisioning is cleared so
+        // the user can retry from the fork.
+        setProvisioning(false);
+        return;
+      }
+      setCreatedFacilityId(newFacilityId);
+      onFacilityCreated(newFacilityId, organizationId);
+      advance();
+    } catch {
+      setProvisioning(false);
+    }
+  };
+
   // Resume banner is only meaningful while the wizard is still sitting on the
   // step the user was resumed to — once they advance past it, it's dismissed
   // (README: "dismissable-on-advance only, no close button"). Comparing
@@ -213,14 +284,18 @@ export function Wizard({
         )}
       </header>
       {showResumeBanner && <ResumeBanner />}
-      {step === "farm_basics" && (
-        <FarmBasics
-          onSaved={(data) => {
-            setCreatedFacilityId(data.facilityId);
-            onFacilityCreated(data.facilityId, data.organizationId);
-            advance();
-          }}
-        />
+      {showFork && demoStatus.enabled && facilityId === null && !demoStatus.isDemo && step === "farm_basics" ? (
+        <ForkChoice onChoose={handleForkChoice} provisioning={provisioning} />
+      ) : (
+        step === "farm_basics" && (
+          <FarmBasics
+            onSaved={(data) => {
+              setCreatedFacilityId(data.facilityId);
+              onFacilityCreated(data.facilityId, data.organizationId);
+              advance();
+            }}
+          />
+        )
       )}
       {step === "layout" && <LayoutGrid onSaved={advance} />}
       {step === "sensors_accounts" && <VendorAccounts onSaved={advance} onSkipAll={skipToDone} />}

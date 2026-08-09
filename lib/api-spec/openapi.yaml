@@ -34,6 +34,8 @@ tags:
     description: Onboarding wizard facility creation and existence check
   - name: wizard
     description: Onboarding wizard resume/progress tracking
+  - name: demo
+    description: TEN-013 W2 demo fork — provision/graduate the user's own org into/out of a seeded demo state
   - name: sensor-accounts
     description: Vendor sensor account credentials and connection testing
   - name: wizard-events
@@ -1455,6 +1457,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/WizardProgress"
 
+  /demo/status:
+    get:
+      operationId: getDemoStatus
+      tags: [demo]
+      summary: Whether the demo fork is enabled and whether the caller's own org is currently a demo
+      description: >
+        Always available (never flag-gated) — a user already in a demo org
+        must always be able to see their own state, even if DEMO_FORK_ENABLED
+        is later switched off. A caller with no owner org yet (brand-new user
+        at W2) is a normal state, not a failure: isDemo is false and
+        demoFacilityId is null.
+      responses:
+        "200":
+          description: Demo fork flag state and the caller's own org's demo status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoStatus"
+
+  /demo/provision:
+    post:
+      operationId: postDemoProvision
+      tags: [demo]
+      summary: Seed the caller's own empty org with a demo dataset ("Explore a demo" at W2)
+      description: >
+        Flag-gated (403 when DEMO_FORK_ENABLED is off). Resolves the org from
+        the caller's active OWNER membership, never from client input.
+        Idempotent — an already-demo org returns its existing demo facility
+        with no re-seed.
+      responses:
+        "200":
+          description: The demo facility (existing or newly seeded)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoProvisionResult"
+        "403":
+          description: Demo fork disabled, or caller is not an active owner
+
+  /demo/graduate:
+    post:
+      operationId: postDemoGraduate
+      tags: [demo]
+      summary: Reset the demo org in place — delete the demo facility and flip is_demo off
+      description: >
+        Not flag-gated — a demo user must always be able to escape the demo.
+        Requires an explicit confirm:true body. Deletes the demo facility
+        (cascading every seeded row under it) and flips organizations.is_demo
+        back to false. A no-op (200, no writes) when the org isn't currently
+        a demo, so a duplicate call is always safe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DemoGraduateRequest"
+      responses:
+        "200":
+          description: Graduated (or already not a demo — no-op)
+        "400":
+          description: confirm was not true
+
   /sensor-accounts:
     get:
       operationId: listSensorAccounts
@@ -2361,6 +2425,35 @@ components:
         eventType:
           type: string
           enum: [view, save, abandon, skip]
+
+    DemoStatus:
+      type: object
+      description: >
+        Demo fork flag state plus the caller's own org's demo status.
+        demoFacilityId is null unless isDemo is true.
+      properties:
+        enabled:
+          type: boolean
+        isDemo:
+          type: boolean
+        demoFacilityId:
+          type: ["integer", "null"]
+      required: [enabled, isDemo, demoFacilityId]
+
+    DemoProvisionResult:
+      type: object
+      properties:
+        facilityId:
+          type: integer
+      required: [facilityId]
+
+    DemoGraduateRequest:
+      type: object
+      description: Explicit confirm:true required — graduate deletes the demo facility and every cascaded row under it.
+      properties:
+        confirm:
+          type: boolean
+      required: [confirm]
 
     CreateSensorAccountRequest:
       type: object

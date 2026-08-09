@@ -447,6 +447,28 @@ export interface PostWizardEventRequest {
   eventType: PostWizardEventRequestEventType;
 }
 
+/**
+ * Demo fork flag state plus the caller's own org's demo status. demoFacilityId is null unless isDemo is true.
+
+ */
+export interface DemoStatus {
+  enabled: boolean;
+  isDemo: boolean;
+  /** @nullable */
+  demoFacilityId: number | null;
+}
+
+export interface DemoProvisionResult {
+  facilityId: number;
+}
+
+/**
+ * Explicit confirm:true required — graduate deletes the demo facility and every cascaded row under it.
+ */
+export interface DemoGraduateRequest {
+  confirm: boolean;
+}
+
 export type CreateSensorAccountRequestAuthMethod = typeof CreateSensorAccountRequestAuthMethod[keyof typeof CreateSensorAccountRequestAuthMethod];
 
 

@@ -381,6 +381,7 @@ export const shipmentsTable = pgTable("shipments", {
 export const organizationsTable = pgTable("organizations", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  isDemo: boolean("is_demo").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

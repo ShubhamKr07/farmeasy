@@ -1273,6 +1273,38 @@ export const PutWizardProgressResponse = zod.object({
 
 
 /**
+ * Always available (never flag-gated) — a user already in a demo org must always be able to see their own state, even if DEMO_FORK_ENABLED is later switched off. A caller with no owner org yet (brand-new user at W2) is a normal state, not a failure: isDemo is false and demoFacilityId is null.
+
+ * @summary Whether the demo fork is enabled and whether the caller's own org is currently a demo
+ */
+export const GetDemoStatusResponse = zod.object({
+  "enabled": zod.boolean(),
+  "isDemo": zod.boolean(),
+  "demoFacilityId": zod.number().nullable()
+}).describe('Demo fork flag state plus the caller\'s own org\'s demo status. demoFacilityId is null unless isDemo is true.\n')
+
+
+/**
+ * Flag-gated (403 when DEMO_FORK_ENABLED is off). Resolves the org from the caller's active OWNER membership, never from client input. Idempotent — an already-demo org returns its existing demo facility with no re-seed.
+
+ * @summary Seed the caller's own empty org with a demo dataset ("Explore a demo" at W2)
+ */
+export const PostDemoProvisionResponse = zod.object({
+  "facilityId": zod.number()
+})
+
+
+/**
+ * Not flag-gated — a demo user must always be able to escape the demo. Requires an explicit confirm:true body. Deletes the demo facility (cascading every seeded row under it) and flips organizations.is_demo back to false. A no-op (200, no writes) when the org isn't currently a demo, so a duplicate call is always safe.
+
+ * @summary Reset the demo org in place — delete the demo facility and flip is_demo off
+ */
+export const PostDemoGraduateBody = zod.object({
+  "confirm": zod.boolean()
+}).describe('Explicit confirm:true required — graduate deletes the demo facility and every cascaded row under it.')
+
+
+/**
  * @summary List the signed-in user's organization's vendor sensor accounts
  */
 export const ListSensorAccountsResponseItem = zod.object({
