@@ -55,4 +55,11 @@ jobs:
       - name: Assert BYPASSRLS is false for the prod runtime role
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          DATABASE_CA_CERT: ${{ secrets.PRODUCTION_DATABASE_CA_CERT }}
+          # Encrypted-but-unverified TLS for the role-attribute check ONLY: the
+          # Supabase transaction pooler (:6543) cert isn't chained to the
+          # Root-2021 CA, so CA-pinning fails there (SELF_SIGNED_CERT_IN_CHAIN).
+          # This reads one pg_roles flag and moves no data; the app keeps strict
+          # CA-pinning. See scripts/ci/verify-db-role.mjs.
+          DB_ROLE_CHECK_INSECURE_TLS: "true"
         run: node scripts/ci/verify-db-role.mjs
