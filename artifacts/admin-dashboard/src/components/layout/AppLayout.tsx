@@ -1,5 +1,6 @@
 import React from "react";
 import { Sidebar } from "./Sidebar";
+import { DemoBanner } from "./DemoBanner";
 import { TopBar } from "./TopBar";
 import { RightSidebar } from "./RightSidebar";
 import { PanelProvider, usePanel } from "@/context/PanelContext";
@@ -63,6 +64,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       <div className="flex h-[100dvh] w-full overflow-hidden bg-background">
         <Sidebar />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <DemoBanner />
           <TopBar />
           <main className="flex-1 overflow-auto bg-muted/20">
             <div className="h-full">
