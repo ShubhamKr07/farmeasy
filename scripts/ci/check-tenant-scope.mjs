@@ -195,6 +195,21 @@ const BASELINE_VIOLATIONS = new Set([
   //         on organization_members. The org DELETE it then performs is
   //         admitted by 00018's backend DELETE policy on organizations.
   "artifacts/api-server/src/lib/purgeUnverified.ts::const [membership] = await db",
+  // --- (G) TEN-013 demo-fork (routes/demo.ts) getOwnerOrg — PERMANENT
+  //         bootstrap-style organization_members lookup, same category as
+  //         group (C)/(D)/(F), NOT deferred debt. The demo provision/graduate
+  //         endpoints run before any facility/tenant GUC is set: getOwnerOrg
+  //         resolves the caller's ACTIVE OWNER org (filtered by userId +
+  //         status='active' + role='owner' in its own WHERE, userId from the
+  //         verified JWT) precisely so the handler can THEN set app.org_id /
+  //         app.facility_id inside its own db.transaction and seed under RLS.
+  //         withTenantScope is not applicable — it requires the very tenant
+  //         context this lookup exists to bootstrap (identical to wizard.ts's
+  //         getOrganizationId / facilities.ts's membership read in group (C)).
+  //         The seeding writes themselves live in lib/db seedDemoOrg (outside
+  //         this scanner's dirs) and go through `tx`, not `db`, under
+  //         set_config-scoped transactions.
+  "artifacts/api-server/src/routes/demo.ts::const [membership] = await db",
 ]);
 
 const newViolations = [];
