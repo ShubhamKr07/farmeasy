@@ -368,7 +368,11 @@ export async function seedDemoOrg(
 - `sensors` has a CHECK requiring one of `channelId`/`rackId`/`roomId`/`facilityWide=true` — use `facilityWide: true` so no room/rack/channel is required.
 - `inventory_items` has CHECK `current_qty <= max_qty`.
 - `facility_logs.userId` is `NOT NULL` — extend the ctx to `{ organizationId, facilityId, userId }` and pass the demo owner's user id.
-- `alerts` has a partial unique index on `(title, location) WHERE status='current'` — give current alerts distinct titles.
+- **CROSS-ORG UNIQUENESS FOOTGUNS (verified in execution — these are TABLE-WIDE unique, NOT facility-scoped, so a second demo org reusing the same literal values collides):**
+  - `cycles.short_id` is a single table-wide UNIQUE constraint. Do NOT reuse the literal `"d001"`–`"d010"` verbatim — **suffix every short_id with the facilityId** (e.g. `` `d${facilityId}-001` ``) so two demo orgs never collide.
+  - `alerts` partial unique index `(title, location) WHERE status='current'` is table-wide too — for the current-status demo alert, **fold `facilityId` into the `location` string** (distinct titles alone aren't enough across orgs).
+  - (`seed_lots.qr_code` unique index IS `(facility_id, qr_code)` — no per-org suffix needed there.)
+  - Document all three in a top-of-file comment in `seedDemoOrg.ts`.
 
 (The `userId` param is already reflected in this task's Interfaces block above; thread `userId` from Task 6's resolved membership when the endpoint calls this.)
 
