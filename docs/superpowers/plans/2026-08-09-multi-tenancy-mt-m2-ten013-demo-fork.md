@@ -26,7 +26,7 @@
 
 **Create:**
 - `lib/db/drizzle/0031_organizations_is_demo.sql` — adds `organizations.is_demo`.
-- `supabase/migrations/00019_demo_fork_rls.sql` — `organizations` backend UPDATE policy + `facilities` backend DELETE policy.
+- `supabase/migrations/00019_demo_fork_rls.sql` — `organizations` backend UPDATE policy (is_demo flip). No facilities policy — facilities has no RLS (see Task 2's revision note).
 - `supabase/tests/00019_demo_fork_rls.test.sql` — pgTAP proof of the two new policies under `farmsmart_app`.
 - `lib/db/src/seed/seedDemoOrg.ts` — canonical demo dataset (shared by the endpoint and the CLI).
 - `artifacts/api-server/src/lib/demoFork.ts` — `DEMO_FORK_ENABLED` flag reader.
@@ -129,7 +129,9 @@ git commit -m "feat(db): add organizations.is_demo column (TEN-013)"
 
 ---
 
-### Task 2: Backend RLS policies for the `is_demo` flip + facility delete
+### Task 2: Backend RLS policy for the `is_demo` flip
+
+> **Revised during execution (2026-08-09).** The original plan assumed `facilities` had SELECT/INSERT backend policies but no DELETE, and added a `facilities` DELETE policy. **That premise was wrong:** `public.facilities` has ZERO RLS anywhere through 00018 (verified by grep; `organizations` got RLS at 00006, `facilities` never did). `facilities` is one of the tracked 15-table `rls-public-tables-remediation` gaps, deliberately left to its own focused migration. TEN-013 therefore does **NOT** touch facilities RLS: this migration adds only the `organizations` UPDATE policy. Task 7 (graduate) deletes the demo facility via `farmsmart_app`'s plain table grant, scoped by an app-layer `WHERE organization_id = <server-resolved owner org>` — the identical trust model every existing facilities SELECT/INSERT already uses. See Task 7 and the security-compliance isolation attestation.
 
 **Files:**
 - Create: `supabase/migrations/00019_demo_fork_rls.sql`
@@ -137,27 +139,31 @@ git commit -m "feat(db): add organizations.is_demo column (TEN-013)"
 - Modify: `supabase/tests/00001_foundation.sql:115` (Supabase count 18 → 19)
 
 **Interfaces:**
-- Produces: under the `farmsmart_app` role, `UPDATE organizations SET is_demo = …` is permitted when `app.org_id` = that org, and `DELETE FROM facilities` is permitted when `app.org_id` = the facility's org. Task 6/7's transactions depend on these.
+- Produces: under the `farmsmart_app` role, `UPDATE organizations SET is_demo = …` is permitted when `app.org_id` = that org. Task 6/7's `is_demo` flips depend on this. (No facilities policy — facilities has no RLS; the graduate DELETE relies on the plain grant + app-layer org scoping.)
 
-**Background:** `00010` added `current_user='farmsmart_app'` backend policies to `organizations` for only the verbs its routes used (SELECT/INSERT); `00018` added DELETE. There is **no UPDATE policy** on `organizations`, and **no DELETE policy** on `facilities`. The BYPASSRLS CI DB masks both — they only surface under the real `farmsmart_app` proof. Follow the exact shape of the existing backend policies (see `00013`/`00018` for the `NULLIF(current_setting('app.org_id', true), '')::int` idiom).
+**Background:** `00010` added `current_user='farmsmart_app'` backend policies to `organizations` for only the verbs its routes used (SELECT/INSERT); `00018` added DELETE. There is **no UPDATE policy** on `organizations` — the gap the BYPASSRLS CI DB masks, surfacing only under the real `farmsmart_app` proof. Follow the exact shape of the existing backend policies (see `00013`/`00018` for the `NULLIF(current_setting('app.org_id', true), '')::int` idiom).
 
 - [ ] **Step 1: Write the migration.** Create `supabase/migrations/00019_demo_fork_rls.sql`:
 
 ```sql
--- TEN-013 demo fork: two backend (current_user = 'farmsmart_app') policies the
+-- TEN-013 demo fork: the one backend (current_user = 'farmsmart_app') policy the
 -- prior milestones never needed and the BYPASSRLS CI DB masked.
 --
--- 1. organizations UPDATE — POST /api/demo/provision flips is_demo=true and
---    POST /api/demo/graduate flips it back to false, both under app.org_id.
--- 2. facilities DELETE — POST /api/demo/graduate deletes the demo facility
---    (its ON DELETE CASCADE children are removed by the engine, not subject to
---    RLS). facilities shipped with SELECT/INSERT backend policies but no DELETE.
+-- organizations UPDATE — POST /api/demo/provision flips is_demo=true and
+-- POST /api/demo/graduate flips it back to false, both under app.org_id.
+-- Keyed on the transaction-local app.org_id GUC (the demo endpoints set it via
+-- set_config inside their per-request tx), same NULLIF-guarded cast as 00013,
+-- AND scoped to current_user='farmsmart_app'.
 --
--- Both key on the transaction-local app.org_id GUC (set via withTenantScope /
--- the demo endpoints' own set_config), same NULLIF-guarded cast as 00013.
+-- Deliberately NO facilities DELETE policy: public.facilities has no RLS at all
+-- (it is part of the separate 15-table rls-public-tables-remediation, not this
+-- feature). Graduate's DELETE FROM facilities runs via farmsmart_app's plain
+-- table grant, scoped by an app-layer WHERE organization_id = <server-resolved
+-- owner org> — the same trust model as every existing facilities SELECT/INSERT.
+-- Enabling RLS on facilities here would deny-all its live SELECT/INSERT paths
+-- (prod regression) and fragment the 15-table remediation.
 -- Rollback:
 --   DROP POLICY organizations_backend_update ON public.organizations;
---   DROP POLICY facilities_backend_delete ON public.facilities;
 
 CREATE POLICY organizations_backend_update
   ON public.organizations
@@ -165,24 +171,17 @@ CREATE POLICY organizations_backend_update
   TO farmsmart_app
   USING (id = NULLIF(current_setting('app.org_id', true), '')::int)
   WITH CHECK (id = NULLIF(current_setting('app.org_id', true), '')::int);
-
-CREATE POLICY facilities_backend_delete
-  ON public.facilities
-  FOR DELETE
-  TO farmsmart_app
-  USING (organization_id = NULLIF(current_setting('app.org_id', true), '')::int);
 ```
 
-(Verify the exact role name and the `TO farmsmart_app` vs `USING current_user = 'farmsmart_app'` convention against `00018_organizations_backend_delete_policy.sql` and match it verbatim — do not mix conventions.)
+(Match `00018_organizations_backend_delete_policy.sql`'s exact convention verbatim — lowercase keywords, quoted policy name, whichever of `TO farmsmart_app` vs `USING current_user='farmsmart_app'` that file uses. "Verbatim" is the syntax convention; keep the `app.org_id` GUC check regardless, since provision/graduate set it per-request.)
 
-- [ ] **Step 2: Write the pgTAP proof.** Create `supabase/tests/00019_demo_fork_rls.test.sql` following the structure of `supabase/tests/00018_organizations_backend_delete_policy.test.sql`. Assert, running `SET ROLE farmsmart_app` with `set_config('app.org_id', …, true)`:
-  - a member org's `is_demo` CAN be UPDATEd to true then false when `app.org_id` matches;
-  - the UPDATE affects 0 rows when `app.org_id` is a different org (cross-tenant denied — assert end-state via a service-role re-read, NOT an error, per the RLS UPDATE-returns-0-rows rule);
-  - a facility in the app.org_id org CAN be DELETEd; a facility in another org is NOT (0 rows).
+- [ ] **Step 2: Write the pgTAP proof.** Create `supabase/tests/00019_demo_fork_rls.test.sql` following the structure of `supabase/tests/00018_organizations_backend_delete_policy.test.sql`. **Structural assertions only** (via `pg_policies`) — NOT a live `SET ROLE farmsmart_app` test — matching the 00016/00017/00018 convention: the disposable CI DB runs everything as the `postgres` superuser and never creates the `farmsmart_app` role, so a `SET ROLE` test would error. Assert:
+  - RLS is enabled on `public.organizations` (already true from 00006 — sanity);
+  - a policy named `organizations_backend_update` exists on `public.organizations`, command = UPDATE, role includes `farmsmart_app`, and its `qual`/`with_check` reference `app.org_id`.
 
-Use `SELECT plan(N)` with the exact count you write, and `SELECT * FROM finish();` inside `BEGIN; … ROLLBACK;`.
+Functional cross-tenant proof for this policy comes from Task 6/7/11's route/isolation tests (which run under the real role via the app), same as it does for 00016-00018. Use `SELECT plan(N)` with the exact count you write, and `SELECT * FROM finish();` inside `BEGIN; … ROLLBACK;`.
 
-- [ ] **Step 3: Bump the foundation Supabase count.** In `supabase/tests/00001_foundation.sql`, change the `supabase_migrations.schema_migrations` assertion from `18` to `19`, its message (`00001-00018` → `00001-00019`), and append a comment line describing `00019` (demo-fork backend UPDATE on organizations + DELETE on facilities).
+- [ ] **Step 3: Bump the foundation Supabase count.** In `supabase/tests/00001_foundation.sql`, change the `supabase_migrations.schema_migrations` assertion from `18` to `19`, its message (`00001-00018` → `00001-00019`), and append a comment line describing `00019` (demo-fork backend UPDATE policy on organizations; note the facilities DELETE was intentionally omitted — facilities has no RLS).
 
 - [ ] **Step 4: Run the pgTAP suite via the disposable stack.** The disposable script replays all migrations (Drizzle + Supabase, including this `00019`) then runs `supabase test db` over `supabase/tests/`:
 
@@ -195,7 +194,7 @@ Expected: all pgTAP files pass, including `00001_foundation.sql` (now 32/19) and
 
 ```bash
 git add supabase/migrations/00019_demo_fork_rls.sql supabase/tests/00019_demo_fork_rls.test.sql supabase/tests/00001_foundation.sql
-git commit -m "feat(db): backend RLS for demo is_demo flip + facility delete (TEN-013)"
+git commit -m "feat(db): backend RLS UPDATE policy for demo is_demo flip (TEN-013)"
 ```
 
 ---
@@ -738,7 +737,10 @@ git commit -m "feat(dashboard): persistent demo banner + graduate CTA (TEN-013)"
 **Interfaces:**
 - Consumes: everything above.
 
-- [ ] **Step 1: Add cross-tenant tests.** In `src/tests/routes/demo.test.ts` (or `src/tests/isolation/demo-cross-tenant.test.ts`), `node:test` DB-backed: user B (a different org's owner, seeded via a second `seedTenantContext`/admin insert) calling `GET /demo/status` sees only THEIR own org's `isDemo` (never A's), and `POST /demo/graduate` as B never deletes A's demo facility. Provision by A then, as B, assert A's demo rows are untouched. Assert end-state (row presence/absence), not error codes, for the RLS-scoped paths (per the RLS-denied-writes rule).
+- [ ] **Step 1: Add cross-tenant tests.** In `src/tests/routes/demo.test.ts` (or `src/tests/isolation/demo-cross-tenant.test.ts`), `node:test` DB-backed, run via the disposable stack (real non-BYPASSRLS path). Seed user B (a different org's owner, via a second `seedTenantContext`/admin insert). Per the security-compliance attestation, assert **end-state, not status codes**:
+  - user B's `GET /demo/status` never reflects org A's `isDemo`/demo facility;
+  - **after A provisions, B's `POST /demo/graduate {confirm:true}` leaves A's demo facility AND all its cascaded child rows fully intact** — assert row *presence* for `cycles`/`seed_lots`/`sensors`/`facility_logs` scoped to A's facility (not merely a 403/200);
+  - the `organizations` UPDATE policy's cross-tenant denial: with `app.org_id` set to B's org, an attempt to flip A's `is_demo` affects **0 rows** (re-read via service role) — this is the one assertion that actually exercises the new RLS policy and is the regression canary if the GUC-set-before-write ordering ever drifts.
 
 - [ ] **Step 2: Add the flag-off regression.** With `DEMO_FORK_ENABLED` unset (restore in `afterEach`): `POST /demo/provision` ⇒ 403 and no rows written; `GET /demo/status` ⇒ `enabled:false`. The 403 assertion is DB-free (the guard returns before any query); the "no rows written" check needs the stack. Add a code comment that the dashboard flag-off UI path (fork never renders, `Wizard` opens on `farm_basics`) is verified manually / by the Task 9 build, not here.
 
@@ -761,7 +763,7 @@ git commit -m "test(api): demo cross-tenant isolation + flag-off regression (TEN
 ## Rollback Points
 
 - **Task 1 (column):** down = `ALTER TABLE organizations DROP COLUMN is_demo;` (additive, no data dependency until Task 6 ships).
-- **Task 2 (RLS):** down = `DROP POLICY organizations_backend_update ON organizations; DROP POLICY facilities_backend_delete ON facilities;` (additive policies; dropping them only removes the demo write paths).
+- **Task 2 (RLS):** down = `DROP POLICY organizations_backend_update ON organizations;` (single additive policy; dropping it only removes the demo `is_demo`-flip write path).
 - **Flag (Task 3):** `DEMO_FORK_ENABLED` unset/false instantly disables the fork + provision with no code revert — TEN-012's direct-to-`farm_basics` landing is the fallback. Graduate stays available so no demo user is trapped.
 - **Endpoints (Tasks 6–7):** additive routes; with the flag off, provision is inert and the wizard is unchanged. Graduate is confirm-guarded and single-transaction, so a mid-reset failure leaves the demo intact for retry.
 - **UI (Tasks 9–10):** the fork screen and banner both self-hide when `enabled`/`isDemo` are false, so reverting is a flag flip; the components add no behavior for non-demo users.
@@ -774,5 +776,5 @@ Org-level switcher / multi-org membership; time-based or abandoned-demo purge; r
 
 - **Spec coverage:** is_demo column (T1), provisioning endpoint + shared seed + idempotency (T4/T6), graduate reset-in-place via cascade (T7), rich seed across all screens (T4), fork UI + persistent banner (T9/T10), `DEMO_FORK_ENABLED` default off (T3, gated in T6/T9), tenant/RLS safety under `farmsmart_app` (T2/T11), testing incl. cross-tenant + flag-off (T6/T7/T11), reversible migrations + rollback points (T1/T2/above), CLI refactor preserving a guard (T5) — all mapped.
 - **Cascade risk (spec's headline open item) is resolved in T4's audit** by forbidding `manual_checks`/`bad_tray_entries` in the seed and proving the facility-delete cascade in T4's test.
-- **RLS gap discovered during planning** (no `organizations` UPDATE, no `facilities` DELETE policy for `farmsmart_app`) is closed in T2 — this is the exact class of gap the BYPASSRLS CI DB masks; without it, provision/graduate would silently update/delete 0 rows in production.
+- **RLS gap closed in T2:** the missing `organizations` UPDATE policy for `farmsmart_app` (the class of gap the BYPASSRLS CI DB masks; without it the `is_demo` flip silently updates 0 rows in prod). **Correction during execution:** the plan also assumed a missing `facilities` DELETE policy, but `facilities` has NO RLS at all (a separate 15-table remediation item) — so TEN-013 adds no facilities policy; graduate deletes via plain grant + server-side org scoping, security-attested as no new cross-tenant path (see Task 2 revision note + Task 7).
 - **No-facility-at-fork constraint:** provision/graduate deliberately resolve org from owner membership (not `req.tenant`), and set `app.facility_id` mid-transaction after the facility insert — noted in Global Constraints and T6.
