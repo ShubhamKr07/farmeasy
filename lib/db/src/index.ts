@@ -28,3 +28,4 @@ export const db = drizzle(pool, { schema });
 
 export * from "./schema";
 export * from "./scope.js";
+export { seedDemoOrg } from "./seed/seedDemoOrg.js";
