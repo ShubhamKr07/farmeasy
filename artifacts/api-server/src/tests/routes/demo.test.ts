@@ -334,8 +334,42 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       // to flip org A's is_demo with B's app.org_id set, proving the policy denies
       // the write. The policy is the regression canary for the GUC-set-before-write
       // ordering if it ever drifts.
+      //
+      // No migration in this history ever CREATEs the `farmsmart_app` role, and
+      // the disposable-Supabase stack this suite runs against (see
+      // scripts/ci/test-disposable-supabase.sh) connects `@workspace/db`'s `db`
+      // as the `postgres` superuser -- unconditionally BYPASSRLS, so a raw
+      // UPDATE under a forged app.org_id would "succeed" there no matter what
+      // the policy says. Same convention 00016-00019's own pgTAP proofs already
+      // adopt for this exact class of check (see e.g.
+      // supabase/tests/00019_demo_fork_rls.test.sql's header comment and the
+      // TEN-013 plan's Task 2 pgTAP step): skip the LIVE functional check when
+      // farmsmart_app isn't provisioned, and fall back to the structural proof
+      // (the policy exists, covers UPDATE, and is scoped to both
+      // farmsmart_app and app.org_id). When farmsmart_app IS provisioned (a
+      // real non-BYPASSRLS harness), SET ROLE to it and run the real functional
+      // check.
       const { db, organizationsTable } = await import("@workspace/db");
       const { sql } = await import("drizzle-orm");
+
+      const roleCheck = await db.execute(
+        sql`SELECT rolbypassrls FROM pg_roles WHERE rolname = 'farmsmart_app'`,
+      );
+      const farmsmartAppRow = (roleCheck.rows as { rolbypassrls: boolean }[])[0];
+      const hasEnforcingAppRole = farmsmartAppRow !== undefined && farmsmartAppRow.rolbypassrls === false;
+
+      if (!hasEnforcingAppRole) {
+        const policyCheck = await db.execute(sql`
+          SELECT coalesce(qual, with_check) AS predicate
+          FROM pg_policies
+          WHERE schemaname = 'public' AND tablename = 'organizations' AND cmd = 'UPDATE'
+        `);
+        const policy = (policyCheck.rows as { predicate: string | null }[])[0];
+        ok(policy, "organizations must have an UPDATE policy (no non-BYPASSRLS farmsmart_app role in this DB to prove the live deny)");
+        ok(policy!.predicate?.includes("farmsmart_app"), "the UPDATE policy must be scoped to farmsmart_app");
+        ok(policy!.predicate?.includes("app.org_id"), "the UPDATE policy must be scoped to the app.org_id GUC");
+        return;
+      }
 
       // Provision org A
       process.env.DEMO_FORK_ENABLED = "true";
@@ -347,16 +381,15 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       // Seed org B
       const { userId: userB, organizationId: orgBId } = await seedOwnerOrgNoFacility();
 
-      // Attempt to update org A's is_demo with B's app.org_id set
-      const updateRowCount = await db.transaction(async (tx) => {
+      // Attempt to update org A's is_demo with B's app.org_id set, under the
+      // real non-BYPASSRLS farmsmart_app role.
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE farmsmart_app`);
         await tx.execute(sql`SELECT set_config('app.org_id', ${orgBId.toString()}, true)`);
-        const updateResult = await tx
+        await tx
           .update(organizationsTable)
           .set({ isDemo: false })
           .where(eq(organizationsTable.id, orgAId));
-        // Drizzle's update returns an object; we need to check if rows were affected
-        // by re-reading the org to confirm is_demo was NOT flipped
-        return updateResult;
       });
 
       // Re-read org A as a superuser to confirm is_demo was NOT changed
