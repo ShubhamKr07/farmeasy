@@ -22,8 +22,8 @@ A teammate's model is fixed at spawn from its definition's `model:` frontmatter.
 
 | Requested | How it's realized |
 | --- | --- |
-| **Sonnet 5** (`model: sonnet`) | High-stakes reasoning, correctness-critical roles. |
-| **Haiku 4.5** (`model: haiku`) | Fast/mechanical roles; also the driver for GLM-delegated work. |
+| **Sonnet 5** (`model: sonnet`) | High-stakes reasoning, correctness-critical roles; also the driver for GLM-delegated work. |
+| **Haiku 4.5** (`model: haiku`) | Fast/mechanical roles |
 | **GLM 5.2** | Not a `model:` value — teammate runs `model: haiku` and delegates well-specified, non-secret bulk codegen to `mcp__glm__glm_agent`. |
 
 The **lead runs on Opus 4.8** (deepest reasoning for orchestration + final conflict calls). Set the lead's model with `/model opus` before spawning.
@@ -35,8 +35,8 @@ The **lead runs on Opus 4.8** (deepest reasoning for orchestration + final confl
 | ai-python-engineer | `sonnet` | RAG architecture + retrieval quality; delegates boilerplate to GLM. |
 | sre-engineer | `sonnet` | Incident/observability reasoning under load. |
 | devsecops-engineer | `sonnet` | Supply-chain + secrets judgment; may delegate non-secret CI/YAML scaffolding to GLM. |
-| frontend-engineer | `haiku` + GLM | UI/boilerplate-heavy → delegate implementation to `mcp__glm__glm_agent`. |
-| qa-sdet | `haiku` | Fast test authoring/running; escalate subtle cases. |
+| frontend-engineer | `sonnet` + GLM | UI/boilerplate-heavy → delegate implementation to `mcp__glm__glm_agent`. |
+| qa-sdet | `sonnet` + GLM | Fast test authoring/running; escalate subtle cases. |
 
 ---
 
