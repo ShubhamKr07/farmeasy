@@ -5,29 +5,35 @@
  * (non-local) Supabase project, then tears down everything it created:
  *
  *   1. Sign up a throwaway user with the anon-key client.
- *   2. (OTP step is conditional — see below.)
- *   3. Insert a public.users profile row for that user with role='facility_lead'
- *      using the service-role client. Staging has no profile-creation trigger
- *      yet (that's Release 1), so the script owns this step.
- *   4. Refresh the session so the custom_access_token_hook re-runs against the
- *      new row, decode the JWT, and assert the `user_role` claim == 'facility_lead'.
+ *   2. Retrieve + redeem a confirmation OTP via Mailosaur (email confirmation
+ *      is enabled; see pollInboxForOtp for tuning via env vars).
+ *   3. Seed an organization and active membership via the service-role client.
+ *      The custom_access_token_hook (TEN-010) derives the user_role claim from
+ *      organization_members.role (not the deprecated public.users.role), and
+ *      omits the claim when there is no active membership (TEN-012).
+ *   4. Refresh the session so the hook re-runs against the new membership,
+ *      decode the JWT, and assert the `user_role` claim == the membership role.
  *      THIS is the core verification — it proves the hook + migration landed
- *      correctly and that non-default roles propagate into the access token.
+ *      correctly and that membership roles propagate into the access token.
  *   5. Confirm the `media` storage bucket exists and is public.
- *   6. Confirm 3 Supabase migrations are recorded in
- *      supabase_migrations.schema_migrations.
- *   7. Clean up (delete public.users row, delete Auth user) in a finally block.
+ *   6. Confirm RLS blocks anonymous reads of public.users.
+ *   7. Clean up (delete membership, org, profile, delete Auth user) in a
+ *      finally block.
  *
  * Run (from the monorepo root):
  *
  *   STAGING_SUPABASE_URL=https://<project-ref>.supabase.co \
  *   STAGING_SUPABASE_ANON_KEY=eyJ... \
  *   STAGING_SUPABASE_SERVICE_ROLE_KEY=eyJ... \
+ *   STAGING_TEST_EMAIL_DOMAIN=example.com \
+ *   STAGING_MAILBOX_API_TOKEN=<token> \
+ *   STAGING_TEST_PASSWORD=<password> \
  *   node scripts/ci/verify-staging-supabase.mjs
  *
  * DO NOT point this at production — it creates and deletes real Auth users.
  */
 import { createClient } from "@supabase/supabase-js";
+import { pollInboxForOtp } from "./lib/mailosaur-otp.mjs";
 
 // ── Required env ────────────────────────────────────────────────────────────
 const SUPABASE_URL = process.env.STAGING_SUPABASE_URL?.replace(/\s/g, "");
@@ -58,17 +64,38 @@ if (missing.length > 0) {
 }
 
 // ── Optional env ────────────────────────────────────────────────────────────
-const TEST_EMAIL_DOMAIN = process.env.STAGING_TEST_EMAIL_DOMAIN; // e.g. "example.com"
+const TEST_EMAIL_DOMAIN = process.env.STAGING_TEST_EMAIL_DOMAIN?.replace(/\s/g, "");
+const MAILBOX_API_TOKEN = process.env.STAGING_MAILBOX_API_TOKEN?.replace(/\s/g, "");
 const TEST_PASSWORD =
   process.env.STAGING_TEST_PASSWORD ?? // reuse a fixed staging password…
   `Verify-Staging-${Date.now()}!Aa1`; // …or generate one per run
-const MAILBOX_API_TOKEN = process.env.STAGING_MAILBOX_API_TOKEN; // set to enable OTP retrieval
 
-// Role asserted on the profile row and in the decoded JWT. facility_lead is a
-// non-default user_role value, so a passing check proves the claim path works
-// end-to-end (a default 'technician' would pass trivially even if the hook
-// never read the row).
-const EXPECTED_ROLE = "facility_lead";
+// OTP retrieval is required (email confirmation is enabled).
+const missing_otp = [
+  ["STAGING_TEST_EMAIL_DOMAIN", TEST_EMAIL_DOMAIN],
+  ["STAGING_MAILBOX_API_TOKEN", MAILBOX_API_TOKEN],
+]
+  .filter(([, v]) => !v)
+  .map(([k]) => k);
+
+if (missing_otp.length > 0) {
+  console.error(
+    `✗ missing required env var${missing_otp.length > 1 ? "s" : ""} for OTP retrieval: ${missing_otp.join(", ")}`,
+  );
+  console.error("  (Email confirmation is enabled; OTP retrieval is required.)");
+  process.exit(1);
+}
+
+// Org membership role asserted in the decoded JWT. owner is a non-default
+// membership role (vs. technician), so a passing check proves the hook reads
+// organization_members.role end-to-end (TEN-010), not the deprecated
+// public.users.role or a stale default.
+const EXPECTED_MEMBERSHIP_ROLE = "owner";
+
+// OTP retrieval budget, surfaced only in the local log string below. The actual
+// pollInboxForOtp tuning (timeout + interval) now lives self-contained in
+// ./lib/mailosaur-otp.mjs (the single source of truth, shared with other probes).
+const OTP_TIMEOUT_MS = Number(process.env.STAGING_OTP_TIMEOUT_MS ?? 90_000);
 
 // ── Clients ─────────────────────────────────────────────────────────────────
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -86,7 +113,6 @@ function decodeJwtPayload(token) {
   if (parts.length !== 3) {
     throw new Error(`malformed JWT: expected 3 segments, got ${parts.length}`);
   }
-  // base64url -> base64 -> JSON. atob is global in Node 16+.
   const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
   const json = Buffer.from(b64, "base64").toString("utf8");
   return JSON.parse(json);
@@ -96,12 +122,16 @@ function decodeJwtPayload(token) {
 
 const ts = Date.now();
 const rand = Math.random().toString(36).slice(2, 8);
-const domain = TEST_EMAIL_DOMAIN || "example.com";
-const email = `verify-staging-supabase-${ts}-${rand}@${domain}`;
+const email = `verify-staging-supabase-${ts}-${rand}@${TEST_EMAIL_DOMAIN}`;
+
+// The instant before signUp — OTP search uses this as receivedAfter so we
+// never pick up a stale email for a recycled address.
+const signupStartedIso = new Date(ts).toISOString();
 
 // Track state for cleanup. userId is the Auth user id == public.users.id.
 let userId = null;
 let profileInserted = false;
+let seededOrgId = null;
 
 const checks = []; // { name, ok, detail }
 
@@ -117,70 +147,75 @@ try {
     throw new Error(`signUp failed: ${signUpError.message}`);
   }
   if (!signUpData.user?.id) {
-    // signUp can return no user (e.g. email confirmation required + opaque
-    // response) — without a user id we can't insert a profile or assert a
-    // claim, so this is a hard stop, not a soft skip.
     throw new Error("signUp returned no user id");
   }
   userId = signUpData.user.id;
   console.log(`✓ signed up; user id = ${userId}`);
 
-  // 2. OTP / email-confirmation step — CONDITIONAL.
-  //
-  // Staging has email confirmation disabled, so signUp() already returns a
-  // usable session and we can skip OTP entirely. If confirmation is ever
-  // re-enabled, STAGING_MAILBOX_API_TOKEN gates the retrieval path.
-  if (!MAILBOX_API_TOKEN) {
-    console.log(
-      "⚠ STAGING_MAILBOX_API_TOKEN not set — OTP retrieval skipped (staging has confirmation disabled; proceeding with the signUp session).",
-    );
-  } else {
-    // TODO(OTP): a real OTP retrieval flow would look like this, but no
-    // mailbox/inbox service has been chosen for the project yet, so it is
-    // intentionally NOT implemented here. Sketch only:
-    //
-    //   // 1. Poll the mailbox/inbox API until Supabase's confirmation email
-    //   //    arrives (the token is a 6-digit code in the body). Pseudocode:
-    //   //    const otp = await pollInboxForOtp({
-    //   //      token: MAILBOX_API_TOKEN,
-    //   //      to: email,
-    //   //      subjectContains: "Confirm",
-    //   //      retries: 30, intervalMs: 2000,
-    //   //    });
-    //   //
-    //   //    // 2. Exchange the OTP for a verified session:
-    //   //    //    const { error } = await supabaseAnon.auth.verifyOtp({
-    //   //    //      email, token: otp, type: "email",
-    //   //    //    });
-    //   //    //    if (error) throw new Error(`verifyOtp failed: ${error.message}`);
-    //   //
-    //   // Until a concrete provider is picked, leave OTP unimplemented and
-    //   // rely on the confirmation-disabled session above.
-    console.log(
-      "ℹ STAGING_MAILBOX_API_TOKEN is set, but OTP retrieval is not implemented yet — proceeding with the signUp session (see TODO).",
-    );
+  // 2. Retrieve + redeem the confirmation OTP.
+  console.log(`▶ retrieving confirmation OTP from mailbox (${OTP_TIMEOUT_MS}ms budget)`);
+  const otp = await pollInboxForOtp({
+    token: MAILBOX_API_TOKEN,
+    toEmail: email,
+    sinceIso: signupStartedIso,
+  });
+  console.log(`✓ OTP retrieved from mailbox`);
+
+  console.log("▶ redeeming OTP via auth.verifyOtp");
+  const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
+    email,
+    token: otp,
+    type: "signup",
+  });
+  if (verifyError) {
+    throw new Error(`verifyOtp failed: ${verifyError.message}`);
   }
+  const sessionAfterVerify = (await supabaseAnon.auth.getSession()).data?.session;
+  if (!sessionAfterVerify) {
+    throw new Error("no active session after verifyOtp");
+  }
+  console.log("✓ OTP verified; session established");
 
-  // 3. Insert a public.users profile row via the service-role client.
-  //    No profile-creation trigger exists on staging yet (Release 1), so the
-  //    script owns this insert. facility_lead is deliberately non-default.
-  console.log(`▶ inserting public.users row with role='${EXPECTED_ROLE}'`);
-  const { error: insertError } = await supabaseAdmin
+  // 3. Seed an organization and active membership via the service-role client.
+  //    The hook (TEN-010) reads organization_members.role for the user_role
+  //    claim. With no membership, the claim is omitted (TEN-012).
+  console.log("▶ seeding organization and active membership");
+  const { data: orgRows, error: orgErr } = await supabaseAdmin
+    .from("organizations")
+    .insert({ name: `verify-staging-${ts}-${rand}` })
+    .select("id");
+  if (orgErr || !orgRows?.[0]?.id) {
+    throw new Error(`could not seed organization: ${orgErr?.message ?? "no id returned"}`);
+  }
+  seededOrgId = orgRows[0].id;
+
+  const { error: memErr } = await supabaseAdmin
+    .from("organization_members")
+    .insert({
+      organization_id: seededOrgId,
+      user_id: userId,
+      role: EXPECTED_MEMBERSHIP_ROLE,
+      status: "active",
+    });
+  if (memErr) {
+    throw new Error(`could not seed membership: ${memErr.message}`);
+  }
+  console.log(`✓ organization and active '${EXPECTED_MEMBERSHIP_ROLE}' membership seeded`);
+
+  // Also seed a public.users profile (the hook runs on every token refresh but
+  // the profile is still a separate entity that trigger 00004 creates at signup).
+  // The hook does not read public.users.role (deprecated per TEN-010), but the
+  // profile still needs to exist for other routes.
+  const { error: profileErr } = await supabaseAdmin
     .from("users")
-    .insert({ id: userId, email, role: EXPECTED_ROLE });
-
-  if (insertError) {
-    throw new Error(`profile insert failed: ${insertError.message}`);
+    .insert({ id: userId, email });
+  if (profileErr && !profileErr.message?.includes("duplicate")) {
+    throw new Error(`could not seed profile: ${profileErr.message}`);
   }
   profileInserted = true;
-  console.log(`✓ profile inserted`);
 
-  // 4. Refresh the session so the access-token hook re-runs against the new
-  //    row, then decode the JWT and assert user_role == facility_lead.
-  //
-  //    Why refresh: the token minted at signUp() runs BEFORE the profile row
-  //    exists, so its user_role would be the hook's default 'technician'.
-  //    Refreshing forces a fresh token through the hook with the row present.
+  // 4. Refresh the session so the hook re-runs against the seeded membership,
+  //    then decode the JWT and assert user_role == the membership role.
   console.log("▶ refreshing session to re-run custom_access_token_hook");
   const { data: refreshData, error: refreshError } =
     await supabaseAnon.auth.refreshSession();
@@ -195,21 +230,18 @@ try {
 
   const payload = decodeJwtPayload(accessToken);
   const claimRole = payload.user_role;
-  const claimOk = claimRole === EXPECTED_ROLE;
+  const claimOk = claimRole === EXPECTED_MEMBERSHIP_ROLE;
   checks.push({
-    name: "JWT user_role claim == facility_lead",
+    name: `JWT user_role claim == '${EXPECTED_MEMBERSHIP_ROLE}' (hook reads organization_members.role)`,
     ok: claimOk,
     detail:
       claimRole === undefined
-        ? "claim 'user_role' is ABSENT (hook not registered / not firing)"
-        : `expected '${EXPECTED_ROLE}', got '${claimRole}'`,
+        ? `claim 'user_role' is ABSENT (expected '${EXPECTED_MEMBERSHIP_ROLE}'; hook not reading membership)`
+        : `expected '${EXPECTED_MEMBERSHIP_ROLE}', got '${claimRole}'`,
   });
   if (claimOk) {
-    console.log(`✓ JWT user_role == '${claimRole}' (expected '${EXPECTED_ROLE}')`);
+    console.log(`✓ JWT user_role == '${claimRole}' (hook reads organization_members.role end-to-end)`);
   } else {
-    // Don't throw yet — still run the remaining structural checks so the report
-    // is maximally useful, then fail at the summary. This is the core check,
-    // so it WILL flip the exit code to 1.
     console.error(`✗ CORE CHECK FAILED: ${checks[checks.length - 1].detail}`);
   }
 
@@ -243,18 +275,9 @@ try {
     }
   }
 
-  // 6. Confirm migration 00002's RLS policies are live.
-  //
-  //    supabase_migrations.schema_migrations isn't exposed via PostgREST
-  //    (config.toml api.schemas is ["public", "graphql_public"] only, and
-  //    should stay that way — migration bookkeeping has no business being
-  //    publicly queryable), so a row-count check on it always 404s
-  //    regardless of migration state. Check the migration's actual EFFECT
-  //    instead: an anonymous, unauthenticated client must not be able to
-  //    read another user's public.users row. Migrations 00001 and 00003's
-  //    effects are already confirmed above (hook fired with the right
-  //    claim; bucket exists and is public), so this covers 00002.
-  console.log("▶ checking RLS enforcement on public.users (migration 00002)");
+  // 6. Confirm RLS policies are live: an anonymous, unauthenticated client
+  //    must not be able to read another user's public.users row.
+  console.log("▶ checking RLS enforcement on public.users");
   const supabaseAnonUnauthenticated = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
   });
@@ -305,8 +328,6 @@ try {
     console.log(`\n✓ PASS: all checks passed for ${email}`);
   }
 } catch (err) {
-  // An exception means a step couldn't even run to completion (vs. a check
-  // that ran and returned a negative result).
   console.error(`\n✗ FAIL: aborted at an earlier step — ${err?.message ?? err}`);
   if (err?.stack && process.env.DEBUG) {
     console.error(err.stack);
@@ -317,9 +338,34 @@ try {
   process.exitCode = 1;
 } finally {
   // ── Cleanup (always best-effort) ─────────────────────────────────────────
-  // Order matters: delete the profile row first (its id references the Auth
-  // user, but there's no FK from public.users -> auth.users, so order is
-  // really about leaving no orphan either way), then delete the Auth user.
+  // Delete in order: membership, org, profile, auth user. The membership's
+  // FK cascades (organization_id -> organizations.id), and the organization's
+  // FK cascades (user_id -> auth.users.id via public.users), so the cascades
+  // could handle it, but we remove explicitly to avoid relying on cascade
+  // assumptions and to leave no orphans on a partial failure.
+
+  if (seededOrgId) {
+    const { error: delMemErr } = await supabaseAdmin
+      .from("organization_members")
+      .delete()
+      .eq("organization_id", seededOrgId);
+    if (delMemErr) {
+      console.error(`⚠ cleanup: failed to delete membership: ${delMemErr.message}`);
+    } else {
+      console.log(`✓ cleanup: deleted membership`);
+    }
+
+    const { error: delOrgErr } = await supabaseAdmin
+      .from("organizations")
+      .delete()
+      .eq("id", seededOrgId);
+    if (delOrgErr) {
+      console.error(`⚠ cleanup: failed to delete organization: ${delOrgErr.message}`);
+    } else {
+      console.log(`✓ cleanup: deleted organization`);
+    }
+  }
+
   if (userId) {
     if (profileInserted) {
       const { error: delProfileError } = await supabaseAdmin
