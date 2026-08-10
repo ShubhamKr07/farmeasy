@@ -160,9 +160,19 @@ export async function resolveTenantContext(
     // warn (not error) because an unreachable DB in dev/test is expected, and
     // the message is reduced to the error message (no stack) so it can't spam
     // stderr on every request when the DB is down.
+    // Also surface the underlying driver error (`error.cause`): a Drizzle
+    // query error's own `.message` is only "Failed query: <sql>", so the real
+    // Postgres cause (permission denied, aborted transaction, prepared-statement
+    // conflict, etc.) is otherwise invisible in logs — which is exactly what
+    // made a production 400 on this path opaque to debug.
+    const cause =
+      error instanceof Error && error.cause instanceof Error
+        ? error.cause.message
+        : undefined;
     console.warn(
       "[tenantContext] membership lookup failed; req.tenant unset:",
       error instanceof Error ? error.message : error,
+      cause ? `| cause: ${cause}` : "",
     );
   }
   return next();
