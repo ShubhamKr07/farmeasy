@@ -31,6 +31,7 @@ const SCOPED_TABLES = [
   "seedLotsTable",
   "organizationMembersTable",
   "invitationsTable",
+  "facilitiesTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
@@ -210,6 +211,25 @@ const BASELINE_VIOLATIONS = new Set([
   //         this scanner's dirs) and go through `tx`, not `db`, under
   //         set_config-scoped transactions.
   "artifacts/api-server/src/routes/demo.ts::const [membership] = await db",
+  // --- (H) MT-M2 batch 1: facilities is now a SCOPED_TABLES entry (its RLS is a
+  //         current_user backend backstop, so the static guard is the row-level
+  //         safety net). These are PERMANENT bootstrap-read exceptions, same
+  //         category as (C)/(D)/(F)/(G): each resolves or validates a facility/
+  //         org before any tenant GUC exists (or is a scheduled sweep), and each
+  //         already carries its own explicit organization_id/id WHERE. A NEW
+  //         un-scoped facilities read is NOT baselined and will fail this gate.
+  //         (metrics.ts and growthProfiles.ts also read facilities but are not
+  //         listed here: both files already contain "withTenantScope" elsewhere,
+  //         so the file-level skip above exempts them from this scanner entirely
+  //         -- same reasoning documented for growthProfiles.ts in group (B).)
+  "artifacts/api-server/src/routes/demo.ts::const [facility] = await db",
+  "artifacts/api-server/src/routes/facilities.ts::const [facility] = await db",
+  "artifacts/api-server/src/routes/facilities.ts::const facilities = await db",
+  // wizard.ts's two facility-validation call sites (getOrganizationId path,
+  // PATCH /wizard-progress) share the identical trimmed start line, so one key
+  // covers both matches:
+  "artifacts/api-server/src/routes/wizard.ts::const [facility] = await db",
+  "artifacts/api-server/src/lib/purgeUnverified.ts::const [facilityCount] = await db",
 ]);
 
 const newViolations = [];
