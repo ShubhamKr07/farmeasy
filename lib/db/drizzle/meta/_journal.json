@@ -225,6 +225,13 @@
       "when": 1786276497352,
       "tag": "0031_organizations_is_demo",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786441791488,
+      "tag": "0032_crops_org_scope",
+      "breakpoints": true
     }
   ]
 }

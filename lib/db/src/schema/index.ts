@@ -184,13 +184,34 @@ export const invitationsTable = pgTable(
   ],
 );
 
-export const cropsTable = pgTable("crops", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull().unique(),
-  scientificName: text("scientific_name"),
-  category: cropCategoryEnum("category"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+// MT-M2 batch 3: hybrid org-scoped catalog. organizationId NULL = a shared
+// "system" crop, readable by every tenant; a set organizationId = a
+// tenant-private crop. The old table-wide unique(name) is split so system
+// names stay globally unique while each org can reuse a name within its own
+// catalog: uniqueIndex on (organizationId, name) covers per-org rows, and the
+// partial uniqueIndex on name (where organizationId is null) covers system
+// rows (a plain uniqueIndex on (organizationId, name) alone would NOT catch
+// two system rows both named e.g. "Kale", because NULL is never equal to
+// NULL in a unique index).
+export const cropsTable = pgTable(
+  "crops",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    scientificName: text("scientific_name"),
+    category: cropCategoryEnum("category"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    organizationId: integer("organization_id").references(() => organizationsTable.id, {
+      onDelete: "cascade",
+    }),
+  },
+  (table) => [
+    uniqueIndex("crops_org_id_name_uniq").on(table.organizationId, table.name),
+    uniqueIndex("crops_system_name_uniq")
+      .on(table.name)
+      .where(sql`${table.organizationId} is null`),
+  ],
+);
 
 export const growthProfilesTable = pgTable("growth_profiles", {
   id: serial("id").primaryKey(),
