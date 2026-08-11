@@ -3,7 +3,6 @@ import { getAuth } from "../middlewares/supabaseAuth";
 import { eq, ne, desc, and } from "drizzle-orm";
 import { z } from "zod";
 import {
-  db,
   cyclesTable,
   growthProfilesTable,
   manualChecksTable,
@@ -291,13 +290,23 @@ router.post("/cycles", enforceAuth, async (req, res) => {
       if (body.waterLevel !== undefined) sensorUpdate.waterLevelPct = body.waterLevel;
       if (body.nutrientMix !== undefined) sensorUpdate.nutrientMix = body.nutrientMix;
 
-      // Unchanged (sensorStatusTable is out of scope — see Global Constraints):
-      const [existing] = await db.select({ id: sensorStatusTable.id }).from(sensorStatusTable).limit(1);
-      if (existing) {
-        await db.update(sensorStatusTable).set(sensorUpdate).where(eq(sensorStatusTable.id, existing.id));
-      } else {
-        await db.insert(sensorStatusTable).values(sensorUpdate as typeof sensorStatusTable.$inferInsert);
-      }
+      // MT-M2 batch 4: sensor_status is now per-facility (facility_id +
+      // unique(facility_id)) — upsert keyed on the caller's own facility,
+      // under withTenantScope so app.facility_id is set for the RLS policy.
+      // Previously this read/wrote the single global row shared across every
+      // tenant (last-write-wins across organizations).
+      await withTenantScope(req.tenant!, (tx) =>
+        tx
+          .insert(sensorStatusTable)
+          .values({
+            ...sensorUpdate,
+            facilityId: req.tenant!.facilityId,
+          } as typeof sensorStatusTable.$inferInsert)
+          .onConflictDoUpdate({
+            target: sensorStatusTable.facilityId,
+            set: sensorUpdate,
+          }),
+      );
     }
 
     return res.status(201).json(formatCycle(cycle, profile));
@@ -430,12 +439,20 @@ router.post("/cycles/:id/fertigation", enforceAuth, async (req, res) => {
       if (body.waterLevel !== undefined) sensorUpdate.waterLevelPct = body.waterLevel;
       if (body.nutrientMix !== undefined) sensorUpdate.nutrientMix = body.nutrientMix;
 
-      const [existing] = await db.select({ id: sensorStatusTable.id }).from(sensorStatusTable).limit(1);
-      if (existing) {
-        await db.update(sensorStatusTable).set(sensorUpdate).where(eq(sensorStatusTable.id, existing.id));
-      } else {
-        await db.insert(sensorStatusTable).values(sensorUpdate as typeof sensorStatusTable.$inferInsert);
-      }
+      // MT-M2 batch 4: sensor_status is now per-facility — see the create-
+      // cycle upsert above for the full rationale.
+      await withTenantScope(req.tenant!, (tx) =>
+        tx
+          .insert(sensorStatusTable)
+          .values({
+            ...sensorUpdate,
+            facilityId: req.tenant!.facilityId,
+          } as typeof sensorStatusTable.$inferInsert)
+          .onConflictDoUpdate({
+            target: sensorStatusTable.facilityId,
+            set: sensorUpdate,
+          }),
+      );
     }
 
 
