@@ -27,7 +27,12 @@ def _bootstrap_env(monkeypatch):
 def _req():
     from app.models import RecommendRequest
 
-    return RecommendRequest(user_id=uuid.uuid4(), question="What is my yield this week?")
+    return RecommendRequest(
+        user_id=uuid.uuid4(),
+        question="What is my yield this week?",
+        org_id=1,
+        facility_id=1,
+    )
 
 
 def _patch_externals(monkeypatch, main):

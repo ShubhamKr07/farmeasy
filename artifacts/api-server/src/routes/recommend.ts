@@ -95,10 +95,25 @@ const IP_RECOMMEND_LIMIT = 60;
  * -svc's own grounding only matches crop/seed names, so without this,
  * operational questions returned "no relevant results" (they don't match
  * any external search result or crop-specific growth profile).
+ *
+ * MT-M2 task #5: also forwards the caller's org_id/facility_id (from
+ * req.tenant, resolved by app.ts's requireTenantContext gate on this route)
+ * so the recommender's own non-BYPASSRLS farmsmart_recommender role can set
+ * the tenant GUC for its RLS-scoped grounding reads — never cross-tenant.
  */
 async function recommendHandler(req: Request, res: Response) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+  // MT-M2 task #5: the recommender now runs as a dedicated, non-BYPASSRLS
+  // farmsmart_recommender role that sets the tenant GUC (app.org_id/
+  // app.facility_id) per request -- it needs the querying user's own tenant
+  // to scope its grounding reads (growth_profiles/bad_tray_entries/crops) to
+  // that tenant only, never cross-tenant. This route is now mounted behind
+  // app.ts's requireTenantContext (tier 3), so req.tenant is guaranteed
+  // populated here -- the non-null assertion mirrors the existing
+  // computeDashboardSnapshot(req.tenant!) call below.
+  const { organizationId, facilityId } = req.tenant!;
 
   // Validate + bound the question BEFORE any dashboard/ops-context work runs
   // (Task 9 Step 6): an oversized payload must not drive the (expensive)
@@ -141,6 +156,8 @@ async function recommendHandler(req: Request, res: Response) {
         user_id: userId,
         question,
         ops_context: opsContext,
+        org_id: organizationId,
+        facility_id: facilityId,
       }),
       // 10s deadline so a hung upstream can't pin the connection. Aborts
       // with a DOMException named "TimeoutError", caught below → 502.
