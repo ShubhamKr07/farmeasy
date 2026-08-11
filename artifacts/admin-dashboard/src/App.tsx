@@ -13,6 +13,13 @@ import { useOrgRole } from "@/hooks/use-org-role";
 import { useSignupAvailability } from "@/hooks/use-signup-availability";
 import { SignUpForm } from "@/pages/auth/SignUpForm";
 import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
+import { ForgotPasswordPanel } from "@/pages/auth/ForgotPasswordPanel";
+import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage";
+// Re-exported so existing `import { LoadingScreen } from "@/App"` (if any) and
+// the local references below keep resolving after the extraction to its own
+// module. The implementation now lives in pages/auth/LoadingScreen.tsx so
+// ResetPasswordPage can reuse it without a circular dep on App.tsx.
+import { LoadingScreen } from "@/pages/auth/LoadingScreen";
 import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
 import NotFound from "@/pages/not-found";
 
@@ -81,8 +88,10 @@ function AuthGate() {
   const [busy, setBusy] = useState(false);
   // TEN-012 Task 9: toggle between the existing sign-in form (unchanged) and
   // the new Create-account form. Defaults to sign-in so existing behavior is
-  // preserved for every user who never touches the toggle.
-  const [view, setView] = useState<"signin" | "signup">("signin");
+  // preserved for every user who never touches the toggle. AUTH-002 Task 3
+  // adds a third value, "forgot", which swaps the sign-in form for the
+  // ForgotPasswordPanel (states 1-2) reached via the "Forgot password?" link.
+  const [view, setView] = useState<"signin" | "signup" | "forgot">("signin");
 
   // Probe sign-up availability for the email typed into the SHARED email
   // field, so a user who typed their address to sign in already knows (once
@@ -117,11 +126,15 @@ function AuthGate() {
     // view. Force-show whenever we're already in the sign-up view so the user
     // can always switch back to sign-in.
     const showCreateAccountToggle =
-      view === "signup" ||
-      mode === null ||
-      mode === "public" ||
-      mode === "off" ||
-      (mode === "allowlist" && allowed);
+      // Hide the create-account toggle entirely in the forgot-password view —
+      // that panel has its own "Back to sign in" action and shouldn't offer a
+      // detour into sign-up.
+      view !== "forgot" &&
+      (view === "signup" ||
+        mode === null ||
+        mode === "public" ||
+        mode === "off" ||
+        (mode === "allowlist" && allowed));
 
     return (
       <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background">
@@ -133,6 +146,12 @@ function AuthGate() {
             email={email}
             onEmailChange={setEmail}
           />
+        ) : view === "forgot" ? (
+          // AUTH-002 Task 3: forgot-password panel (states 1-2). Rendered on
+          // the same auth screen via state — not a separate route — so it
+          // reuses the logo + centered chrome above. "Back to sign in"
+          // returns to the sign-in form.
+          <ForgotPasswordPanel onBackToSignIn={() => setView("signin")} />
         ) : (
           <>
             <form onSubmit={signIn} className="w-full max-w-sm space-y-4">
@@ -163,6 +182,16 @@ function AuthGate() {
                 Sign in
               </Button>
             </form>
+            {/* AUTH-002 Task 3: "Forgot password?" link under the password
+                field flips this auth screen to the ForgotPasswordPanel
+                (state 1) — same panel, no route change. */}
+            <Button
+              variant="link"
+              className="text-sm w-full max-w-sm -mt-2"
+              onClick={() => setView("forgot")}
+            >
+              Forgot password?
+            </Button>
             <div className="flex items-center gap-3 w-full max-w-sm">
               <div className="h-px bg-border flex-1" />
               <span className="text-xs text-muted-foreground">or</span>
@@ -224,20 +253,6 @@ function AuthGate() {
     <ActiveFacilityProvider>
       <FacilityGate />
     </ActiveFacilityProvider>
-  );
-}
-
-/**
- * Shared full-screen loading state (auth-session check, facility-existence
- * check) — same visual treatment as the original inline `AuthGate` loading
- * branch, just reusable.
- */
-function LoadingScreen() {
-  return (
-    <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
-      <span>Loading…</span>
-    </div>
   );
 }
 
@@ -373,6 +388,11 @@ function App() {
                 AuthGate sign-in screen. Keep the auth bridge + OAuth handler
                 above mounted for all paths. */}
             <Route path="/accept-invite" component={AcceptInvite} />
+            {/* AUTH-002 Task 3: recovery-email landing route. Reached from the
+                reset link (ForgotPasswordPanel's `redirectTo`). Rendered
+                OUTSIDE AuthGate — the recovery session is short-lived and the
+                page inspects it directly to pick state 3 vs 3B. */}
+            <Route path="/reset-password" component={ResetPasswordPage} />
             <Route>
               <AuthGate />
             </Route>
