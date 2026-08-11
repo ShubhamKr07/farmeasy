@@ -211,49 +211,58 @@ try {
   userId = signUpData.user.id;
   console.log(`✓ signed up; user id = ${userId}`);
 
-  // 2. Retrieve + redeem the confirmation OTP. With email confirmation enabled
-  //    (the foundation-plan target state) signUp returns no usable session; the
-  //    session is established only after verifyOtp. If confirmation is still
-  //    disabled on staging, signUp already returned a session and verifyOtp
-  //    may report "already confirmed" — tolerate that so the script degrades
-  //    gracefully instead of hard-failing an otherwise-valid run.
-  console.log(`▶ retrieving confirmation OTP from mailbox (${OTP_TIMEOUT_MS}ms budget)`);
-  const otp = await pollInboxForOtp({
-    token: MAILBOX_API_TOKEN,
-    toEmail: email,
-    sinceIso: signupStartedIso,
-  });
-  console.log(`✓ OTP retrieved from mailbox`);
-
-  console.log("▶ redeeming OTP via auth.verifyOtp");
-  // type "signup" — this is a brand-new-account confirmation OTP (the email's
-  // own verify URL carries type=signup). "email" is for existing-user email
-  // OTP sign-in and would reject a fresh signup token.
-  const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
-    email,
-    token: otp,
-    type: "signup",
-  });
-  const sessionAfterVerify = (await supabaseAnon.auth.getSession()).data?.session;
-  if (verifyError) {
-    const msg = String(verifyError.message ?? "").toLowerCase();
-    const tolerable =
-      !!sessionAfterVerify &&
-      (msg.includes("already confirmed") ||
-        msg.includes("already") ||
-        msg.includes("session"));
-    if (tolerable) {
-      console.log(
-        `⚠ verifyOtp returned "${verifyError.message}" but an active session exists (confirmation likely disabled) — proceeding.`,
-      );
-    } else {
-      throw new Error(`verifyOtp failed: ${verifyError.message}`);
-    }
+  // 2. Retrieve + redeem the confirmation OTP — but only when signUp() didn't
+  //    already return a live session. Email confirmation is a per-project
+  //    Supabase Auth setting; when it's disabled, signUp() returns an
+  //    already-confirmed session and no email is EVER sent, so polling an
+  //    inbox for an OTP that will never arrive hangs for the full timeout.
+  //    Check the immediate signUp() result generically instead of assuming
+  //    any one environment's config (staging currently has confirmation
+  //    disabled; production's setting must not be assumed to match).
+  let sessionAfterVerify = signUpData.session;
+  if (sessionAfterVerify) {
+    console.log(
+      "⚠ signUp() returned an active session immediately — email confirmation is disabled on this project; skipping OTP poll/verify",
+    );
   } else {
-    console.log("✓ OTP verified; session established");
+    console.log(`▶ retrieving confirmation OTP from mailbox (${OTP_TIMEOUT_MS}ms budget)`);
+    const otp = await pollInboxForOtp({
+      token: MAILBOX_API_TOKEN,
+      toEmail: email,
+      sinceIso: signupStartedIso,
+    });
+    console.log(`✓ OTP retrieved from mailbox`);
+
+    console.log("▶ redeeming OTP via auth.verifyOtp");
+    // type "signup" — this is a brand-new-account confirmation OTP (the email's
+    // own verify URL carries type=signup). "email" is for existing-user email
+    // OTP sign-in and would reject a fresh signup token.
+    const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
+      email,
+      token: otp,
+      type: "signup",
+    });
+    sessionAfterVerify = (await supabaseAnon.auth.getSession()).data?.session;
+    if (verifyError) {
+      const msg = String(verifyError.message ?? "").toLowerCase();
+      const tolerable =
+        !!sessionAfterVerify &&
+        (msg.includes("already confirmed") ||
+          msg.includes("already") ||
+          msg.includes("session"));
+      if (tolerable) {
+        console.log(
+          `⚠ verifyOtp returned "${verifyError.message}" but an active session exists (confirmation likely disabled) — proceeding.`,
+        );
+      } else {
+        throw new Error(`verifyOtp failed: ${verifyError.message}`);
+      }
+    } else {
+      console.log("✓ OTP verified; session established");
+    }
   }
   if (!sessionAfterVerify) {
-    throw new Error("no active session after verifyOtp — cannot read claims");
+    throw new Error("no active session after signUp/verifyOtp — cannot read claims");
   }
 
   // 3. Assert exactly ONE trigger-created profile with role technician.
