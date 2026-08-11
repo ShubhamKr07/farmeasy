@@ -1,109 +1,80 @@
 # MT-M2 Public-RLS Remediation — Design
 
-**Status:** design, awaiting review. Branch `mt-m2-public-rls-remediation-design`.
-**Relates to:** [[rls-public-tables-remediation]], [[rls-positive-invariant-practice]]. Follows TEN-013 (which deliberately left `facilities` RLS-off, pointing here).
+**Status:** design (rescoped 2026-08-11). Branch `mt-m2-public-rls-remediation-design`.
+**Relates to:** [[rls-public-tables-remediation]], [[rls-positive-invariant-practice]]. Follows TEN-013 (which deferred `facilities` here).
 
-## Scope correction
+## Scope (corrected)
 
-The tracked memory says "15 public tables lack RLS (Supabase advisor)." That count **predates TEN-012's `00017`/`00018`** (which gave the signup tables + organizations-DELETE their RLS). Enumerating the current schema against the migrations, **only 6 public tables still lack RLS**:
+The authoritative source is the Supabase advisor (`rls_disabled_in_public`) + a `pg_class.relrowsecurity=false` enumeration of `public` base tables — **NOT** a schema grep (an earlier grep under-counted the schema's 36 tables as 16 and mis-scoped this to 6; corrected via [[verify-assumptions-before-acting]]).
 
-`facilities` · `channels` · `racks` · `trays` · `crops` · `sensor_status`
+**15 public tables lacked RLS.** Disposition:
+- **`facilities` — DONE:** Batch 1, PR #35 merged 2026-08-11, security-attested (`current_user` model; see migration `00020`).
+- **`recommender_cache`, `recommender_queries` — deferred to task #5** (`farmsmart_recommender` read-scoped role) — their RLS is decided alongside the recommender's DB access model, not here.
+- **12 remain in THIS remediation** (below).
 
-Two of these (`crops`, `sensor_status`) were originally modeled un-scoped; the product decision (2026-08-10) is to **tenant-scope both**, not rubber-stamp them as global reference. So this is not a mechanical "enable RLS" pass — it is a tenant-scoping project for 4 logical units, delivered in **4 risk-ordered batches**, each its own PR, each proven under the real non-BYPASSRLS `farmsmart_app` role (a BYPASSRLS connection makes every policy a silent no-op).
+## Decision (2026-08-11): policy model = `current_user` backend policies (Option A)
 
-## Guiding principles
+After an impact analysis of `current_user` backend policies vs denormalizing `facility_id` (see the earlier Q&A / this session's analysis), **Option A chosen** for all backend-accessed, no-tenant-column tables. Summary of why:
 
-- **Prove under `farmsmart_app`, not a superuser.** Each batch ships pgTAP structural assertions + a route/cross-tenant test that runs under the real role via the disposable stack. Assert **end-state** (rows crossed / not), never error strings.
-- **Never deny-by-default a live path.** Enabling RLS on a table with no matching policy denies every existing SELECT/INSERT/UPDATE/DELETE. Every batch audits the exact verbs each table's routes use and adds a policy for each before enabling RLS.
-- **Bootstrap reads can't use the `app.org_id`/`app.facility_id` GUC.** Several tables are read before any tenant context exists (wizard bootstrap, demo `getOwnerOrg`, purge sweep). For those, the backend backstop is `current_user = 'farmsmart_app'` (the established `organization_members` `00012` / `organizations` `00010` model), NOT a GUC-scoped policy — the app already self-scopes those reads with an explicit `WHERE`.
-- **Batched by risk; #4 invariant guard flips to ENFORCING only after all 4 batches land.**
+- All 10 are **exclusively backend-accessed** (no PostgREST/`anon`/`authenticated` data grants) and hold **low-sensitivity structural/operational data** (layout positions, sensor readings, tray-QA rows, stock deltas, a junction, per-user UI prefs).
+- `current_user='farmsmart_app'` policies close the advisor's actual threat (non-backend access + a future stray `GRANT`) with **zero runtime/rollout risk**, match the entire existing backend-RLS model (facilities/organizations/org_members/invitations/signup) + the original [[rls-public-tables-remediation]] plan, and add **no schema change**.
+- Denormalizing `facility_id` (~24 expand→backfill→contract migrations + live-backfill + bootstrap-breakage risk) buys only marginal extra isolation (catching a *backend* query bug) on low-sensitivity tables — not worth it. Per-row DB isolation is reserved for the 2 tables being tenant-scoped for **product** reasons (below).
 
----
+## Guiding principles (unchanged)
 
-## Batch 1 — `facilities` (org-scoped, backend-backstop policies) — HIGHEST RISK
-
-**Why first + risky:** `facilities` has the heaviest, most bootstrap-entangled live traffic. Verb audit (verified):
-- **SELECT:** `facilities.ts` (GET /facilities, membership bootstrap), `wizard.ts` (getOrganizationId, facility validation), `demo.ts` (getOwnerOrg / status), `growthProfiles.ts` (pilot first-facility), `metrics.ts` (timezone lookup), `lib/purgeUnverified.ts` (sweep). **Most run before `app.org_id` is set.**
-- **INSERT:** `facilities.ts` (POST /facilities), `demo.ts` (provision).
-- **DELETE:** `demo.ts` (graduate).
-- **UPDATE:** none today.
-
-**Policy model:** `current_user = 'farmsmart_app'` backend policies for **SELECT / INSERT / DELETE** (no UPDATE policy — nothing updates facilities; add later if a route does). NOT GUC-scoped — the bootstrap SELECTs have no `app.org_id`, and the app already scopes every facilities read/write by `organization_id` in its own `WHERE` (server-resolved from owner membership, per TEN-013's attested trust model). This backstop blocks only non-`farmsmart_app` roles (defense-in-depth) without breaking any bootstrap path. Same shape as `00012`/`00010`.
-
-**Migration:** new `supabase/migrations/000NN_facilities_rls.sql` — `alter table public.facilities enable row level security;` + the 3 `create policy … to farmsmart_app using (current_user = 'farmsmart_app')` statements (match the exact convention of `00018`).
-
-**Proof:** pgTAP structural (RLS enabled + 3 policies present, correct cmd + role) — mirrors `00016-00019` (the disposable DB has no `farmsmart_app` role, so no live SET ROLE). Regression proof = the **existing** facilities/wizard/demo/metrics route suites must stay green under the disposable stack (they exercise every live path). **Rollback:** drop the 3 policies + `disable row level security`.
-
-**Static-guard hardening (mitigation, part of this batch).** A `current_user` policy gives up DB-level per-row isolation on `facilities` — the app's explicit `WHERE organization_id = …` is the row filter. To recover the safety net RLS won't provide, add `facilitiesTable` to `scripts/ci/check-tenant-scope.mjs`'s `SCOPED_TABLES` so a *new* stray raw `db…from(facilitiesTable)` is caught statically at PR time (today `facilities` is in neither RLS nor the guard — a gap this closes). Because the existing bootstrap sites all legitimately read `facilities` outside `withTenantScope` (org/facility resolution, purge sweep — the same category already baselined for `wizard.ts`/`demo.ts`), baseline each known site in `BASELINE_VIOLATIONS` as a group-(C)/(G)-style permanent bootstrap exception with rationale: the SELECT lines in `facilities.ts` (GET /facilities), `wizard.ts` (getOrganizationId + facility validation), `demo.ts` (getOwnerOrg/status), `growthProfiles.ts` (pilot), `metrics.ts` (timezone), and `lib/purgeUnverified.ts` (sweep). Net effect: every current path stays green, but any future un-scoped facilities access fails the TEN-004 gate. Run `node scripts/ci/check-tenant-scope.mjs` locally to enumerate the exact trimmed lines before baselining (the plan pins them).
+- Prove under the real non-BYPASSRLS `farmsmart_app` role; disposable-CI pgTAP is structural (no `farmsmart_app` role there), matching `00016`–`00020`. Live enforcement holds in staging/prod.
+- No live path may regress — the full `scripts/ci/test-disposable-supabase.sh` (existing suites green under new RLS) is the gate.
+- Batch by risk; separate PRs; the #4 invariant guard flips to ENFORCING only after every public table (incl. the recommender pair in #5) has RLS.
 
 ---
 
-## Batch 2 — `channels` / `racks` / `trays` (facility-scoped-via-parent)
+## Batch 1 — `facilities` — ✅ DONE (PR #35, merged)
 
-**Problem:** these carry only a parent FK (`channels.room_id` → `racks.channel_id` → `trays.rack_id`); the chain roots at `rooms` (which already has `facility_id` + RLS). Chosen approach (design-approved): **denormalize a `facility_id`** onto each, MT-M0's expand→backfill→contract pattern.
+`current_user='farmsmart_app'` backend policies (SELECT/INSERT/DELETE), no UPDATE (nothing updates facilities), structural pgTAP `00020`, foundation 19→20, `facilitiesTable` added to `check-tenant-scope` SCOPED_TABLES with bootstrap reads baselined. Security-attested (verb-completeness enumerated; no cross-tenant exposure — strictly additive). Recorded here for completeness.
 
-**Per table, 3 Drizzle migrations:**
-1. **Expand:** add nullable `facility_id integer references facilities(id) on delete cascade`.
-2. **Backfill:** `channels.facility_id` ← `rooms.facility_id` via `room_id`; `racks.facility_id` ← `channels.facility_id` via `channel_id`; `trays.facility_id` ← `racks.facility_id` via `rack_id` (run in that order).
-3. **Contract:** `set not null` + add `facility_id` index.
+## Batch 2 — the 10 `current_user` tables (ONE migration)
 
-**Policy model:** first audit how channels/racks/trays are accessed (the onboarding wizard's layout step creates them; `layout.ts` reads). If the write path runs under `withTenantScope` → `facility_id = app.facility_id` GUC policies. If any creation path is bootstrap (no GUC) → add the `current_user = 'farmsmart_app'` backstop instead (the plan pins this from the exact call sites). Enable RLS only after policies exist.
+`rooms`, `channels`, `racks`, `trays`, `sensor_readings`, `bad_tray_entries`, `manual_checks`, `stock_movements`, `cycle_seed_lots`, `user_settings`.
 
-**Proof:** pgTAP structural + a cross-tenant test (org A's layout rows invisible/immutable to org B) under the disposable stack. **Rollback:** drop policies + `facility_id` columns (reverse contract→expand).
+- **One Supabase migration:** `enable row level security` on all 10 + `current_user='farmsmart_app'` **per-verb** backend policies, matching `00020`/`00018`'s exact convention. Audit each table's actual verbs (which of SELECT/INSERT/UPDATE/DELETE its routes use — e.g. `layout.ts` for rooms/channels/racks/trays, `sensor-readings.ts`, `badTrays.ts`, cycles/manual-checks, inventory `stock_movements`, `cycle_seed_lots` writes, `userSettings.ts`) and add a policy for exactly those verbs — a MISSING verb policy = silent 0-row denial under the real role (the class of bug that made `00012`/`00014`/`00018` necessary; enumerate, don't guess).
+- `user_settings` is per-user, but the same `current_user` backend policy applies (the app already filters by `user_id`); no `auth.uid()` policy needed for the backend path.
+- **No schema change, no denormalization** — this is the whole point of Option A. Bootstrap-safe (no GUC), so zero runtime risk.
+- **Static-guard hardening:** add all 10 `*Table` names to `check-tenant-scope.mjs` `SCOPED_TABLES`; run the guard; baseline the existing backend reads it flags (group-(I), same permanent-bootstrap category as facilities' group-(H)), pasting the exact keys — so a *new* stray raw read of any of these fails the TEN-004 gate.
+- **Proof:** structural pgTAP (RLS enabled + expected per-verb `current_user` policies on each of the 10) + foundation Supabase count bump; regression proof = the full api-server suite green under the new RLS (disposable stack). **Rollback:** drop policies + `disable row level security` on the 10 + revert the guard additions.
 
----
+## Batch 3 — `crops` (org-scoped, HYBRID system + per-org) — schema change
 
-## Batch 3 — `crops` (org-scoped, HYBRID system + per-org)
+Product decision: crops is tenant-scoped, not global reference. Keep a shared base catalog as **system crops** (`organization_id NULL`, readable by all) + per-org custom crops.
+- Add `organization_id` nullable (NULL = system); drop global `unique(name)` → `unique(organization_id, name)` + partial `unique(name) where organization_id is null`; seed existing ~5 rows as system (NULL).
+- RLS (`farmsmart_app`): SELECT `using (organization_id is null or organization_id = app.org_id)`; INSERT/UPDATE/DELETE `with check/using (organization_id = app.org_id)`.
+- Rewire `crops.ts` GET + POST onto `withTenantScope` (so `app.org_id` is set → SELECT auto-filters system+own; POST stamps `organization_id`). `growth_profiles.cropId` FKs unaffected.
+- **Proof:** pgTAP + route test (org A sees system+own, never B's; can't mutate system/B's crop). **Rollback:** drop policy + `organization_id` + restore `unique(name)`.
 
-**Model (design-approved):** keep a shared base catalog as **system crops** (`organization_id NULL`, readable by everyone) + let orgs add their own (`organization_id` set, private to them).
+## Batch 4 — `sensor_status` (facility-scoped) — SECURITY, latent leak — schema + behavior change
 
-**Migration:**
-- Add `organization_id integer references organizations(id) on delete cascade` **nullable** (NULL = system crop).
-- Drop the global `unique(name)`; add `unique(organization_id, name)` **plus** a partial `unique(name) where organization_id is null` (system names stay globally unique; org names unique within the org).
-- Seed: leave the existing ~5 rows as system crops (`organization_id` stays NULL) — no duplication.
+`sensor_status` is a single un-scoped global row (`cycles.ts` upserts `SELECT…LIMIT 1`, `dashboard.ts` reads) → org A's write is visible on org B's dashboard. Fix:
+- Add `facility_id not null references facilities` + `unique(facility_id)` (one row per facility); rescope the `cycles.ts` upsert (key on `req.tenant.facilityId`, under `withTenantScope`) + the `dashboard.ts` read (by active facility); reset/delete the existing global row (regenerated aggregate, not source data); RLS `facility_id = app.facility_id` policies for the verbs those two sites use.
+- **Proof (explicit isolation test):** org A writes → org B's dashboard read returns B's own/empty, never A's — end-state, under the real role. Ships last with its own security-compliance attestation (changes `cycles.ts`/`dashboard.ts` runtime). **Rollback:** drop policy + `facility_id` + revert the two call sites.
 
-**RLS policies (`farmsmart_app`):**
-- SELECT: `using (organization_id is null or organization_id = app.org_id GUC)` — everyone reads system + their own.
-- INSERT/UPDATE/DELETE: `using/with check (organization_id = app.org_id)` — orgs manage only their own; nobody mutates system crops via the app (seeded/managed by migration/backend).
+## #4 — RLS positive-invariant guard (flips to ENFORCING last)
 
-**Route rescoping (`crops.ts`):** GET /crops + POST /crops currently run raw `db` unscoped. Rewire both onto `withTenantScope` so `app.org_id` is set → the SELECT policy auto-filters to system+own, and POST stamps `organization_id = app.org_id`. `growth_profiles.cropId` FKs are unaffected (a profile references either a system or its own crop).
+After Batches 2–4 **and task #5** (recommender pair) land — i.e. every `public` base table has RLS — ship task #4: a CI Supabase-linter step + a pgTAP "every `public` base table has `relrowsecurity=true`" assertion, **enforcing** (fails CI on any new un-RLS'd table), replacing the curated-allowlist mindset. **Dependency: #4 blocked by BOTH this remediation (#3) AND task #5** — the invariant can't pass while the recommender tables lack RLS.
 
-**Proof:** pgTAP + route test: org A sees system + A's crops, never B's; A can't mutate a system crop or B's crop. **Rollback:** drop policies + `organization_id` + restore `unique(name)`.
+## Rollout order & safety
 
----
-
-## Batch 4 — `sensor_status` (facility-scoped) — SECURITY PRIORITY (latent cross-tenant leak)
-
-**The finding:** `sensor_status` is a **single, un-scoped, overwritten global row** (`id, sensorsOnline/Total, acidityPh, waterLevelPct, tempCelsius, humidityPct, nutrientMix` — no facility/org column). `cycles.ts` writes it (`SELECT … LIMIT 1` → update-else-insert, lines ~294–299 / ~433–437); `dashboard.ts` reads it. One deployment-wide row → **org A's cycle action overwrites it, org B's dashboard reads A's environment values.** A structural cross-tenant leak (matches CLAUDE.md's "sensors are a single overwritten row"; `cycles.ts` marks it "out of scope"). This is the highest-value item here even though it's last (it needs batches' groundwork + the most care).
-
-**Fix — make it per-facility:**
-- Add `facility_id integer not null references facilities(id) on delete cascade`; make it **one row per facility** (`unique(facility_id)`), upserted per facility.
-- Rescope `cycles.ts`: the update-else-insert keys on `facility_id = req.tenant.facilityId`, under `withTenantScope`.
-- Rescope `dashboard.ts`: read `sensor_status where facility_id = <active facility>`, under `withTenantScope`.
-- Existing single global row: **reset/delete** it (it's a regenerated aggregate snapshot, not source data) — backfilling one global row to a specific facility would be wrong.
-- RLS: enable + `facility_id = app.facility_id` policies (all verbs the two sites use).
-
-**Proof (explicit isolation test):** org A writes a `sensor_status` (via a cycle op), assert org B's dashboard read returns **B's own/empty**, never A's values — end-state, under the real role. **Rollback:** drop policies + `facility_id` + revert the two call sites (restore the singleton read/write). Because this changes `cycles.ts`/`dashboard.ts` behavior, it ships last and gets its own security-compliance attestation.
-
----
-
-## #4 — RLS positive-invariant guard (flips to ENFORCING after Batch 4)
-
-Once all 4 batches land (every public table has RLS), ship task #4: a CI step running the Supabase linter (`rls_disabled_in_public`) + a pgTAP assertion "every `public` base table has `relrowsecurity = true`" — **enforcing** (fails CI on any new un-RLS'd table). No report-only phase needed since the gap is closed. This replaces the curated `SCOPED_TABLES` allowlist mindset with a positive invariant.
-
-## Rollout order & tenancy safety
-
-Batches ship as **4 separate PRs in order 1→4** (facilities → layout → crops → sensor_status), each independently revertible, each with pgTAP + a farmsmart_app-proven route/cross-tenant test, each security-attested (Batch 1 and Batch 4 especially). #4 guard is a 5th PR. Every batch re-runs the full disposable stack (`test-disposable-supabase.sh`) — the definitive CI-equivalent — before merge.
+Separate PRs, risk-ordered: Batch 2 (the 10, low-risk `current_user`, one migration) → Batch 3 (`crops`, schema change) → Batch 4 (`sensor_status`, security + behavior change) → then #4 (after #5 too). Each: pgTAP + full disposable-stack regression proof under `farmsmart_app`, security-attested (Batch 4 especially). Batch 1 already merged.
 
 ## Out of scope (YAGNI)
 
-- Per-org customization of crops beyond the system/own split (e.g. cloning system crops into an org).
-- Streaming/real-time sensor data (`sensor_status` stays a per-facility snapshot; the real time-series lives in `sensors`/`sensor_readings`, already facility-scoped).
-- The other MT-M2 items (TEN-011, recommender role, flag flip) — separate tasks.
+- Denormalizing `facility_id` onto the 10 (rejected per the impact analysis — Option A).
+- Per-org crop cloning beyond the system/own split.
+- Streaming sensor data (`sensor_status` stays a per-facility snapshot).
+- `recommender_cache`/`recommender_queries` RLS (→ task #5).
+- The other MT-M2 items (TEN-011, flag flip) — separate tasks.
 
 ## Risks / open items for the plan
 
-- **Batch 1 bootstrap breakage** is the top risk — the plan must run the full facilities/wizard/demo/metrics/purge suites under the disposable stack and confirm zero regression before merge.
-- **Batch 2 access-pattern audit** — pin whether channels/racks/trays writes are `withTenantScope` or bootstrap, to choose GUC vs `current_user` policy per table.
-- **Batch 3 crops read** only filters correctly once `crops.ts` runs under `withTenantScope`; the route rewire and the RLS must land together.
-- **Batch 4** changes runtime behavior of `cycles.ts`/`dashboard.ts` — needs the explicit before/after isolation test + attestation, not just a policy.
+- **Batch 2 verb-completeness** — the top risk: enumerate every verb each of the 10 tables' routes use and add a `current_user` policy for each; a missing-verb policy silently 0-rows under the real role (invisible to BYPASSRLS CI). The regression suite catches most, but audit explicitly.
+- **Batch 3 crops** — the route rewire (`withTenantScope`) and the RLS must land together, or the SELECT won't filter correctly.
+- **Batch 4 sensor_status** — runtime behavior change to `cycles.ts`/`dashboard.ts`; needs the explicit before/after isolation test + attestation.
+- **#4 depends on #5** — coordinate so the invariant flips only once the recommender tables are also RLS'd.

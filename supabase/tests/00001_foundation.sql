@@ -120,11 +120,19 @@ SELECT is(
 -- security at all through 00019; the current_user model (not app.org_id GUC)
 -- is required because facilities is read in bootstrap contexts before any
 -- tenant GUC is set (GET /facilities, wizard org-resolution, demo
--- getOwnerOrg, the unverified-purge sweep).
+-- getOwnerOrg, the unverified-purge sweep). 00021 (MT-M2 public-RLS
+-- remediation, Batch 2) enables RLS on the 10 remaining backend-only,
+-- no-tenant-column public tables (rooms, channels, racks, trays,
+-- sensor_readings, bad_tray_entries, manual_checks, stock_movements,
+-- cycle_seed_lots, user_settings) and adds current_user-scoped per-verb
+-- backend policies audited against their actual route/lib usage (see
+-- 00021's own header for the full per-table verb list and rationale --
+-- stock_movements/cycle_seed_lots are SELECT-only today; user_settings needs
+-- both INSERT and UPDATE for its onConflictDoUpdate upsert path).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  20,
-  'supabase_migrations.schema_migrations has exactly 20 rows (Supabase migrations 00001-00020)'
+  21,
+  'supabase_migrations.schema_migrations has exactly 21 rows (Supabase migrations 00001-00021)'
 );
 
 SELECT * FROM finish();
