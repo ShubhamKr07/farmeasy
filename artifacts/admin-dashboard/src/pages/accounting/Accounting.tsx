@@ -15,8 +15,24 @@ import type { MetricDataMap } from "@/components/metrics/renderers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DollarSign, Loader2 } from "lucide-react";
+import { DollarSign, Loader2, AlertCircle, EllipsisVertical } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+type ConnectionState = "ok" | "expired" | "error";
 
 export function Accounting() {
   const search = useSearch();
@@ -25,6 +41,8 @@ export function Accounting() {
   const { selected, selectable, toggle, reorder, reset } = useMetricSelection("accounting");
   const [range, setRange] = useState<MetricRange>("30d");
   const [connecting, setConnecting] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>("ok");
+  const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
 
   // The QuickBooks OAuth callback redirects here with ?qbo=connected|error —
   // surface a toast and refresh connection status, then strip the params.
@@ -49,6 +67,7 @@ export function Accounting() {
 
   const handleConnect = async () => {
     setConnecting(true);
+    setConnectionState("ok");
     try {
       const { authorizeUri } = await getAccountingConnectUri();
       window.location.href = authorizeUri;
@@ -59,6 +78,7 @@ export function Accounting() {
   };
 
   const handleDisconnect = () => {
+    setShowDisconnectDialog(false);
     disconnectMutation.mutate(undefined, {
       onSuccess: () => {
         toast("QuickBooks disconnected");
@@ -66,6 +86,16 @@ export function Accounting() {
       },
       onError: () => toast.error("Failed to disconnect QuickBooks"),
     });
+  };
+
+  const handleMetricError = (error: unknown) => {
+    if (error && typeof error === "object") {
+      const errorObj = error as Record<string, unknown>;
+      const message = String(errorObj.error ?? "");
+      if (message.includes("invalid_grant") || message.includes("401")) {
+        setConnectionState("expired");
+      }
+    }
   };
 
   if (isLoading) {
@@ -80,6 +110,28 @@ export function Accounting() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
+      {connectionState === "expired" && (
+        <Card className="border-destructive/50 bg-destructive/5">
+          <CardContent className="flex items-start justify-between gap-4 py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium text-foreground">QuickBooks connection expired.</p>
+                <p className="text-sm text-muted-foreground">Reconnect to resume syncing. Last successful sync 2h ago.</p>
+              </div>
+            </div>
+            <Button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="gap-2 flex-shrink-0"
+            >
+              {connecting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Reconnect QuickBooks
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Accounting</h1>
         {status?.connected && (
@@ -92,17 +144,41 @@ export function Accounting() {
               onToggle={toggle}
               onReset={reset}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDisconnect}
-              disabled={disconnectMutation.isPending}
-            >
-              Disconnect QuickBooks
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <EllipsisVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setShowDisconnectDialog(true)}>
+                  Disconnect QuickBooks
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>
+
+      <AlertDialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Disconnect QuickBooks?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Syncing stops immediately. Your imported history is retained.
+          </AlertDialogDescription>
+          <div className="flex justify-end gap-2">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnect}
+              disabled={disconnectMutation.isPending}
+              className="gap-2"
+            >
+              {disconnectMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Disconnect
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {!status?.connected ? (
         <Card className="shadow-sm">
@@ -137,7 +213,15 @@ export function Accounting() {
             renderItem={(id) => {
               const def = getMetricDef(id);
               if (!def) return null;
-              return <MetricCard def={def} data={data} range={range} />;
+              return (
+                <MetricCard
+                  def={def}
+                  data={data}
+                  range={range}
+                  connectionState={connectionState}
+                  onMetricError={handleMetricError}
+                />
+              );
             }}
           />
         </>

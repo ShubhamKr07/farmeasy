@@ -32,6 +32,8 @@ interface SeriesPoint { label: string; value: number }
 interface TierBMetricCardProps {
   def: MetricDef;
   range: MetricRange;
+  suppressConnectionError?: boolean;
+  onMetricError?: (error: unknown) => void;
 }
 
 /**
@@ -39,16 +41,25 @@ interface TierBMetricCardProps {
  * card, scoped by id+range) and renders per the metric's `render` type.
  * Header carries an (i) definition tooltip and a CSV export of the fetched data.
  */
-export function TierBMetricCard({ def, range }: TierBMetricCardProps) {
-  const { data, isLoading, isError } = useListMetrics({
+export function TierBMetricCard({ def, range, suppressConnectionError, onMetricError }: TierBMetricCardProps) {
+  const { data, isLoading, isError, error } = useListMetrics({
     tab: def.tab,
     keys: def.id,
     range,
   });
 
+  React.useEffect(() => {
+    if (isError && error) {
+      onMetricError?.(data?.[def.id]);
+    }
+  }, [isError, error, data, def.id, onMetricError]);
+
   const payload = data?.[def.id];
   const hasData = !isLoading && !isError && !(payload && typeof payload === "object" && "error" in payload);
   const canExport = hasData && isExportableRender(def.render) && Array.isArray(payload) && payload.length > 0;
+
+  const isConnectionError = payload && typeof payload === "object" && "error" in payload && String((payload as { error: unknown }).error).includes("invalid_grant");
+  const shouldSuppressError = suppressConnectionError && isConnectionError;
 
   return (
     <Card className="shadow-sm h-full">
@@ -81,6 +92,11 @@ export function TierBMetricCard({ def, range }: TierBMetricCardProps) {
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-[120px] w-full" />
+        ) : shouldSuppressError ? (
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-20" />
+            <Skeleton className="h-[100px] w-full" />
+          </div>
         ) : isError || (payload && typeof payload === "object" && "error" in payload) ? (
           <ErrorDetail payload={payload} />
         ) : (

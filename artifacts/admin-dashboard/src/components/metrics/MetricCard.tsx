@@ -8,6 +8,8 @@ interface MetricCardProps {
   def: MetricDef;
   data: MetricDataMap;
   range: MetricRange;
+  connectionState?: "ok" | "expired" | "error";
+  onMetricError?: (error: unknown) => void;
 }
 
 /**
@@ -18,12 +20,19 @@ interface MetricCardProps {
  * Tier-B metrics (source: "metrics" + a query template) render via
  * TierBMetricCard, which fetches /api/metrics.
  */
-export function MetricCard({ def, data, range }: MetricCardProps) {
+export function MetricCard({ def, data, range, connectionState, onMetricError }: MetricCardProps) {
   const isTierB = def.source === "metrics" && !!def.template && !!def.templateParams;
   const Renderer = useMemo(() => resolveRenderer(def), [def]);
 
   if (isTierB) {
-    return <TierBMetricCard def={def} range={range} />;
+    return (
+      <TierBMetricCard
+        def={def}
+        range={range}
+        suppressConnectionError={connectionState === "expired"}
+        onMetricError={onMetricError}
+      />
+    );
   }
 
   const props: RendererProps = { def, data };
