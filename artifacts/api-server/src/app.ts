@@ -189,9 +189,11 @@ app.use("/api", requireSignedIn, requireVerifiedEmail);
 //      already be rejected for, so it's safe to sit ahead of every other
 //      router in tiers 3-4.
 //   3. Relies entirely on app.ts's own `requireTenantContext` wrap in its
-//      mount call (alerts, inventory, shipments, badTrays, sensors, tasks,
-//      metrics, accounting, facilityLogs) -- these never self-gate, so
-//      nothing here may sit before an ungated/per-route-gated router.
+//      mount call (alerts, inventory, shipments, badTrays, sensors,
+//      sensor-readings [TEN-014 hotfix -- moved out of tier 1, see its own
+//      mount comment below], tasks, metrics, accounting, facilityLogs) --
+//      these never self-gate, so nothing here may sit before an
+//      ungated/per-route-gated router.
 //   4. Self-gates TENANT CONTEXT **+ A RESTRICTIVE ROLE** via an
 //      unconditional `router.use(requireTenantContext, requireRole(...))`
 //      inside the router file itself (invitations.ts [TEN-010 T5], members.ts
@@ -211,7 +213,6 @@ app.use("/api", requireSignedIn, requireVerifiedEmail);
 // Tier 1: ungated, or gated per-route only.
 app.use("/api", requireSignedIn, dashboardRouter);
 app.use("/api", requireSignedIn, layoutRouter);
-app.use("/api", requireSignedIn, sensorReadingsRouter);
 app.use("/api", requireSignedIn, cropsRouter); // MT-M2 batch 3: crops.ts self-gates GET/POST /crops via a per-route requireTenantContext arg (category 1 above, same as growthProfiles.ts/seedLots.ts) -- stays tier 1, no app.ts-level wrap needed
 app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, recommendRouter);
@@ -249,6 +250,14 @@ app.use("/api", requireSignedIn, requireTenantContext, inventoryRouter);
 app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
 app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
+// TEN-014 hotfix: sensor-readings was tier-1 (requireSignedIn only) with no
+// facility WHERE at all, so ANY authenticated user in ANY org could omit
+// sensorId and dump up to 1000 recent readings across every org/facility, or
+// pass another org's sensorId directly, and get it back -- a live
+// cross-tenant leak (every sensor carries a real, NOT NULL facility_id). Now
+// tier 3, mirroring alerts/inventory/shipments/badTrays/sensors/tasks above:
+// no self-gate in the router itself, relies entirely on this wrap.
+app.use("/api", requireSignedIn, requireTenantContext, sensorReadingsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
 app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
