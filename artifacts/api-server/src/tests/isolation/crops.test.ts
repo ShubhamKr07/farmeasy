@@ -125,31 +125,96 @@ describe("Crops org-scoped hybrid isolation (MT-M2 batch 3)", { skip: !dbUrl }, 
     strictEqual(res.status, 400);
   });
 
+  // Both deny tests below hit the same BYPASSRLS-canary gap as
+  // demo.test.ts's "RLS regression: UPDATE organizations..." test (see that
+  // test's header comment for the full writeup): withTenantScope only sets
+  // the app.org_id/app.facility_id GUCs, it does NOT change role, and the
+  // disposable-stack `db` connection is the `postgres` superuser (always
+  // BYPASSRLS, no migration in this history ever CREATEs farmsmart_app in a
+  // fresh CI DB) -- so a raw UPDATE/DELETE through withTenantScope would
+  // "succeed" (return the row) no matter what the RLS policy says, and a
+  // `deepStrictEqual(updated, [])` assertion against that connection is
+  // false-failing (worse, false-passing if ever inverted). Skip the LIVE
+  // functional deny when farmsmart_app isn't provisioned as a real
+  // non-BYPASSRLS role and fall back to the structural proof instead (the
+  // policy exists, covers the cmd, is scoped to app.org_id, and -- per this
+  // batch's role-agnostic design (00022's header) -- carries no
+  // current_user clause). When farmsmart_app IS provisioned, SET LOCAL ROLE
+  // to it inside the transaction and run the real functional check.
   test("RLS end-state: org A cannot UPDATE the system crop under the real farmsmart_app role", async () => {
-    const { withTenantScope, cropsTable } = await import("@workspace/db");
-    const { eq } = await import("drizzle-orm");
-    const updated = await withTenantScope({ organizationId: orgA.organizationId, facilityId: orgA.facilityId }, (tx) =>
-      tx.update(cropsTable).set({ name: "hacked" }).where(eq(cropsTable.id, systemCropId)).returning(),
+    const { db, cropsTable } = await import("@workspace/db");
+    const { eq, sql } = await import("drizzle-orm");
+
+    const roleCheck = await db.execute(
+      sql`SELECT rolbypassrls FROM pg_roles WHERE rolname = 'farmsmart_app'`,
     );
+    const farmsmartAppRow = (roleCheck.rows as { rolbypassrls: boolean }[])[0];
+    const hasEnforcingAppRole = farmsmartAppRow !== undefined && farmsmartAppRow.rolbypassrls === false;
+
+    if (!hasEnforcingAppRole) {
+      const policyCheck = await db.execute(sql`
+        SELECT coalesce(qual, with_check) AS predicate
+        FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'crops' AND cmd = 'UPDATE'
+      `);
+      const policy = (policyCheck.rows as { predicate: string | null }[])[0];
+      ok(policy, "crops must have an UPDATE policy (no non-BYPASSRLS farmsmart_app role in this DB to prove the live deny)");
+      ok(policy!.predicate?.toLowerCase().includes("app.org_id"), "the UPDATE policy must be scoped to the app.org_id GUC");
+      ok(!policy!.predicate?.toLowerCase().includes("current_user"), "the UPDATE policy must be role-agnostic (no current_user) per this batch's task-#5 compatibility requirement");
+      return;
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE farmsmart_app`);
+      await tx.execute(sql`SELECT set_config('app.org_id', ${orgA.organizationId.toString()}, true)`);
+      await tx.execute(sql`SELECT set_config('app.facility_id', ${orgA.facilityId.toString()}, true)`);
+      return tx.update(cropsTable).set({ name: "hacked" }).where(eq(cropsTable.id, systemCropId)).returning();
+    });
     deepStrictEqual(updated, [], "UPDATE against a system crop must affect 0 rows under RLS, not silently succeed");
 
-    const { db } = await import("@workspace/db");
     const [row] = await (getAdminDb() ?? db).select().from(cropsTable).where(eq(cropsTable.id, systemCropId));
     strictEqual(row!.name, "Isolation Test System Crop", "the system crop's name must be unchanged");
   });
 
   test("RLS end-state: org A cannot UPDATE or DELETE org B's own crop under the real farmsmart_app role", async () => {
-    const { withTenantScope, db, cropsTable } = await import("@workspace/db");
-    const { eq } = await import("drizzle-orm");
+    const { db, cropsTable } = await import("@workspace/db");
+    const { eq, sql } = await import("drizzle-orm");
 
-    const updated = await withTenantScope({ organizationId: orgA.organizationId, facilityId: orgA.facilityId }, (tx) =>
-      tx.update(cropsTable).set({ name: "hacked" }).where(eq(cropsTable.id, orgBOwnCropId)).returning(),
+    const roleCheck = await db.execute(
+      sql`SELECT rolbypassrls FROM pg_roles WHERE rolname = 'farmsmart_app'`,
     );
+    const farmsmartAppRow = (roleCheck.rows as { rolbypassrls: boolean }[])[0];
+    const hasEnforcingAppRole = farmsmartAppRow !== undefined && farmsmartAppRow.rolbypassrls === false;
+
+    if (!hasEnforcingAppRole) {
+      const policyCheck = await db.execute(sql`
+        SELECT cmd, coalesce(qual, with_check) AS predicate
+        FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'crops' AND cmd IN ('UPDATE', 'DELETE')
+      `);
+      const rows = policyCheck.rows as { cmd: string; predicate: string | null }[];
+      strictEqual(rows.length, 2, "crops must have both an UPDATE and a DELETE policy (no non-BYPASSRLS farmsmart_app role in this DB to prove the live deny)");
+      for (const r of rows) {
+        ok(r.predicate?.toLowerCase().includes("app.org_id"), `the ${r.cmd} policy must be scoped to the app.org_id GUC`);
+        ok(!r.predicate?.toLowerCase().includes("current_user"), `the ${r.cmd} policy must be role-agnostic (no current_user)`);
+      }
+      return;
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE farmsmart_app`);
+      await tx.execute(sql`SELECT set_config('app.org_id', ${orgA.organizationId.toString()}, true)`);
+      await tx.execute(sql`SELECT set_config('app.facility_id', ${orgA.facilityId.toString()}, true)`);
+      return tx.update(cropsTable).set({ name: "hacked" }).where(eq(cropsTable.id, orgBOwnCropId)).returning();
+    });
     deepStrictEqual(updated, [], "UPDATE against org B's crop must affect 0 rows for org A under RLS");
 
-    const deleted = await withTenantScope({ organizationId: orgA.organizationId, facilityId: orgA.facilityId }, (tx) =>
-      tx.delete(cropsTable).where(eq(cropsTable.id, orgBOwnCropId)).returning(),
-    );
+    const deleted = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE farmsmart_app`);
+      await tx.execute(sql`SELECT set_config('app.org_id', ${orgA.organizationId.toString()}, true)`);
+      await tx.execute(sql`SELECT set_config('app.facility_id', ${orgA.facilityId.toString()}, true)`);
+      return tx.delete(cropsTable).where(eq(cropsTable.id, orgBOwnCropId)).returning();
+    });
     deepStrictEqual(deleted, [], "DELETE against org B's crop must affect 0 rows for org A under RLS");
 
     const [row] = await (getAdminDb() ?? db).select().from(cropsTable).where(eq(cropsTable.id, orgBOwnCropId));

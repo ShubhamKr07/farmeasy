@@ -33,12 +33,19 @@ SELECT is(
 
 -- SELECT policy: role-agnostic (no current_user), admits system crops
 -- (organization_id IS NULL) OR the caller's own org.
+--
+-- Match ROBUSTLY against Postgres's normalized pg_policies.qual, not a
+-- brittle exact/verbatim-source string: ruleutils.c reformats the stored
+-- expression (adds explicit ::text/::integer casts, upper-cases the IS NULL
+-- keyword, etc.) when it deparses the policy for pg_policies, so the
+-- as-written-in-the-migration lowercase form never appears verbatim. Use
+-- ILIKE (case-insensitive) for the keyword-bearing substrings instead.
 SELECT is(
   (SELECT count(*)::integer FROM pg_policies WHERE schemaname = 'public' AND tablename = 'crops'
      AND cmd = 'SELECT'
-     AND coalesce(qual, with_check) LIKE '%app.org_id%'
-     AND coalesce(qual, with_check) LIKE '%organization_id is null%'
-     AND coalesce(qual, with_check) NOT LIKE '%current_user%'),
+     AND coalesce(qual, with_check) ILIKE '%app.org_id%'
+     AND coalesce(qual, with_check) ILIKE '%organization_id IS NULL%'
+     AND coalesce(qual, with_check) NOT ILIKE '%current_user%'),
   1, 'crops has exactly one role-agnostic SELECT policy admitting system (organization_id IS NULL) or own-org rows'
 );
 
@@ -86,9 +93,17 @@ SELECT is(
 
 -- Every policy predicate uses the NULLIF-guarded GUC cast idiom (00013),
 -- not a bare current_setting(...)::int cast.
+--
+-- ILIKE + '%'-bounded fragments, not an exact-cased/exact-spaced string:
+-- ruleutils.c deparses NULLIF as the upper-cased SQL construct `NULLIF(...)`
+-- (not the lowercase-as-written call syntax) and inserts its own
+-- ::text/::integer casts around the arguments, so the source migration's
+-- literal `nullif(current_setting('app.org_id'` substring never matches the
+-- normalized form verbatim even though the idiom is present.
 SELECT is(
   (SELECT count(*)::integer FROM pg_policies WHERE schemaname = 'public' AND tablename = 'crops'
-     AND coalesce(qual, with_check) LIKE '%nullif(current_setting(''app.org_id''%'),
+     AND coalesce(qual, with_check) ILIKE '%nullif%'
+     AND coalesce(qual, with_check) ILIKE '%current_setting(%''app.org_id''%'),
   4, 'all 4 crops policies use the nullif(current_setting(...), '''')::int GUC-cast idiom'
 );
 
