@@ -200,7 +200,7 @@ auditConfig:
     - GHSA-mh99-v99m-4gvg
 
 allowBuilds:
-  '@clerk/shared': true
+  '@clerk/shared': set this to true or false
   browser-tabs-lock: true
   core-js: true
   esbuild: true
