@@ -64,7 +64,7 @@ async def _process_recommend(req: RecommendRequest) -> RecommendResponse:
         hits = await search_cache(question_embedding, limit=5)
         used_live_search = True
 
-    farm_context = await get_farm_context(req.question)
+    farm_context = await get_farm_context(req.org_id, req.facility_id, req.question)
     farm_context_text = format_farm_context(farm_context) if farm_context else None
     grounding_text = "\n\n".join(t for t in (farm_context_text, req.ops_context) if t) or None
 
@@ -117,6 +117,15 @@ async def recommend(req: RecommendRequest) -> RecommendResponse:
     synthesis fails or there's nothing to synthesize from. Every Q&A is
     logged to recommender_queries for audit / a future "recent questions"
     UI.
+
+    MT-M2 task #5: this service runs as the dedicated, non-BYPASSRLS
+    farmsmart_recommender role. req.org_id/req.facility_id (the querying
+    user's own tenant, resolved + re-validated by api-server's
+    requireTenantContext, never trusted from the client beyond that) are
+    passed into get_farm_context, which sets the app.org_id/app.facility_id
+    GUCs (app/db.py's tenant_scope, the withTenantScope equivalent) before
+    its reads — so RLS scopes the grounding to the querying tenant's own
+    data + global/system reference only. Never cross-tenant.
 
     Bounding (Task 9 / Step 7): a process-wide semaphore caps concurrent
     processing. If a permit isn't acquired within the queue timeout the
