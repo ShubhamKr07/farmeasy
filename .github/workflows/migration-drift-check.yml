@@ -16,6 +16,16 @@
 # It is read-only against the database and never writes, so a cron-triggered
 # failure is safe to surface via the standard GitHub failed-workflow
 # notification channel.
+#
+# ALSO runs a daily OTP/deploy-gate probe (scripts/ci/test-supabase-signup.mjs)
+# against staging so auth-email/OTP-template drift (a broken Resend template,
+# an expired Mailosaur domain, a GoTrue config regression) is caught once a
+# day instead of only at the next deploy. This reuses the SAME script and the
+# SAME shared OTP extractor (scripts/ci/lib/mailosaur-otp.mjs) as
+# deploy-staging.yml's "Run hosted Auth signup integration test (staging
+# gate)" step — never a re-implementation — and is soft-gated on
+# STAGING_MAILBOX_API_TOKEN being provisioned, the identical pattern used
+# there, so this step is a no-op (not a failure) until that secret exists.
 
 name: "Migration drift check"
 
@@ -44,6 +54,12 @@ jobs:
     # STAGING_DATABASE_CA_CERT) are consumed under the `staging` environment,
     # so declare it here to guarantee they resolve exactly as the deploy does.
     environment: staging
+    env:
+      # `secrets` isn't a valid context inside a step's `if:` (actionlint:
+      # "context 'secrets' is not allowed here"). Thread presence through a
+      # job-level env var instead, checked via the (allowed) `env` context —
+      # same pattern deploy-staging.yml uses for the identical soft-gate.
+      HAS_MAILBOX_TOKEN: ${{ secrets.STAGING_MAILBOX_API_TOKEN != '' }}
     steps:
       - name: Checkout (full history so git ls-files lists every tracked migration)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -52,7 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -73,3 +89,29 @@ jobs:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL_DIRECT }}
           DATABASE_CA_CERT: ${{ secrets.STAGING_DATABASE_CA_CERT }}
         run: node scripts/ci/check-migration-drift.mjs
+
+      # OTP/deploy-gate probe: reuses the SAME hosted-Auth signup script
+      # deploy-staging.yml gates promotion on (scripts/ci/test-supabase-
+      # signup.mjs), which imports pollInboxForOtp from the shared
+      # scripts/ci/lib/mailosaur-otp.mjs extractor — the single source of
+      # truth for Mailosaur OTP retrieval, never duplicated here. Running it
+      # daily (not only at deploy time) catches auth-email/OTP-template drift
+      # — a broken Resend template, an expired/misconfigured Mailosaur test
+      # domain, a GoTrue auth-email config regression — even on days with no
+      # deploy. Soft-gated on STAGING_MAILBOX_API_TOKEN existing, identical to
+      # deploy-staging.yml's gate: a no-op until that secret is provisioned,
+      # never a silent skip once it is (a run with the token present that
+      # fails to reach this step is not possible — it is unconditional once
+      # gated in).
+      - name: Run OTP/deploy-gate probe (auth-email drift)
+        if: ${{ env.HAS_MAILBOX_TOKEN == 'true' }}
+        env:
+          STAGING_SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_ANON_KEY: ${{ vars.STAGING_SUPABASE_ANON_KEY }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          STAGING_TEST_EMAIL_DOMAIN: ${{ vars.STAGING_TEST_EMAIL_DOMAIN }}
+          STAGING_MAILBOX_API_TOKEN: ${{ secrets.STAGING_MAILBOX_API_TOKEN }}
+          STAGING_TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/test-supabase-signup.mjs

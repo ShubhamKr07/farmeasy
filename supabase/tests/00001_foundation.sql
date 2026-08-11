@@ -113,11 +113,18 @@ SELECT is(
 -- adds a current_user- and app.org_id-scoped UPDATE policy on organizations
 -- so TEN-013's demo-fork provision/graduate endpoints can flip
 -- organizations.is_demo under the real non-BYPASSRLS role (organizations
--- had backend SELECT/INSERT/DELETE but no UPDATE).
+-- had backend SELECT/INSERT/DELETE but no UPDATE). 00020 (MT-M2 public-RLS
+-- remediation, Batch 1) enables RLS on public.facilities and adds 3
+-- current_user-scoped backend policies (SELECT/INSERT/DELETE, no UPDATE --
+-- nothing updates facilities today) -- facilities shipped with no row level
+-- security at all through 00019; the current_user model (not app.org_id GUC)
+-- is required because facilities is read in bootstrap contexts before any
+-- tenant GUC is set (GET /facilities, wizard org-resolution, demo
+-- getOwnerOrg, the unverified-purge sweep).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  19,
-  'supabase_migrations.schema_migrations has exactly 19 rows (Supabase migrations 00001-00019)'
+  20,
+  'supabase_migrations.schema_migrations has exactly 20 rows (Supabase migrations 00001-00020)'
 );
 
 SELECT * FROM finish();

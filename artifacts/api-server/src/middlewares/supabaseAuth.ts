@@ -76,8 +76,7 @@ export async function supabaseAuthMiddleware(
   } catch {
     // Invalid/expired token — leave req.supabaseUser unset, requireSignedIn
     // (app.ts) is what actually rejects the request; this middleware only
-    // populates identity, mirroring clerkMiddleware()'s own non-throwing
-    // "attach if present, let the route decide" behavior.
+    // populates identity — "attach if present, let the route decide".
   }
   next();
 }

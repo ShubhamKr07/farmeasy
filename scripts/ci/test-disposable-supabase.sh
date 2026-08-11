@@ -20,11 +20,42 @@
 # pipeline result (pgTAP 8/50 PASS, api-server 246/246). Do not add this flag
 # to the command CI runs; it masks a real health-check failure if one ever
 # occurs for db/auth/kong/rest.
+#
+# ISOLATION (per-worktree/agent): supabase/config.toml's `project_id` is the
+# prefix the Supabase CLI uses for every Docker container/network/volume it
+# creates (supabase_db_<project_id>, supabase_kong_<project_id>, ...). The
+# committed config.toml hard-codes a single project_id, so copying it verbatim
+# means every worktree/agent running this script on the same machine names the
+# SAME containers -- two concurrent runs fight over one Postgres/Kong/etc.
+# stack (hit repeatedly during TEN-013 when multiple agents ran this in
+# parallel). Fix below: derive a short id from this worktree's absolute path
+# ($ROOT) and (a) fold it into WORKDIR so concurrent runs never share an
+# on-disk workdir, and (b) rewrite project_id in the per-run copy of
+# config.toml so concurrent runs never share Docker resources either. A
+# sha256 prefix (not the raw path) keeps the id short, deterministic, and
+# restricted to lowercase hex -- the only characters guaranteed valid in a
+# Docker Compose project name. This does NOT change the migration-replay /
+# pgTAP / api-server steps below, and CI already gets one unique $RUNNER_TEMP
+# per job -- this is purely additive isolation for concurrent LOCAL runs.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 
-WORKDIR="${RUNNER_TEMP:-/tmp}/farmsmart-supabase"
+# Unique per-worktree id -- the same worktree reuses the same id run-to-run
+# (harmless: a stale container from a prior run of the SAME worktree is
+# stopped/recreated exactly like a fresh one), different worktrees never
+# collide. See the ISOLATION note above. sha256sum (GNU coreutils) is what
+# this repo's CI already uses (ci.yml/deploy-*.yml) but isn't preinstalled on
+# macOS; shasum -a 256 is the macOS/BSD equivalent but isn't guaranteed on a
+# minimal Linux image. Prefer sha256sum (the CI runner's actual tool), fall
+# back to shasum for local macOS dev.
+if command -v sha256sum >/dev/null 2>&1; then
+  WORKTREE_ID="$(printf '%s' "$ROOT" | sha256sum | cut -c1-12)"
+else
+  WORKTREE_ID="$(printf '%s' "$ROOT" | shasum -a 256 | cut -c1-12)"
+fi
+
+WORKDIR="${RUNNER_TEMP:-/tmp}/farmsmart-supabase-${WORKTREE_ID}"
 
 TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
@@ -35,7 +66,11 @@ trap cleanup EXIT
 
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/supabase/migrations"
-cp "$ROOT/supabase/config.toml" "$WORKDIR/supabase/config.toml"
+# Copy config.toml but rewrite project_id to the per-worktree unique id above
+# (see ISOLATION note) instead of a plain `cp`, so this disposable stack's
+# Docker resources never collide with another worktree's concurrent run.
+sed -e "s/^project_id = .*/project_id = \"farmsmart-disposable-${WORKTREE_ID}\"/" \
+  "$ROOT/supabase/config.toml" > "$WORKDIR/supabase/config.toml"
 
 # 1. Start a disposable local Supabase stack in the isolated workdir.
 pnpm exec supabase --workdir "$WORKDIR" start
@@ -55,10 +90,34 @@ export SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY
 DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @workspace/db run db:migrate
 
 # 3. Replay the Supabase-managed migrations (00001-00003) into the same DB.
+# Deliberately NO --workdir here: `db push` needs to find the REAL,
+# hand-written migration files, which live at $ROOT/supabase/migrations, not
+# in $WORKDIR/supabase/migrations (which stays empty — only the Drizzle
+# history is Drizzle-generated; the Supabase migrations are never copied into
+# $WORKDIR). It resolves the project directory by walking up from the CURRENT
+# directory (still $ROOT, never `cd`ed into $WORKDIR), which correctly finds
+# $ROOT/supabase/migrations. (Verified locally: adding --workdir "$WORKDIR"
+# here made the CLI resolve $WORKDIR/supabase/migrations instead — empty — so
+# it silently reported "Local database is up to date" having applied ZERO
+# migrations, a real regression caught only by running the full pipeline
+# end-to-end.) `db push --db-url` needs no Docker networking (a direct
+# connection), so it never hits the project_id/network-name collision this
+# script isolates against — only `test db` below does.
 pnpm exec supabase db push --db-url "$TEST_DATABASE_URL" --include-all
 
 # 4. Run pgTAP assertions against the fully-migrated disposable DB.
-pnpm exec supabase test db --db-url "$TEST_DATABASE_URL" "$ROOT/supabase/tests"
+# --workdir IS required here: `test db` spins up a Docker helper container
+# attached to the project's Docker network to run pg_prove, so it must
+# resolve the SAME (rewritten, per-worktree) project_id `start` used above —
+# without it, the CLI falls back to cwd resolution of the ORIGINAL,
+# un-rewritten $ROOT/supabase/config.toml project_id, reintroducing the exact
+# Docker network-name collision this script isolates against (verified
+# locally: omitting --workdir here made `test db` fail with "network
+# supabase_network_supabase-db-migration not found" once project_id started
+# diverging between $ROOT/supabase/config.toml and the $WORKDIR copy). The
+# pgTAP test SQL directory itself is passed as an explicit positional arg
+# ($ROOT/supabase/tests, the real one), independent of --workdir.
+pnpm exec supabase --workdir "$WORKDIR" test db --db-url "$TEST_DATABASE_URL" "$ROOT/supabase/tests"
 
 # 5. Run the api-server test suite against the disposable DB.
 # ACCOUNTING_ENCRYPTION_KEY (artifacts/api-server/src/lib/accounting/crypto.ts)
