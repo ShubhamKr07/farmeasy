@@ -29,6 +29,7 @@ export function MetricCard({ def, data, range, connectionState, onMetricError }:
       <TierBMetricCard
         def={def}
         range={range}
+        size={def.size}
         suppressConnectionError={connectionState === "expired"}
         onMetricError={onMetricError}
       />

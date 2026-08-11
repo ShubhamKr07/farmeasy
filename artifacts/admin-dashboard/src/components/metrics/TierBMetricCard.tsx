@@ -32,6 +32,13 @@ interface SeriesPoint { label: string; value: number }
 interface TierBMetricCardProps {
   def: MetricDef;
   range: MetricRange;
+  /**
+   * Row-height class token from the overview grid height contract
+   * (OVW-001/002). Drives how much vertical room the card body takes: a
+   * `tall` card stretches its chart to fill the row, a `compact` card keeps
+   * its KPI body tight. Defaults to 'compact'.
+   */
+  size?: "compact" | "tall";
   suppressConnectionError?: boolean;
   onMetricError?: (error: unknown) => void;
 }
@@ -40,8 +47,14 @@ interface TierBMetricCardProps {
  * Tier-B metric card: fetches its value from /api/metrics (one React Query per
  * card, scoped by id+range) and renders per the metric's `render` type.
  * Header carries an (i) definition tooltip and a CSV export of the fetched data.
+ *
+ * Height contract: the Card root uses `h-full` so it stretches to whatever
+ * row height the parent grid assigned (DraggableMetricGrid sets
+ * grid-auto-rows + items-stretch). The body uses flex column layout so the
+ * chart region flexes to fill leftover height rather than a fixed pixel
+ * height — no `h-[…px]` here (banned by scripts/ci/check-metric-heights.mjs).
  */
-export function TierBMetricCard({ def, range, suppressConnectionError, onMetricError }: TierBMetricCardProps) {
+export function TierBMetricCard({ def, range, size = "compact", suppressConnectionError, onMetricError }: TierBMetricCardProps) {
   const { data, isLoading, isError, error } = useListMetrics({
     tab: def.tab,
     keys: def.id,
@@ -62,8 +75,8 @@ export function TierBMetricCard({ def, range, suppressConnectionError, onMetricE
   const shouldSuppressError = suppressConnectionError && isConnectionError;
 
   return (
-    <Card className="shadow-sm h-full">
-      <CardHeader className="pb-2 space-y-0 flex flex-row items-center justify-between">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="pb-2 space-y-0 flex flex-row items-center justify-between shrink-0">
         <div className="flex items-center gap-1.5">
           <CardTitle className="text-sm font-medium text-muted-foreground">
             {def.label}{def.unit && def.unit !== "count" ? ` (${def.unit})` : ""}
@@ -89,18 +102,18 @@ export function TierBMetricCard({ def, range, suppressConnectionError, onMetricE
           </Button>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         {isLoading ? (
-          <Skeleton className="h-[120px] w-full" />
+          <Skeleton className="flex-1 min-h-24 w-full" />
         ) : shouldSuppressError ? (
-          <div className="space-y-2">
+          <div className="flex-1 flex flex-col gap-2">
             <Skeleton className="h-6 w-20" />
-            <Skeleton className="h-[100px] w-full" />
+            <Skeleton className="flex-1 min-h-20 w-full" />
           </div>
         ) : isError || (payload && typeof payload === "object" && "error" in payload) ? (
           <ErrorDetail payload={payload} />
         ) : (
-          <Body def={def} payload={payload} />
+          <Body def={def} size={size} payload={payload} />
         )}
       </CardContent>
     </Card>
@@ -113,7 +126,7 @@ function ErrorDetail({ payload }: { payload: unknown }) {
       ? String((payload as { error: unknown }).error)
       : "";
   return (
-    <Empty className="h-[120px] text-xs">
+    <Empty className="flex-1 min-h-24 text-xs">
       <span>Unable to load metric</span>
       {message && (
         <span className="mt-1 block text-muted-foreground/70 break-words">{message}</span>
@@ -122,55 +135,60 @@ function ErrorDetail({ payload }: { payload: unknown }) {
   );
 }
 
-function Body({ def, payload }: { def: MetricDef; payload: unknown }) {
+function Body({ def, size = "compact", payload }: { def: MetricDef; size?: "compact" | "tall"; payload: unknown }) {
   switch (def.render) {
     case "kpi":
     case "stat":
     case "gauge": {
       const v = (payload as { value?: number } | undefined)?.value ?? 0;
-      const display = def.unit === "USD" ? `$${formatNumber(v)}` : def.unit === "%" ? `${formatNumber(v)}%` : def.unit === "USD/kg" ? `$${formatNumber(v)}/kg` : formatNumber(v);
+      const display = def.unit === "USD" ? `${formatNumber(v)}` : def.unit === "%" ? `${formatNumber(v)}%` : def.unit === "USD/kg" ? `${formatNumber(v)}/kg` : formatNumber(v);
       return <div className="text-2xl font-bold">{display}</div>;
     }
     case "area":
     case "bar":
     case "line": {
       const rows = (payload as SeriesPoint[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No data</Empty>;
-      return <SeriesChart def={def} rows={rows} />;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No data</Empty>;
+      return <SeriesChart def={def} rows={rows} size={size} />;
     }
     case "donut": {
       const rows = (payload as SeriesPoint[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No data</Empty>;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No data</Empty>;
       return <Donut rows={rows} />;
     }
     case "hbar": {
       const rows = (payload as SeriesPoint[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No data</Empty>;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No data</Empty>;
       return <HBar rows={rows} />;
     }
     case "table": {
       const rows = (payload as Record<string, unknown>[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No rows</Empty>;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No rows</Empty>;
       return <Table rows={rows} />;
     }
     case "scatter": {
       const rows = (payload as Record<string, unknown>[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No data</Empty>;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No data</Empty>;
       return <ScatterPlot rows={rows} />;
     }
     case "heatmap": {
       const rows = (payload as SeriesPoint[] | undefined) ?? [];
-      if (rows.length === 0) return <Empty className="h-[180px]">No data</Empty>;
+      if (rows.length === 0) return <Empty className="flex-1 min-h-36">No data</Empty>;
       return <Heatmap rows={rows} />;
     }
     default:
-      return <Empty className="h-[120px]">Unsupported render type</Empty>;
+      return <Empty className="flex-1 min-h-24">Unsupported render type</Empty>;
   }
 }
 
-function SeriesChart({ def, rows }: { def: MetricDef; rows: SeriesPoint[] }) {
+function SeriesChart({ def, rows, size = "compact" }: { def: MetricDef; rows: SeriesPoint[]; size?: "compact" | "tall" }) {
+  // Tall cards (charts that fill a tall row) flex to fill leftover card
+  // height; compact cards keep a short, fixed-aspect chart. Both avoid
+  // `h-[…px]` (banned by scripts/ci/check-metric-heights.mjs) — compact uses
+  // min-h utilities that read as semantic floors, not pixel locks.
+  const chartClass = size === "tall" ? "flex-1 min-h-48" : "min-h-40";
   return (
-    <div className="h-[200px]">
+    <div className={chartClass}>
       <ResponsiveContainer width="100%" height="100%">
         {def.render === "bar" ? (
           <BarChart data={rows}>
@@ -204,7 +222,7 @@ function SeriesChart({ def, rows }: { def: MetricDef; rows: SeriesPoint[] }) {
 
 function Donut({ rows }: { rows: SeriesPoint[] }) {
   return (
-    <div className="h-[200px]">
+    <div className="flex-1 min-h-48">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={rows} dataKey="value" nameKey="label" innerRadius={55} outerRadius={85} paddingAngle={2}>
@@ -220,7 +238,7 @@ function Donut({ rows }: { rows: SeriesPoint[] }) {
 
 function HBar({ rows }: { rows: SeriesPoint[] }) {
   return (
-    <div className="h-[200px]">
+    <div className="flex-1 min-h-48">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart layout="vertical" data={rows}>
           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
@@ -241,7 +259,7 @@ function ScatterPlot({ rows }: { rows: Record<string, unknown>[] }) {
     .map((r) => ({ x: Number(r[xKey]), y: Number(r[yKey]) }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   return (
-    <div className="h-[200px]">
+    <div className="flex-1 min-h-48">
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -264,7 +282,7 @@ function Heatmap({ rows }: { rows: SeriesPoint[] }) {
     return "hsl(var(--muted))";
   };
   return (
-    <div className="grid grid-cols-4 gap-2 max-h-[200px] overflow-y-auto">
+    <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
       {rows.map((r) => (
         <div
           key={r.label}
@@ -283,7 +301,7 @@ function Heatmap({ rows }: { rows: SeriesPoint[] }) {
 function Table({ rows }: { rows: Record<string, unknown>[] }) {
   const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
   return (
-    <div className="overflow-x-auto rounded-md border max-h-[240px] overflow-y-auto">
+    <div className="overflow-x-auto rounded-md border max-h-60 overflow-y-auto">
       <table className="w-full text-sm">
         <thead className="bg-muted/50 text-muted-foreground sticky top-0">
           <tr>{cols.map((c) => <th key={c} className="p-2 text-left">{c}</th>)}</tr>
