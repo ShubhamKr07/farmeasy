@@ -32,6 +32,16 @@ const SCOPED_TABLES = [
   "organizationMembersTable",
   "invitationsTable",
   "facilitiesTable",
+  "roomsTable",
+  "channelsTable",
+  "racksTable",
+  "traysTable",
+  "sensorReadingsTable",
+  "badTrayEntriesTable",
+  "manualChecksTable",
+  "stockMovementsTable",
+  "cycleSeedLotsTable",
+  "userSettingsTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
@@ -230,6 +240,29 @@ const BASELINE_VIOLATIONS = new Set([
   // covers both matches:
   "artifacts/api-server/src/routes/wizard.ts::const [facility] = await db",
   "artifacts/api-server/src/lib/purgeUnverified.ts::const [facilityCount] = await db",
+  // --- (I) MT-M2 batch 2: the 10 batch-2 tables (rooms/channels/racks/trays/
+  //         sensor_readings/bad_tray_entries/manual_checks/stock_movements/
+  //         cycle_seed_lots/user_settings) are now SCOPED_TABLES entries (their
+  //         RLS is a current_user backend backstop, same as facilities' group
+  //         (H) -- the static guard is the row-level safety net). Only 2 files
+  //         actually surface here: layout.ts, dashboard.ts, cycles.ts, and
+  //         badTrays.ts all touch several of these 10 tables directly with raw
+  //         `db`, but every one of those four files ALSO calls withTenantScope
+  //         for a different (already-scoped) table elsewhere in the same file,
+  //         so the file-level withTenantScope skip above exempts them entirely
+  //         (documented precedent: group (B)'s note on growthProfiles.ts). Only
+  //         sensor-readings.ts and userSettings.ts contain zero withTenantScope
+  //         calls anywhere in the file, so their raw `db` reads are the only
+  //         ones this scanner actually sees. Both are PERMANENT, not deferred
+  //         debt: sensor-readings.ts's GET has no tenant/facility WHERE at all
+  //         today (pre-existing app-layer behavior, out of this batch's scope
+  //         per Option A -- RLS-only, no live-path/behavior change); user
+  //         settings are inherently per-user (scoped by its own userId WHERE),
+  //         not per-facility, so there is no tenant context to wrap in
+  //         withTenantScope. A NEW un-scoped read of any of the 10 is NOT
+  //         baselined and will fail this gate.
+  "artifacts/api-server/src/routes/sensor-readings.ts::const rows = await db",
+  "artifacts/api-server/src/routes/userSettings.ts::const rows = await db",
 ]);
 
 const newViolations = [];
