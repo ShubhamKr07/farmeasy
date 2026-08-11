@@ -248,6 +248,17 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
     strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
   });
 
+  test("TEN-014: GET /api/sensor-readings with no X-Facility-Id 400s through the real app (hotfix regression -- previously tier-1/ungated, so this returned 200 with a global cross-tenant dump)", async () => {
+    const user = await createRealTestUser();
+    createdUserIds.push(user.userId);
+
+    const res = await request(app)
+      .get("/api/sensor-readings")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    strictEqual(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+  });
+
   test("signed-in user with NO X-Facility-Id hitting media.ts's route in the catch-all router (routes/index.ts) is NOT intercepted by an earlier tenant gate -- media.ts's own (gate-less) handler is reached", async () => {
     const user = await createRealTestUser();
     createdUserIds.push(user.userId);

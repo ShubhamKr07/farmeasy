@@ -32,7 +32,7 @@ let combinedRouter: any;
 const FIXTURE_TABLES =
   "organizations, facilities, rooms, users, organization_members, " +
   "cycles, inventory_items, alerts, tasks, shipments, " +
-  "facility_logs, sensors, growth_profiles, seed_lots, " +
+  "facility_logs, sensors, sensor_readings, growth_profiles, seed_lots, " +
   "manual_checks, bad_tray_entries";
 
 describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
@@ -45,6 +45,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   let seededGrowthProfileId: number;
   let seededCycleId: number;
   let seededSensorId: number;
+  let seededSensorReadingId: number;
   let seededSeedLotQrCode: string;
   // TEN-008: org A's second facility -- proves facility-level isolation
   // WITHIN the same organization/user, one level deeper than this suite's
@@ -71,6 +72,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const cyclesRouter = (await import("../../routes/cycles")).default;
     const facilityLogsRouter = (await import("../../routes/facilityLogs")).default;
     const sensorsRouter = (await import("../../routes/sensors")).default;
+    const sensorReadingsRouter = (await import("../../routes/sensor-readings")).default;
     const seedLotsRouter = (await import("../../routes/seedLots")).default;
     const accountingRouter = (await import("../../routes/accounting")).accountingRouter;
     // TEN-008: GET /facility-readiness (Step 2's new tests) isn't mounted by
@@ -88,6 +90,7 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     combinedRouter.use(cyclesRouter);
     combinedRouter.use(facilityLogsRouter);
     combinedRouter.use(sensorsRouter);
+    combinedRouter.use(sensorReadingsRouter);
     combinedRouter.use(seedLotsRouter);
     combinedRouter.use(accountingRouter);
     combinedRouter.use(facilityReadinessRouter);
@@ -190,6 +193,15 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     });
     strictEqual(sensorRes.status, 201, "sensor creation for org A must succeed");
     seededSensorId = sensorRes.body.id;
+
+    // TEN-014: a reading on org A's own sensor, used to prove GET
+    // /sensor-readings never leaks it to org B (nor org B resolving org A's
+    // sensorId directly) under the real non-BYPASSRLS role.
+    const sensorReadingRes = await request(orgA.app)
+      .post("/api/sensor-readings")
+      .send({ sensorId: seededSensorId, metric: "temp", value: 21.5 });
+    strictEqual(sensorReadingRes.status, 201, "sensor reading creation for org A must succeed");
+    seededSensorReadingId = sensorReadingRes.body.id;
 
     // seed_lots has no generic create-via-HTTP route in this milestone (only
     // GET /seed-lots/lookup) -- seeded directly, matching the growth-profile/
@@ -343,6 +355,36 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
     const res = await request(orgB.app).get("/api/sensors");
     strictEqual(res.status, 200);
     ok(!res.body.some((s: { id: number }) => s.id === seededSensorId), "org B's sensor list must not contain org A's sensor");
+  });
+
+  // TEN-014 hotfix: GET /sensor-readings previously had no facility/org WHERE
+  // at all -- any authenticated user, in any org, could omit sensorId and get
+  // a global dump of readings across every org/facility, or pass another
+  // org's sensorId directly and get it back. These three tests prove the
+  // fix's end-state under the real non-BYPASSRLS `farmsmart_app` role (the
+  // whole suite runs against it -- see testDatabase.ts).
+  test("TEN-014: GET /sensor-readings with no sensorId: org B never sees org A's reading", async () => {
+    const res = await request(orgB.app).get("/api/sensor-readings");
+    strictEqual(res.status, 200);
+    ok(
+      !res.body.some((r: { id: number }) => r.id === seededSensorReadingId),
+      "org B's reading list must not contain org A's reading",
+    );
+  });
+
+  test("TEN-014: GET /sensor-readings?sensorId=<org A's sensor>: org B gets an empty list, never org A's reading", async () => {
+    const res = await request(orgB.app).get("/api/sensor-readings").query({ sensorId: seededSensorId });
+    strictEqual(res.status, 200);
+    strictEqual(res.body.length, 0, "requesting org A's sensorId directly must resolve nothing for org B");
+  });
+
+  test("TEN-014: GET /sensor-readings: org A itself still sees its own reading (the facility filter isn't over-broad)", async () => {
+    const res = await request(orgA.app).get("/api/sensor-readings");
+    strictEqual(res.status, 200);
+    ok(
+      res.body.some((r: { id: number }) => r.id === seededSensorReadingId),
+      "org A's own reading list must contain its own reading",
+    );
   });
 
   test("GET /seed-lots/lookup: org B never resolves org A's seed lot by qr code", async () => {
