@@ -46,6 +46,11 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   let seededCycleId: number;
   let seededSensorId: number;
   let seededSensorReadingId: number;
+  // TEN-014 (write side): org B's own sensor -- used to prove the
+  // ownership check on POST /sensor-readings rejects a foreign sensorId
+  // without being over-broad (org B posting against ITS OWN sensor must
+  // still work).
+  let seededSensorIdB: number;
   let seededSeedLotQrCode: string;
   // TEN-008: org A's second facility -- proves facility-level isolation
   // WITHIN the same organization/user, one level deeper than this suite's
@@ -202,6 +207,28 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
       .send({ sensorId: seededSensorId, metric: "temp", value: 21.5 });
     strictEqual(sensorReadingRes.status, 201, "sensor reading creation for org A must succeed");
     seededSensorReadingId = sensorReadingRes.body.id;
+
+    // TEN-014 (write side): org B's own sensor, seeded the same way as org
+    // A's above -- needed so the POST /sensor-readings ownership-check
+    // tests can prove org B posting against its OWN sensor still works
+    // (not over-broad), not just that a foreign sensorId is rejected.
+    const [orgBRoom] = await db
+      .select()
+      .from(roomsTable)
+      .where(eq(roomsTable.facilityId, orgB.facilityId))
+      .limit(1);
+    const [channelB] = await (getAdminDb() ?? db)
+      .insert(channelsTable)
+      .values({ roomId: orgBRoom!.id, label: "Isolation Test Channel B", positionIndex: 0 })
+      .returning();
+    const sensorResB = await request(orgB.app).post("/api/sensors").send({
+      channelId: channelB.id,
+      type: "temp",
+      label: "Isolation Test Sensor B",
+      unit: "C",
+    });
+    strictEqual(sensorResB.status, 201, "sensor creation for org B must succeed");
+    seededSensorIdB = sensorResB.body.id;
 
     // seed_lots has no generic create-via-HTTP route in this milestone (only
     // GET /seed-lots/lookup) -- seeded directly, matching the growth-profile/
@@ -385,6 +412,45 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
       res.body.some((r: { id: number }) => r.id === seededSensorReadingId),
       "org A's own reading list must contain its own reading",
     );
+  });
+
+  // TEN-014 hotfix (write side): POST /sensor-readings previously inserted a
+  // reading against a caller-supplied sensorId with NO ownership check, then
+  // updated sensors.lastValue/lastReadAt for that id in the same tx -- any
+  // authenticated member of ANY org could forge a reading against another
+  // org's sensor AND overwrite that org's live sensor state. These tests
+  // prove the fix's end-state under the real non-BYPASSRLS `farmsmart_app`
+  // role: the forged write is rejected, org A's sensor state is provably
+  // unchanged afterward, and org B posting against its own sensor still
+  // works (the ownership check isn't over-broad).
+  test("TEN-014: POST /sensor-readings against org A's sensorId: org B's forged reading is rejected", async () => {
+    const res = await request(orgB.app)
+      .post("/api/sensor-readings")
+      .send({ sensorId: seededSensorId, metric: "temp", value: 999.9 });
+    ok(
+      res.status === 404 || res.status === 400,
+      `org B forging a reading against org A's sensorId must be rejected (got ${res.status})`,
+    );
+  });
+
+  test("TEN-014: POST /sensor-readings forgery attempt never corrupts org A's sensor state", async () => {
+    const { db, sensorsTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
+    const [sensor] = await db.select().from(sensorsTable).where(eq(sensorsTable.id, seededSensorId));
+    ok(sensor, "org A's sensor must still exist");
+    strictEqual(
+      Number(sensor!.lastValue),
+      21.5,
+      "org A's sensor lastValue must be unchanged by org B's rejected forgery attempt",
+    );
+  });
+
+  test("TEN-014: POST /sensor-readings against org B's own sensorId still succeeds (ownership check isn't over-broad)", async () => {
+    const res = await request(orgB.app)
+      .post("/api/sensor-readings")
+      .send({ sensorId: seededSensorIdB, metric: "temp", value: 18.2 });
+    strictEqual(res.status, 201, "org B posting a reading against its own sensor must still succeed");
+    strictEqual(res.body.sensorId, seededSensorIdB);
   });
 
   test("GET /seed-lots/lookup: org B never resolves org A's seed lot by qr code", async () => {

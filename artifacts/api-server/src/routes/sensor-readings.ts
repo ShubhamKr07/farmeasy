@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { db, withTenantScope } from "@workspace/db";
+import { withTenantScope } from "@workspace/db";
 import { sensorReadingsTable, sensorsTable } from "@workspace/db";
 
 const router = Router();
@@ -70,6 +70,20 @@ router.get("/sensor-readings", async (req: Request, res: Response) => {
   }
 });
 
+// TEN-014 hotfix (write side): previously this inserted a reading against a
+// caller-supplied sensorId with NO ownership check, then updated
+// sensors.lastValue/lastReadAt for that same id in the same tx -- any
+// authenticated member of ANY org could POST a reading tagged to another
+// org's sensor (serial PKs are enumerable) and overwrite that org's live
+// sensor state, corrupting its dashboard/monitoring/alerting. Mirror
+// sensors.ts's trust model: never trust a client-supplied id against another
+// tenant's rows -- look the sensor up scoped to req.tenant.facilityId first,
+// and only insert/update if it's actually this tenant's sensor. Unlike the
+// GET route's "filter, don't 404" convention (a list endpoint silently
+// narrowing results), this is a single-resource write against a supplied id
+// that doesn't belong to the tenant -- treat it like sensors.ts would treat
+// posting to a foreign resource: reject with 404, not a silent partial
+// success.
 router.post("/sensor-readings", async (req: Request, res: Response) => {
   try {
     const { sensorId, metric, value } = req.body;
@@ -77,7 +91,15 @@ router.post("/sensor-readings", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "sensorId, metric, and value are required" });
     }
 
-    const [reading] = await db.transaction(async (tx) => {
+    const reading = await withTenantScope(req.tenant!, async (tx) => {
+      const [sensor] = await tx
+        .select({ id: sensorsTable.id })
+        .from(sensorsTable)
+        .where(
+          and(eq(sensorsTable.id, sensorId), eq(sensorsTable.facilityId, req.tenant!.facilityId)),
+        );
+      if (!sensor) return null;
+
       const [r] = await tx
         .insert(sensorReadingsTable)
         .values({ sensorId, metric, value: String(value) })
@@ -86,8 +108,12 @@ router.post("/sensor-readings", async (req: Request, res: Response) => {
         .update(sensorsTable)
         .set({ lastValue: String(value), lastReadAt: new Date() })
         .where(eq(sensorsTable.id, sensorId));
-      return [r];
+      return r;
     });
+
+    if (!reading) {
+      return res.status(404).json({ error: "Sensor not found" });
+    }
 
     return res.status(201).json(formatReading(reading));
   } catch (err) {
