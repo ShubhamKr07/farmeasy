@@ -213,7 +213,7 @@ app.use("/api", requireSignedIn, requireVerifiedEmail);
 // Tier 1: ungated, or gated per-route only.
 app.use("/api", requireSignedIn, dashboardRouter);
 app.use("/api", requireSignedIn, layoutRouter);
-app.use("/api", requireSignedIn, cropsRouter);
+app.use("/api", requireSignedIn, cropsRouter); // MT-M2 batch 3: crops.ts self-gates GET/POST /crops via a per-route requireTenantContext arg (category 1 above, same as growthProfiles.ts/seedLots.ts) -- stays tier 1, no app.ts-level wrap needed
 app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);

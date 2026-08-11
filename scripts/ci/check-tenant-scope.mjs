@@ -42,6 +42,12 @@ const SCOPED_TABLES = [
   "stockMovementsTable",
   "cycleSeedLotsTable",
   "userSettingsTable",
+  // MT-M2 batch 3: crops is now org-scoped (hybrid system/own-org, role-
+  // agnostic app.org_id GUC RLS -- see 00022_crops_rls.sql). crops.ts's
+  // GET/POST are rewired onto withTenantScope, so the file-level skip below
+  // exempts it entirely (no baseline needed); this entry is the static
+  // safety net against a future stray raw `db...from(cropsTable)` reappearing.
+  "cropsTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`

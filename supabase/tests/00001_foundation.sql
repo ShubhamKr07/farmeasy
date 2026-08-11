@@ -9,9 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 32 Drizzle migrations should have been
--- replayed (0031, TEN-013, is the most recent addition -- adds
--- organizations.is_demo).
+-- and lib/db/scripts/migrate.mjs). All 33 Drizzle migrations should have been
+-- replayed (0032, MT-M2 public-RLS remediation Batch 3, is the most recent
+-- addition -- adds crops.organization_id + the org/system unique indexes).
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -19,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  32,
-  'drizzle.__drizzle_migrations has exactly 32 rows (full migration history replayed)'
+  33,
+  'drizzle.__drizzle_migrations has exactly 33 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -128,11 +128,18 @@ SELECT is(
 -- backend policies audited against their actual route/lib usage (see
 -- 00021's own header for the full per-table verb list and rationale --
 -- stock_movements/cycle_seed_lots are SELECT-only today; user_settings needs
--- both INSERT and UPDATE for its onConflictDoUpdate upsert path).
+-- both INSERT and UPDATE for its onConflictDoUpdate upsert path). 00022
+-- (MT-M2 public-RLS remediation, Batch 3) enables RLS on public.crops with
+-- ROLE-AGNOSTIC app.org_id GUC policies (no current_user clause, no TO
+-- clause) -- unlike Batches 1/2's backend-backstop tables, crops must be
+-- readable by both farmsmart_app and the task-#5 farmsmart_recommender role,
+-- so SELECT admits organization_id IS NULL (shared system crops) OR
+-- organization_id = app.org_id (an org's own crops); INSERT/UPDATE/DELETE
+-- are restricted to an org's own rows.
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  21,
-  'supabase_migrations.schema_migrations has exactly 21 rows (Supabase migrations 00001-00021)'
+  22,
+  'supabase_migrations.schema_migrations has exactly 22 rows (Supabase migrations 00001-00022)'
 );
 
 SELECT * FROM finish();
