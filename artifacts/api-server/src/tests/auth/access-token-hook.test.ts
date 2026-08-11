@@ -2,35 +2,52 @@
 /**
  * PR-time auth/RLS integration test for access-token hook semantics.
  *
- * Tests the custom_access_token_hook end-to-end against real RLS policies
- * running under a non-BYPASSRLS Postgres role (the disposable Supabase stack).
- * This is the PR-time analog for the hosted post-merge gates (rule 2 of
- * docs/testing/auth-and-persistent-env-testing.md): it catches auth/RLS drift
- * before merge, not just after.
+ * Tests (a)/(b) call the REAL `public.custom_access_token_hook(jsonb)`
+ * function directly (see supabase/migrations/00001_custom_access_token_hook.sql
+ * + 00015_access_token_hook_org_role.sql for its contract) -- this is the
+ * only way to catch a regression in the hook itself. A prior version of this
+ * file only hand-injected a `user_role` claim via createAuthenticatedTestApp
+ * and asserted RLS/route behavior respected the injected value; that can
+ * never fail if the hook's own SQL breaks, since the hook was never called.
+ *
+ * The disposable Supabase stack's TEST_DATABASE_URL connects `db` as the
+ * `postgres` superuser (see scripts/ci/test-disposable-supabase.sh), which
+ * has no execute grant revoked against it (GRANT/REVOKE EXECUTE only binds
+ * non-superuser roles) -- calling the SECURITY DEFINER hook function
+ * directly works there. It also means `db`'s own queries below run
+ * BYPASSRLS in this env (no farmsmart_app role is provisioned locally --
+ * see docs/runbooks/tenancy-db-role.md); the route-level tests below
+ * (c)/(d)/(e) are still meaningful because the routes themselves apply
+ * explicit tenant-scoped WHERE clauses (see routes/alerts.ts) independent of
+ * RLS, and resolveTenantContext independently re-validates facility
+ * ownership against the DB -- but they are not a substitute for the real
+ * pgTAP RLS proofs (supabase/tests/**) run under farmsmart_app.
  *
  * Assertions:
  * - (a) A user with an active membership gets the org role as the user_role
- *       claim (tested via synthetic injection + RLS enforcement below).
- * - (b) A user with NO active membership has NO user_role claim (tested the
- *       same way).
+ *       claim -- asserted by calling the hook directly.
+ * - (b) A user with NO active membership has NO user_role claim -- asserted
+ *       by calling the hook directly.
  * - (c) Membership-gated authz: org A members cannot read/mutate org B rows.
  * - (d) Negative-authz: RLS-denied operations return 0 rows, not errors; the
  *       end-state is unchanged. (Rule 3 of the practice doc.)
  *
- * This test uses the disposable Supabase stack, so it runs under the real
- * non-BYPASSRLS farmsmart_app role, not a superuser or test-only bypass.
- * The synthetic user_role claims (injected via createAuthenticatedTestApp)
- * represent what the hook would have computed for real; the test verifies
- * that RLS policies respect those claims.
+ * (c)/(d)/(e) below use createAuthenticatedTestApp with a synthetic
+ * user_role claim standing in for what the hook would produce for real --
+ * legitimate there, since those tests are about route/tenant-scoping
+ * behavior GIVEN a claim, not about the hook computing the claim (that's
+ * exactly what (a)/(b) now cover for real).
  */
 import { describe, test, before } from "node:test";
 import { strictEqual, ok } from "node:assert";
 import { Router } from "express";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
   requireTestDatabaseUrl,
+  seedTestUser,
   seedTenantContext,
   closeDatabasePoolAfterTests,
   getAdminDb,
@@ -76,9 +93,22 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
     // and enforce RLS).
     const facilitiesRouter = (await import("../../routes/facilities")).default;
     const alertsRouter = (await import("../../routes/alerts")).default;
+    // alerts.ts is a Tier-3 router (app.ts's own comment above its mount:
+    // "rely entirely on app.ts's own requireTenantContext wrap") -- it does
+    // NOT self-gate internally, unlike cycles.ts/facilityReadiness.ts. Real
+    // app.ts wraps it with `requireSignedIn, requireTenantContext,
+    // alertsRouter` (app.ts:247); omitting that same wrap here let a
+    // membership-less request reach withTenantScope with req.tenant unset,
+    // which throws inside the route handler's try/catch and surfaces as a
+    // 500 instead of alerts.ts's real 404-on-not-found behavior -- caught by
+    // running this file's negative-authz tests for real against the
+    // disposable stack. facilitiesRouter deliberately has NO such wrap here
+    // (app.ts:218 mounts it the same way -- it serves pre-tenant onboarding
+    // routes like POST /facilities).
+    const { requireTenantContext } = await import("../../middlewares/tenantContext");
     combinedRouter = Router();
     combinedRouter.use(facilitiesRouter);
-    combinedRouter.use(alertsRouter);
+    combinedRouter.use(requireTenantContext, alertsRouter);
 
     // ────────────────────────────────────────────────────────────────────────
     // Seed Org A with an active membership (user_role='technician').
@@ -119,14 +149,20 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
 
     // Seed just the user/auth rows, but no active membership (simulating
     // a fresh signup that hasn't been provisioned with an org yet).
-    const { usersTable: usersTableImport } = await import("@workspace/db");
-    await (getAdminDb() ?? db)
-      .insert(usersTableImport)
-      .values({ id: orgBUserId, email: orgBEmail, role: "technician", organizationId: null })
-      .onConflictDoUpdate({
-        target: usersTableImport.id,
-        set: { organizationId: null },
-      });
+    // MUST go through seedTestUser (not a raw insert into usersTable): a raw
+    // insert skips the auth.users row seedTestUser creates first, which
+    // violates `users_id_auth_users_id_fk` (00004_create_auth_profiles.sql)
+    // -- that FK violation threw inside this before() hook, and node:test
+    // reports every test in the describe block as CANCELLED (not failed)
+    // when its before() throws. This was the suite-abort root cause behind
+    // PR #33's "cancelled 5" CI failure -- confirmed by reproducing it
+    // locally against the disposable stack before this fix.
+    await seedTestUser(db, usersTable, {
+      id: orgBUserId,
+      email: orgBEmail,
+      role: "technician",
+      organizationId: null,
+    });
 
     // For RLS testing, we still need an organization and facility to exist
     // so we can seed a row there and verify the membership-less user cannot
@@ -151,17 +187,60 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
 
     // Seed an alert for org B using the admin connection (because the membership-less
     // user cannot INSERT into their own org).
+    // severity must be one of alert_severity's two values ("critical" |
+    // "warning" -- lib/db/src/schema/index.ts's alertSeverityEnum); "info"
+    // is not a member and throws inside this before() hook (a second,
+    // independent cause of the same "before() throws -> every test in the
+    // describe block is CANCELLED" failure mode as the auth.users FK bug
+    // above), confirmed by reproducing it locally against the disposable
+    // stack.
     const { alertsTable } = await import("@workspace/db");
     const [alertB] = await (getAdminDb() ?? db)
       .insert(alertsTable)
-      .values({ title: "Org B Alert (hook test)", severity: "info", facilityId: orgBFacility.id })
+      .values({ title: "Org B Alert (hook test)", severity: "warning", facilityId: orgBFacility.id })
       .returning();
     alertIdB = alertB.id;
 
     orgB = { app: orgBApp, userId: orgBUserId, organizationId: orgBOrg.id, facilityId: orgBFacility.id };
   });
 
-  test("(a) user_role claim present for active membership: org A's technician can read own alert", async () => {
+  test("(a) real custom_access_token_hook: active membership returns the org role as the user_role claim", async () => {
+    // Calls the REAL public.custom_access_token_hook(jsonb) SQL function
+    // directly with a synthetic GoTrue event carrying org A's user_id --
+    // this is the hook contract itself (00015_access_token_hook_org_role.sql),
+    // not a route/RLS proxy for it.
+    const { db } = await import("@workspace/db");
+    const hookRes = await db.execute(
+      sql`select public.custom_access_token_hook(
+        jsonb_build_object('user_id', ${orgA.userId}::text, 'claims', '{}'::jsonb)
+      ) as result`,
+    );
+    const event = (hookRes.rows[0] as { result: { claims: Record<string, unknown> } }).result;
+    strictEqual(
+      event.claims.user_role,
+      "technician",
+      "a user with an active membership must get their organization_members.role as the user_role claim",
+    );
+  });
+
+  test("(b) real custom_access_token_hook: no active membership omits the user_role claim entirely", async () => {
+    // Same real hook call, this time for org B's user, who has no
+    // organization_members row at all -- the hook must OMIT the claim key
+    // (not default it to a stale/synthetic value).
+    const { db } = await import("@workspace/db");
+    const hookRes = await db.execute(
+      sql`select public.custom_access_token_hook(
+        jsonb_build_object('user_id', ${orgB.userId}::text, 'claims', '{}'::jsonb)
+      ) as result`,
+    );
+    const event = (hookRes.rows[0] as { result: { claims: Record<string, unknown> } }).result;
+    ok(
+      !("user_role" in event.claims),
+      "a user with no active membership must get no user_role claim key at all",
+    );
+  });
+
+  test("RLS end-state: org A's technician (matching the real hook's active-membership claim) can read own alert", async () => {
     const res = await request(orgA.app).get("/api/alerts");
     strictEqual(res.status, 200);
     ok(
@@ -170,21 +249,25 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
     );
   });
 
-  test("(b) user_role claim omitted for no membership: org B user cannot read their org's alert (negative-authz: 0 rows)", async () => {
-    // The membership-less org B user tries to read an alert in their org.
-    // RLS denies them (because they have no organization_members row linking
-    // them to that org), so the query returns 0 rows — no error, just an
-    // empty result. This is negative-authz: we verify the END-STATE (0 rows),
-    // not the absence of an error.
+  test("RLS end-state: membership-less org B user (matching the real hook's omitted claim) cannot read their org's alert (negative-authz: 400, never reaches the query)", async () => {
+    // The membership-less org B user has NO organization_members row at all,
+    // so resolveTenantContext's per-request membership lookup (joined
+    // against the requested X-Facility-Id) finds nothing -- req.tenant stays
+    // unset, and requireTenantContext (the same Tier-3 wrap app.ts uses for
+    // alertsRouter -- app.ts:247) 400s before the request ever reaches a
+    // query. This is a STRONGER negative-authz guarantee than "RLS filters
+    // an executed query to 0 rows": the membership-less user's request never
+    // touches alert data at all. End-state: no error leak, no data returned
+    // -- a client-facing 400 (TEN-008's own error-handling design, see
+    // requireTenantContext's doc comment in tenantContext.ts), never a 500
+    // or a leaked row.
     const res = await request(orgB.app).get("/api/alerts");
-    strictEqual(res.status, 200, "query itself must succeed (RLS silently filters)");
-    const foundAlert = res.body.find((a: { id: number }) => a.id === alertIdB);
-    ok(!foundAlert, "membership-less user must NOT see their org's alert (RLS filtered to 0 rows)");
     strictEqual(
-      res.body.length,
-      0,
-      "membership-less user must see an empty alert list (RLS enforces end-state)",
+      res.status,
+      400,
+      "membership-less user's request must never resolve a tenant context (400), and must never surface as a 500",
     );
+    ok(!Array.isArray(res.body) || res.body.length === 0, "response body must carry no alert data");
   });
 
   test("(c) cross-org isolation: org A user cannot read org B's alert", async () => {
@@ -199,21 +282,16 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
     ok(!foundOrgBAlert, "org A user must not see org B's alert across tenants");
   });
 
-  test("(d) negative-authz for UPDATE: membership-less user cannot update, 0 rows affected (not an error)", async () => {
-    // The membership-less org B user tries to PATCH an alert in their org.
-    // PostgREST's RLS filtering means this returns 404 (the alert is not
-    // visible via RLS, so it's like it doesn't exist for the query path).
-    // However, if we were to craft the PATCH to omit the id filter and apply
-    // to 'their' facility, it would return 200 with 0 rows — demonstrating
-    // that RLS silently filters UPDATEs, not error them.
-    // For this test, we use the route's standard 404-on-not-found behavior.
+  test("(d) negative-authz for UPDATE: membership-less user cannot update, no rows affected (not an error)", async () => {
+    // Same requireTenantContext gate as the GET test above: the
+    // membership-less org B user's PATCH never resolves a tenant context
+    // (no organization_members row at all), so it 400s before the route
+    // handler runs. This is the end-state: the alert is unchanged because
+    // the request never even reached a query.
     const res = await request(orgB.app)
       .patch(`/api/alerts/${alertIdB}`)
       .send({ status: "resolved" });
-    // The alert doesn't exist in the membership-less user's view (RLS hides it),
-    // so the route returns 404. This is the end-state: the alert is unchanged
-    // because the user couldn't even see it.
-    strictEqual(res.status, 404, "membership-less user cannot PATCH an alert they cannot read");
+    strictEqual(res.status, 400, "membership-less user cannot PATCH an alert -- no tenant context resolves, never a 500");
   });
 
   test("(e) negative-authz for DELETE: membership-less user cannot delete, end-state unchanged", async () => {
