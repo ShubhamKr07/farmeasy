@@ -150,14 +150,17 @@ SELECT is(
   1, 'sensor_readings has exactly one farmsmart_app-scoped INSERT policy'
 );
 
--- ── bad_tray_entries: SELECT, INSERT (2 policies) ───────────────────────────
+-- ── bad_tray_entries: SELECT, INSERT (2 farmsmart_app policies here; a 3rd,
+--    farmsmart_recommender-scoped SELECT policy is added later by 00023 --
+--    the total-count assertion below is bumped to 3 to match, and 00023's
+--    own test file re-asserts the full picture in detail) ──────────────────
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.bad_tray_entries'::regclass),
   'row-level security is enabled on public.bad_tray_entries'
 );
 SELECT is(
   (SELECT count(*)::integer FROM pg_policies WHERE schemaname = 'public' AND tablename = 'bad_tray_entries'),
-  2, 'bad_tray_entries has exactly 2 policies'
+  3, 'bad_tray_entries has exactly 3 policies (2 farmsmart_app + 1 farmsmart_recommender from 00023)'
 );
 SELECT is(
   (SELECT count(*)::integer FROM pg_policies WHERE schemaname = 'public' AND tablename = 'bad_tray_entries'

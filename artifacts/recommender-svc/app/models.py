@@ -11,6 +11,16 @@ class RecommendRequest(BaseModel):
     # service's own crop/seed-name grounding can't answer "what's my yield
     # this week" on its own.
     ops_context: str | None = None
+    # MT-M2 task #5: the querying user's tenant, sent by api-server's
+    # recommend.ts from req.tenant (resolved + re-validated per request by
+    # requireTenantContext — never trusted from the client directly). Used to
+    # set the app.org_id/app.facility_id GUCs (db.py's tenant-scope helper)
+    # before farm_context.py's reads, so the recommender's own non-BYPASSRLS
+    # farmsmart_recommender role is scoped by the existing role-agnostic RLS
+    # policies (00007/00022) to this tenant's own data + global/system
+    # reference — never cross-tenant.
+    org_id: int
+    facility_id: int
 
 
 class Source(BaseModel):

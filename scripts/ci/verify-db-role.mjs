@@ -73,3 +73,21 @@ if (rolbypassrls) {
   process.exit(1);
 }
 console.log("\nThis role does not bypass RLS -- policies will be enforced.");
+
+// Optional: also assert the connected role is EXACTLY the one expected (task
+// #5 / recommender-role-rotation reuses this same script for a SECOND role,
+// farmsmart_recommender, via a separate workflow -- without this check a
+// misconfigured secret pointing at the WRONG non-BYPASSRLS role would still
+// pass silently). Backward-compatible: unset EXPECTED_DB_ROLE (the original
+// prod-farmsmart_app workflow) skips this check entirely.
+const expectedRole = process.env.EXPECTED_DB_ROLE;
+if (expectedRole && role !== expectedRole) {
+  console.error(
+    `\nExpected to connect as role "${expectedRole}" but connected as "${role}" -- ` +
+      "DATABASE_URL points at the wrong role.",
+  );
+  process.exit(1);
+}
+if (expectedRole) {
+  console.log(`Role name matches expected "${expectedRole}".`);
+}

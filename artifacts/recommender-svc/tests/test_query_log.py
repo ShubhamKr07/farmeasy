@@ -70,11 +70,13 @@ def test_recommend_request_user_id_is_uuid():
     from app.models import RecommendRequest
 
     valid_uuid = uuid.uuid4()
-    req = RecommendRequest(user_id=valid_uuid, question="What is my yield this week?")
+    req = RecommendRequest(
+        user_id=valid_uuid, question="What is my yield this week?", org_id=1, facility_id=1
+    )
     assert req.user_id == valid_uuid
     assert not hasattr(req, "clerk_user_id"), "legacy clerk_user_id field must be gone"
 
     # A bare string (the legacy Clerk identity shape) must be rejected —
     # the column is a Postgres uuid, so the contract is a UUID, not str.
     with pytest.raises(ValidationError):
-        RecommendRequest(user_id="not-a-uuid", question="x")
+        RecommendRequest(user_id="not-a-uuid", question="x", org_id=1, facility_id=1)

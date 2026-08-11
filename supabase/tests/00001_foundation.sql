@@ -135,11 +135,22 @@ SELECT is(
 -- readable by both farmsmart_app and the task-#5 farmsmart_recommender role,
 -- so SELECT admits organization_id IS NULL (shared system crops) OR
 -- organization_id = app.org_id (an org's own crops); INSERT/UPDATE/DELETE
--- are restricted to an org's own rows.
+-- are restricted to an org's own rows. 00023 (MT-M2 task #5, recommender
+-- tenant-scoped read role) enables RLS on the last two RLS-less public
+-- tables the recommender touches -- recommender_cache (a global,
+-- non-tenant web-search cache: SELECT+INSERT admitting both
+-- farmsmart_recommender and farmsmart_app) and recommender_queries (a
+-- per-user query audit log: SELECT+INSERT scoped to farmsmart_recommender,
+-- app-layer scopes by user_id) -- and adds a farmsmart_recommender SELECT
+-- policy on bad_tray_entries (00021 shipped it with only a farmsmart_app
+-- policy, which doesn't admit the new recommender role; unscoped at the row
+-- level -- farm_context.py's `JOIN cycles` is what scopes it to the
+-- querying tenant, via 00007's facility-GUC policy on cycles). This closes
+-- task #4's last no-RLS-at-all gap on public tables.
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  22,
-  'supabase_migrations.schema_migrations has exactly 22 rows (Supabase migrations 00001-00022)'
+  23,
+  'supabase_migrations.schema_migrations has exactly 23 rows (Supabase migrations 00001-00023)'
 );
 
 SELECT * FROM finish();

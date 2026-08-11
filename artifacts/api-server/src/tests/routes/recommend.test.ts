@@ -296,6 +296,13 @@ function createRecommendTestApp(router: Router): Express {
   app.use((req: Request, _res: Response, next: NextFunction) => {
     const sub = (req.get("x-test-user-sub") || DEFAULT_TEST_USER.sub).trim();
     req.supabaseUser = { sub, user_role: DEFAULT_TEST_USER.user_role };
+    // Production mounts app.ts's requireTenantContext ahead of this router
+    // (MT-M2 task #5 — recommend.ts now forwards org_id/facility_id to the
+    // recommender), so req.tenant is always populated by the time the
+    // handler runs. This harness builds the bare router directly (no app.ts
+    // stack), so it must set the same fixture req.tenant would carry in
+    // production, or the handler's `req.tenant!` throws.
+    req.tenant = { organizationId: 1, facilityId: 1, role: "owner" };
     // Production mounts pinoHttp which sets req.log; the harness stubs it so
     // the fetch-timeout catch block's req.log.error(...) doesn't crash with
     // "Cannot read properties of undefined". (Other route suites only log on

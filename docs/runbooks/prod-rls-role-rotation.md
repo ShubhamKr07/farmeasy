@@ -111,7 +111,7 @@ on staging (under `farmsmart_app`) before re-attempting.
 
 ## Deferred (tracked, not part of this rotation)
 
-- **`farmsmart-recommender` role rotation** — needs a dedicated read-scoped
-  `farmsmart_recommender` role; see the parked follow-up on the TEN-013 task.
-  Until then the recommender remains on its current elevated role.
-- **`recommender-svc` staging** rotation follows the same plan.
+- **`farmsmart-recommender` role rotation** — now has its own dedicated
+  runbook: `docs/runbooks/recommender-rls-role-rotation.md` (MT-M2 task #5,
+  `farmsmart_recommender`, read-mostly, non-BYPASSRLS). Until that rotation is
+  performed, the recommender remains on its current elevated role.

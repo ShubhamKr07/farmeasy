@@ -215,7 +215,6 @@ app.use("/api", requireSignedIn, dashboardRouter);
 app.use("/api", requireSignedIn, layoutRouter);
 app.use("/api", requireSignedIn, cropsRouter); // MT-M2 batch 3: crops.ts self-gates GET/POST /crops via a per-route requireTenantContext arg (category 1 above, same as growthProfiles.ts/seedLots.ts) -- stays tier 1, no app.ts-level wrap needed
 app.use("/api", requireSignedIn, userSettingsRouter);
-app.use("/api", requireSignedIn, recommendRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
 app.use("/api", requireSignedIn, demoRouter); // TEN-013: no requireTenantContext — the demo fork runs before any facility exists, mirroring wizardRouter above
@@ -262,6 +261,14 @@ app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
 app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
 app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
+// MT-M2 task #5: recommend.ts now forwards org_id/facility_id to the
+// recommender (so its non-BYPASSRLS farmsmart_recommender role can set the
+// tenant GUC for its RLS-scoped reads) -- moved out of tier 1 into tier 3 so
+// req.tenant is guaranteed populated before the handler runs. Clients already
+// send X-Facility-Id on every request via the shared custom-fetch client's
+// global setFacilityId (lib/api-client-react/src/custom-fetch.ts) -- no
+// frontend change needed.
+app.use("/api", requireSignedIn, requireTenantContext, recommendRouter);
 
 // Tier 4: self-gate internally via router.use(requireTenantContext,
 // requireRole("owner","admin")) (TEN-010 invitations.ts/members.ts). This is

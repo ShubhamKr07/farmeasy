@@ -1,53 +1,76 @@
-from app.db import get_pool
+from app.db import tenant_scope
 
 
-async def get_farm_context(question: str) -> dict | None:
+async def get_farm_context(org_id: int, facility_id: int, question: str) -> dict | None:
     """
     Keyword-matches crop/seed names mentioned in the question against
     crops.name and growth_profiles.seed_name, and pulls the matching growth
     profile + recent bad-tray issues for that crop/seed as grounding context
     for synthesis. Plain substring match — no NLP/entity extraction; good
     enough for a farm's own crop catalog (a few dozen names).
+
+    MT-M2 task #5: all reads run inside `tenant_scope(org_id, facility_id)`
+    (the asyncpg withTenantScope equivalent, app/db.py) on a single
+    transaction-scoped connection, so the non-BYPASSRLS
+    `farmsmart_recommender` role's reads are scoped by the EXISTING
+    role-agnostic RLS policies to the querying tenant + global/system
+    reference only — never cross-tenant:
+      - crops: system (organization_id IS NULL) + the caller's own org
+        (00022's role-agnostic hybrid policy).
+      - growth_profiles: the caller's own org (00007's role-agnostic
+        organization_id = app.org_id policy).
+      - bad_tray_entries: the caller's own FACILITY, scoped not by a policy
+        on bad_tray_entries itself (that policy, 00023, is intentionally
+        unscoped) but by the `JOIN cycles` below — cycles carries 00007's
+        facility_id = app.facility_id policy, so only cycles (and therefore
+        only bad-tray rows reachable through them) belonging to the
+        caller's own facility are visible. Accepted behavior change: this
+        is now OWN-FARM-ONLY grounding, not the previous fleet-wide
+        "issues across all farms for this seed" signal (see the MT-M2 task
+        #5 design doc).
     """
-    pool = await get_pool()
     q = question.lower()
 
-    crops = await pool.fetch("SELECT id, name FROM crops")
-    matched_crop = next((c for c in crops if c["name"].lower() in q), None)
+    async with tenant_scope(org_id, facility_id) as conn:
+        crops = await conn.fetch("SELECT id, name FROM crops")
+        matched_crop = next((c for c in crops if c["name"].lower() in q), None)
 
-    seed_name: str | None = None
-    profile = None
+        seed_name: str | None = None
+        profile = None
 
-    if matched_crop:
-        profile = await pool.fetchrow(
-            "SELECT * FROM growth_profiles WHERE crop_id = $1 LIMIT 1",
-            matched_crop["id"],
-        )
-        seed_name = profile["seed_name"] if profile else matched_crop["name"]
-    else:
-        seed_rows = await pool.fetch("SELECT DISTINCT seed_name FROM growth_profiles")
-        matched = next((r["seed_name"] for r in seed_rows if r["seed_name"].lower() in q), None)
-        if matched:
-            seed_name = matched
-            profile = await pool.fetchrow(
-                "SELECT * FROM growth_profiles WHERE seed_name = $1 LIMIT 1",
-                seed_name,
+        if matched_crop:
+            profile = await conn.fetchrow(
+                "SELECT * FROM growth_profiles WHERE crop_id = $1 LIMIT 1",
+                matched_crop["id"],
             )
+            seed_name = profile["seed_name"] if profile else matched_crop["name"]
+        else:
+            seed_rows = await conn.fetch("SELECT DISTINCT seed_name FROM growth_profiles")
+            matched = next((r["seed_name"] for r in seed_rows if r["seed_name"].lower() in q), None)
+            if matched:
+                seed_name = matched
+                profile = await conn.fetchrow(
+                    "SELECT * FROM growth_profiles WHERE seed_name = $1 LIMIT 1",
+                    seed_name,
+                )
 
-    if not seed_name:
-        return None
+        if not seed_name:
+            return None
 
-    bad_trays = await pool.fetch(
-        """
-        SELECT bte.issue, bte.severity, bte.created_at
-        FROM bad_tray_entries bte
-        JOIN cycles c ON c.id = bte.cycle_id
-        WHERE c.seed_name = $1
-        ORDER BY bte.created_at DESC
-        LIMIT 5
-        """,
-        seed_name,
-    )
+        # own-facility only: the cycles JOIN (facility-GUC-scoped by 00007)
+        # is what confines this to the querying tenant's own bad-tray rows
+        # -- bad_tray_entries' own recommender policy (00023) is unscoped.
+        bad_trays = await conn.fetch(
+            """
+            SELECT bte.issue, bte.severity, bte.created_at
+            FROM bad_tray_entries bte
+            JOIN cycles c ON c.id = bte.cycle_id
+            WHERE c.seed_name = $1
+            ORDER BY bte.created_at DESC
+            LIMIT 5
+            """,
+            seed_name,
+        )
 
     return {
         "matched_crop_or_seed": seed_name,
