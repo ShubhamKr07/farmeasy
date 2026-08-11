@@ -1,0 +1,74 @@
+# Verify recommender DB role (BYPASSRLS check)
+#
+# One-shot, manual (workflow_dispatch) check that the PRODUCTION
+# farmsmart-recommender runtime database role does NOT have BYPASSRLS -- i.e.
+# that farmsmart-recommender's DATABASE_URL has been rotated from an elevated
+# role to the least-privilege, read-mostly farmsmart_recommender role (task
+# #5), so the RLS policies scoping its reads (00007's role-agnostic
+# app.org_id/app.facility_id policies, 00022's role-agnostic crops policy,
+# and this task's recommender_cache/recommender_queries/bad_tray_entries
+# policies) are actually enforced.
+#
+# It runs scripts/ci/verify-db-role.mjs (the SAME script the farmsmart_app
+# prod-role check uses -- see verify-prod-db-role.yml), with EXPECTED_DB_ROLE
+# set so a misconfigured secret pointing at the wrong non-BYPASSRLS role is
+# also caught, not just "some role that isn't BYPASSRLS".
+#
+# REQUIRES a `production`-environment secret
+# PRODUCTION_RECOMMENDER_DATABASE_URL set to the SAME farmsmart_recommender
+# runtime connection string used by the farmsmart-recommender Render service
+# (the transaction-pooler string, carrying sslmode=require). See
+# docs/runbooks/recommender-rls-role-rotation.md, Step 3.
+
+name: "Verify recommender DB role (BYPASSRLS check)"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "11.17.0"
+
+jobs:
+  verify:
+    name: Assert recommender runtime role does not bypass RLS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # verify-db-role.mjs exits 1 if the connected role has BYPASSRLS, or if
+      # EXPECTED_DB_ROLE is set and doesn't match -- so the job failing IS the
+      # "not rotated yet / wrong role" signal.
+      - name: Assert BYPASSRLS is false for the recommender runtime role
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_RECOMMENDER_DATABASE_URL }}
+          DATABASE_CA_CERT: ${{ secrets.PRODUCTION_DATABASE_CA_CERT }}
+          EXPECTED_DB_ROLE: farmsmart_recommender
+          # Encrypted-but-unverified TLS for the role-attribute check ONLY: the
+          # Supabase transaction pooler (:6543) cert isn't chained to the
+          # Root-2021 CA, so CA-pinning fails there (SELF_SIGNED_CERT_IN_CHAIN).
+          # This reads one pg_roles flag and moves no data; the app keeps strict
+          # CA-pinning. See scripts/ci/verify-db-role.mjs.
+          DB_ROLE_CHECK_INSECURE_TLS: "true"
+        run: node scripts/ci/verify-db-role.mjs
