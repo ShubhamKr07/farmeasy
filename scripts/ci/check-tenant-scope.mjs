@@ -250,18 +250,16 @@ const BASELINE_VIOLATIONS = new Set([
   //         `db`, but every one of those four files ALSO calls withTenantScope
   //         for a different (already-scoped) table elsewhere in the same file,
   //         so the file-level withTenantScope skip above exempts them entirely
-  //         (documented precedent: group (B)'s note on growthProfiles.ts). Only
-  //         sensor-readings.ts and userSettings.ts contain zero withTenantScope
-  //         calls anywhere in the file, so their raw `db` reads are the only
-  //         ones this scanner actually sees. Both are PERMANENT, not deferred
-  //         debt: sensor-readings.ts's GET has no tenant/facility WHERE at all
-  //         today (pre-existing app-layer behavior, out of this batch's scope
-  //         per Option A -- RLS-only, no live-path/behavior change); user
-  //         settings are inherently per-user (scoped by its own userId WHERE),
-  //         not per-facility, so there is no tenant context to wrap in
-  //         withTenantScope. A NEW un-scoped read of any of the 10 is NOT
-  //         baselined and will fail this gate.
-  "artifacts/api-server/src/routes/sensor-readings.ts::const rows = await db",
+  //         (documented precedent: group (B)'s note on growthProfiles.ts).
+  //         sensor-readings.ts is NO LONGER listed here (TEN-014 hotfix, fixed
+  //         a live cross-tenant leak: its GET previously had zero
+  //         tenant/facility WHERE at all -- now joins sensors and filters by
+  //         req.tenant.facilityId via withTenantScope, so the file-level skip
+  //         above exempts it like every other withTenantScope-using file).
+  //         userSettings.ts remains: it is inherently per-user (scoped by its
+  //         own userId WHERE), not per-facility, so there is no tenant context
+  //         to wrap in withTenantScope. A NEW un-scoped read of any of the 10
+  //         is NOT baselined and will fail this gate.
   "artifacts/api-server/src/routes/userSettings.ts::const rows = await db",
 ]);
 
