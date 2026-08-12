@@ -32,34 +32,35 @@ const OTP_INTERVAL_MS = Number(process.env.STAGING_OTP_INTERVAL_MS ?? 3_000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Resolve the Mailosaur server id for the account behind the API key.
+ * Derive the Mailosaur server id from the test recipient address.
  *
- * Mailosaur keys are account-scoped (not server-scoped), so a given key may see
- * multiple servers. We take the first; if the account has more than one, the
- * orchestrator can constrain it to a single server, or this resolution can be
- * extended to filter by name. Localized here so a provider swap touches one fn.
+ * Mailosaur routes every `<local>@<serverId>.mailosaur.net` message to server
+ * `<serverId>`, so the subdomain label IS the server id — the authoritative
+ * source of where the mail actually landed.
  *
- * @returns {Promise<string>}
+ * WHY NOT "take the account's first server": Mailosaur keys are account-scoped,
+ * and this account has MULTIPLE servers on purpose (a `FarmSmart Production
+ * Probe` server for prod probes and a `FarmSmart Samplings` server for the
+ * staging gate). The previous resolver returned `items[0]` from GET
+ * /api/servers, which happened to be the prod-probe server — so the staging
+ * signup email landed in the samplings server while the poll watched the empty
+ * prod-probe server, timing out the full OTP budget on every staging deploy.
+ * Routing by the address the email was actually sent to fixes both envs, since
+ * each already emails to its own `*.mailosaur.net` subdomain.
+ *
+ * @param {string} toEmail e.g. `signup-…@c87jrlkh.mailosaur.net`
+ * @returns {string}
  */
-export async function resolveMailosaurServerId(token) {
-  const auth = "Basic " + Buffer.from(`${token}:`).toString("base64");
-  const res = await fetch("https://mailosaur.com/api/servers", {
-    headers: { Authorization: auth },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
+export function serverIdFromEmail(toEmail) {
+  const domain = String(toEmail).split("@")[1] ?? "";
+  const m = domain.match(/^([^.\s]+)\.mailosaur\.(net|io|com)$/i);
+  if (!m) {
     throw new Error(
-      `Mailosaur GET /api/servers failed: HTTP ${res.status} ${body}`,
+      `cannot derive Mailosaur server id from "${toEmail}" — expected ` +
+        `<local>@<serverId>.mailosaur.net`,
     );
   }
-  const json = await res.json();
-  const items = json.items ?? json.data ?? [];
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error(
-      "Mailosaur account has no servers; create one and verify the test domain.",
-    );
-  }
-  return String(items[0].id);
+  return m[1];
 }
 
 /**
@@ -188,7 +189,7 @@ export function extractOtpFromMessage(full) {
  * @returns {Promise<string>}
  */
 export async function pollInboxForOtp({ token, toEmail, sinceIso }) {
-  const serverId = await resolveMailosaurServerId(token);
+  const serverId = serverIdFromEmail(toEmail);
   const auth = "Basic " + Buffer.from(`${token}:`).toString("base64");
   const url = new URL("https://mailosaur.com/api/messages");
   url.searchParams.set("server", serverId);
