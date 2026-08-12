@@ -334,6 +334,58 @@ describe("POST /invitations/accept", { skip: !canRun }, () => {
     strictEqual(inviteRow.status, "accepted");
   });
 
+  // TEN-011: invited users bypass the before_user_created hook entirely --
+  // POST /invitations/accept creates the auth user via
+  // `admin.auth.admin.createUser()` (service_role), which GoTrue does NOT
+  // route through before_user_created (confirmed live -- see
+  // 00025_signup_enforcement.sql's own header). This is the key regression
+  // guard: with signup_config.mode='off' (the MOST restrictive setting --
+  // fail-closed rejects every public /auth/v1/signup), an invite accept must
+  // still succeed. Sets the row directly (admin connection, mirroring every
+  // other elevated test-only write in this file) and restores it to 'off'
+  // (the seeded default) afterward so this file never leaks a non-default
+  // mode to a later test file.
+  test("invite acceptance bypasses signup_config entirely -- succeeds even while mode='off'", async () => {
+    const { app, db, invitationsTable, organizationMembersTable, usersTable, organizationId } =
+      await setup();
+    const { signupConfigTable } = await import("@workspace/db");
+    const adminDb = getAdminDb() ?? db;
+
+    await adminDb.update(signupConfigTable).set({ mode: "off" }).where(eq(signupConfigTable.id, 1));
+    try {
+      const email = `accept-bypass-off-${randomUUID()}@example.com`;
+      const { raw } = await seedInvite(db, invitationsTable, {
+        organizationId,
+        email,
+        role: "technician",
+      });
+
+      const res = await request(app)
+        .post("/api/invitations/accept")
+        .send({ token: raw, password: "Sup3rSecret!123" });
+      strictEqual(res.status, 201, "invite accept must succeed regardless of signup_config.mode");
+      strictEqual(res.body.email, email);
+
+      const [userRow] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+      ok(userRow, "public.users row should exist (the invite path bypassed the hook and created a real auth user)");
+      createdAuthUserIds.push(userRow.id);
+
+      const [memberRow] = await db
+        .select()
+        .from(organizationMembersTable)
+        .where(
+          and(
+            eq(organizationMembersTable.userId, userRow.id),
+            eq(organizationMembersTable.organizationId, organizationId),
+          ),
+        );
+      ok(memberRow, "organization_members row should exist");
+      strictEqual(memberRow.status, "active");
+    } finally {
+      await adminDb.update(signupConfigTable).set({ mode: "off" }).where(eq(signupConfigTable.id, 1));
+    }
+  });
+
   test("re-join after removal: user with a removed membership accepts a fresh invite -> upsert reactivates them in the inviting org", async () => {
     const { app, db, invitationsTable, organizationMembersTable, organizationId } = await setup();
     const { usersTable, organizationsTable, facilitiesTable } = await import("@workspace/db");
