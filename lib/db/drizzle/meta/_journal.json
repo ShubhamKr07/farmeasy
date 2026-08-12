@@ -232,6 +232,13 @@
       "when": 1786441791488,
       "tag": "0032_crops_org_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786484161348,
+      "tag": "0033_sensor_status_facility",
+      "breakpoints": true
     }
   ]
 }

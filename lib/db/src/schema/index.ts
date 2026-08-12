@@ -582,17 +582,30 @@ export const traysTable = pgTable("trays", {
   positionIndex: integer("position_index").notNull().default(0),
 });
 
-export const sensorStatusTable = pgTable("sensor_status", {
-  id: serial("id").primaryKey(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-  sensorsOnline: integer("sensors_online"),
-  sensorsTotal: integer("sensors_total"),
-  acidityPh: real("acidity_ph"),
-  waterLevelPct: real("water_level_pct"),
-  tempCelsius: real("temp_celsius"),
-  humidityPct: real("humidity_pct"),
-  nutrientMix: text("nutrient_mix"),
-});
+// MT-M2 batch 4: facility_id added (+ unique(facility_id)) to close the
+// latent cross-tenant commingling in this table -- it was previously a
+// single global row upserted by cycles.ts with no tenant scoping at all
+// (see 0033_sensor_status_facility.sql and 00024_sensor_status_rls.sql).
+export const sensorStatusTable = pgTable(
+  "sensor_status",
+  {
+    id: serial("id").primaryKey(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    facilityId: integer("facility_id")
+      .notNull()
+      .references(() => facilitiesTable.id, { onDelete: "cascade" }),
+    sensorsOnline: integer("sensors_online"),
+    sensorsTotal: integer("sensors_total"),
+    acidityPh: real("acidity_ph"),
+    waterLevelPct: real("water_level_pct"),
+    tempCelsius: real("temp_celsius"),
+    humidityPct: real("humidity_pct"),
+    nutrientMix: text("nutrient_mix"),
+  },
+  (table) => [
+    uniqueIndex("sensor_status_facility_id_uniq").on(table.facilityId),
+  ],
+);
 
 // ── Phase 2a: additive domain tables ─────────────────────────────────────────
 

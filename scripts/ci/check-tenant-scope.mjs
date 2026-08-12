@@ -48,6 +48,13 @@ const SCOPED_TABLES = [
   // exempts it entirely (no baseline needed); this entry is the static
   // safety net against a future stray raw `db...from(cropsTable)` reappearing.
   "cropsTable",
+  // MT-M2 batch 4: sensor_status is now per-facility (role-agnostic
+  // app.facility_id GUC RLS -- see 00024_sensor_status_rls.sql). Both of
+  // cycles.ts's upserts are rewired onto withTenantScope, so the file-level
+  // skip below exempts it entirely (no baseline needed); this entry is the
+  // static safety net against a future stray raw
+  // `db...from(sensorStatusTable)` reappearing.
+  "sensorStatusTable",
 ];
 
 // Whole-file regex matching a direct `db.<verb>(...)...<.from/.into/.table>(scoped)`
