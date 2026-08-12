@@ -239,6 +239,13 @@
       "when": 1786484161348,
       "tag": "0033_sensor_status_facility",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786553508978,
+      "tag": "0034_signup_config",
+      "breakpoints": true
     }
   ]
 }

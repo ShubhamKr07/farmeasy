@@ -888,3 +888,20 @@ export const accountPurgeAuditTable = pgTable("account_purge_audit", {
   action: text("action").notNull(), // 'warned' | 'purged'
   at: timestamp("at").notNull().defaultNow(),
 });
+
+// ── TEN-011: server-side signup enforcement ──────────────────────────────
+// Single-row (singleton, id=1) source of truth for the sign-up gating mode.
+// Both the app (getSignupMode()) and the before_user_created Postgres hook
+// (supabase/migrations/00025_signup_enforcement.sql) read THIS row, so the
+// availability UI and real enforcement can never drift.
+export const signupConfigTable = pgTable(
+  "signup_config",
+  {
+    id: integer("id").primaryKey().default(1),
+    mode: text("mode", { enum: ["off", "allowlist", "public"] })
+      .notNull()
+      .default("off"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [check("signup_config_singleton", sql`${table.id} = 1`)],
+);

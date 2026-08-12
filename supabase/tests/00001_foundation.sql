@@ -9,10 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 34 Drizzle migrations should have been
--- replayed (0033, MT-M2 public-RLS remediation Batch 4, is the most recent
--- addition -- adds sensor_status.facility_id + unique(facility_id), deleting
--- the prior single global row).
+-- and lib/db/scripts/migrate.mjs). All 35 Drizzle migrations should have been
+-- replayed (0034, TEN-011, is the most recent addition -- adds the
+-- signup_config singleton table, seeded mode='off').
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -20,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  34,
-  'drizzle.__drizzle_migrations has exactly 34 rows (full migration history replayed)'
+  35,
+  'drizzle.__drizzle_migrations has exactly 35 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
