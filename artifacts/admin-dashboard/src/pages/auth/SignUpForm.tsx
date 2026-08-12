@@ -99,6 +99,9 @@ export function SignUpForm({ mode, allowed, email, onEmailChange }: SignUpFormPr
       return;
     }
 
+    // AUTH-004 TODO (TEN-012): add `usePostAuthEvent` and record:
+    // - postAuthEvent.mutateAsync({ data: { eventType: "signup_start" } })
+
     setBusy(true);
     const trimmedEmail = email.trim();
     const { data, error: signUpError } = await supabase.auth.signUp({
@@ -118,6 +121,8 @@ export function SignUpForm({ mode, allowed, email, onEmailChange }: SignUpFormPr
     // and expects the inbox link. OAuth sign-ups (Google) bypass this branch
     // entirely — they redirect away from the page before signUp() resolves.
     if (data.user && !data.session) {
+      // AUTH-004 TODO (TEN-012): record signup_complete here when email is verified
+      // (currently we land on VerifyInterstitial; TEN-012 owns completion tracking)
       setPendingVerificationEmail(trimmedEmail);
       return;
     }

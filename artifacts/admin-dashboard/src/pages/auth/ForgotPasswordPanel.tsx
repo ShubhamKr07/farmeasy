@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase";
+import { usePostAuthEvent } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,10 +46,12 @@ export function ForgotPasswordPanel({ onBackToSignIn }: ForgotPasswordPanelProps
   const [email, setEmail] = useState("");
   const [state, setState] = useState<ForgotState>("form");
   const [busy, setBusy] = useState(false);
+  const postAuthEvent = usePostAuthEvent();
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
+    void postAuthEvent.mutateAsync({ data: { eventType: "reset_request" } });
     // Result is intentionally ignored — see the file-level security note. We
     // transition to the neutral confirmation screen for success AND error so
     // the panel never leaks whether the email is registered. (GoTrue's

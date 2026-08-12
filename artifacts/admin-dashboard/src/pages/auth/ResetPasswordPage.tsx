@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { supabase } from "@/lib/supabase";
+import { usePostAuthEvent } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,7 @@ export function ResetPasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const postAuthEvent = usePostAuthEvent();
 
   useEffect(() => {
     let settled = false;
@@ -115,6 +117,7 @@ export function ResetPasswordPage() {
       return;
     }
 
+    void postAuthEvent.mutateAsync({ data: { eventType: "reset_complete" } });
     // updateUser on a recovery session upgrades it to a normal session, so
     // AuthGate at `/` lets the user straight into the dashboard.
     navigate("/");
