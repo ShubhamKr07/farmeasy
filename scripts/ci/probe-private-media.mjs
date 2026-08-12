@@ -232,42 +232,54 @@ try {
   userId = signUpData.user.id;
   console.log(`✓ signed up; user id = ${userId}`);
 
-  console.log(`▶ retrieving confirmation OTP from mailbox (${OTP_TIMEOUT_MS}ms budget)`);
-  const otp = await pollInboxForOtp({
-    token: MAILBOX_API_TOKEN,
-    toEmail: email,
-    sinceIso: signupStartedIso,
-  });
-  console.log("✓ OTP retrieved from mailbox");
-
-  console.log("▶ redeeming OTP via auth.verifyOtp");
-  const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
-    email,
-    token: otp,
-    // type "signup" — this is a fresh-signup confirmation OTP (the email's own
-    // verify URL carries type=signup). "email" is for existing-user OTP sign-in
-    // and would reject a fresh signup token. Mirrors test-supabase-signup.mjs.
-    type: "signup",
-  });
-  const session = (await supabaseAnon.auth.getSession()).data?.session;
-  if (verifyError) {
-    const msg = String(verifyError.message ?? "").toLowerCase();
-    const tolerable =
-      !!session &&
-      (msg.includes("already confirmed") ||
-        msg.includes("already") ||
-        msg.includes("session"));
-    if (!tolerable) {
-      throw new Error(`verifyOtp failed: ${verifyError.message}`);
-    }
+  // Skip the OTP poll/verify entirely when signUp() already returned a live
+  // session — Email confirmation is a per-project Supabase Auth setting; when
+  // it's disabled (staging currently), no confirmation email is ever sent and
+  // polling would hang for the full timeout. Checked generically so this same
+  // script behaves correctly against production too, whatever its config is.
+  let session = signUpData.session;
+  if (session) {
     console.log(
-      `⚠ verifyOtp returned "${verifyError.message}" but an active session exists (confirmation likely disabled) — proceeding.`,
+      "⚠ signUp() returned an active session immediately — email confirmation is disabled on this project; skipping OTP poll/verify",
     );
   } else {
-    console.log("✓ OTP verified; session established");
+    console.log(`▶ retrieving confirmation OTP from mailbox (${OTP_TIMEOUT_MS}ms budget)`);
+    const otp = await pollInboxForOtp({
+      token: MAILBOX_API_TOKEN,
+      toEmail: email,
+      sinceIso: signupStartedIso,
+    });
+    console.log("✓ OTP retrieved from mailbox");
+
+    console.log("▶ redeeming OTP via auth.verifyOtp");
+    const { error: verifyError } = await supabaseAnon.auth.verifyOtp({
+      email,
+      token: otp,
+      // type "signup" — this is a fresh-signup confirmation OTP (the email's own
+      // verify URL carries type=signup). "email" is for existing-user OTP sign-in
+      // and would reject a fresh signup token. Mirrors test-supabase-signup.mjs.
+      type: "signup",
+    });
+    session = (await supabaseAnon.auth.getSession()).data?.session;
+    if (verifyError) {
+      const msg = String(verifyError.message ?? "").toLowerCase();
+      const tolerable =
+        !!session &&
+        (msg.includes("already confirmed") ||
+          msg.includes("already") ||
+          msg.includes("session"));
+      if (!tolerable) {
+        throw new Error(`verifyOtp failed: ${verifyError.message}`);
+      }
+      console.log(
+        `⚠ verifyOtp returned "${verifyError.message}" but an active session exists (confirmation likely disabled) — proceeding.`,
+      );
+    } else {
+      console.log("✓ OTP verified; session established");
+    }
   }
   if (!session) {
-    throw new Error("no active session after verifyOtp — cannot call API");
+    throw new Error("no active session after signUp/verifyOtp — cannot call API");
   }
   const accessToken = session.access_token;
 
