@@ -150,11 +150,16 @@ SELECT is(
 -- with ROLE-AGNOSTIC app.facility_id GUC policies (SELECT/INSERT/UPDATE,
 -- matching cycles.ts's/dashboard.ts's rescoped call sites) -- the last
 -- public table lacking RLS entirely, closing task #4's last no-RLS-at-all
--- gap on public tables.
+-- gap on public tables. 00025 (TEN-011) adds the before_user_created
+-- Postgres hook that enforces public.signup_config's mode (off/allowlist/
+-- public) server-side -- previously only the UI (SIGNUP_MODE) gated
+-- sign-up, and public self-signup (the browser's own supabase.auth.signUp/
+-- signInWithOAuth calls) bypassed the api-server entirely -- plus RLS on
+-- the new signup_config singleton table (0034_signup_config.sql).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  24,
-  'supabase_migrations.schema_migrations has exactly 24 rows (Supabase migrations 00001-00024)'
+  25,
+  'supabase_migrations.schema_migrations has exactly 25 rows (Supabase migrations 00001-00025)'
 );
 
 SELECT * FROM finish();

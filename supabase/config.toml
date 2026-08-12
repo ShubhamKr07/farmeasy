@@ -291,9 +291,13 @@ max_frequency = "5s"
 # inactivity_timeout = "8h"
 
 # This hook runs before a new user is created and allows developers to reject the request based on the incoming user object.
-# [auth.hook.before_user_created]
-# enabled = true
-# uri = "pg-functions://postgres/auth/before-user-created-hook"
+# TEN-011: enforces signup_config.mode (off/allowlist/public) server-side --
+# see supabase/migrations/00025_signup_enforcement.sql for the function.
+# Rollback: set enabled = false (one-line disable, no redeploy of the hook
+# function itself needed).
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/before_user_created_hook"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]
