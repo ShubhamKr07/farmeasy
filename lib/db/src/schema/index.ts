@@ -536,6 +536,24 @@ export const facilityReadinessEventsTable = pgTable(
   ],
 );
 
+// auth_events — AUTH-004 sign-in/reset/sign-up funnel telemetry, append-only, no PII beyond userId
+export const authEventTypeEnum = pgEnum("auth_event_type", [
+  "signin_success",
+  "signin_failed",
+  "reset_request",
+  "reset_complete",
+  "signup_start",
+  "signup_complete",
+]);
+
+export const authEventsTable = pgTable("auth_events", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").references(() => usersTable.id),
+  eventType: authEventTypeEnum("event_type").notNull(),
+  reason: text("reason"),
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+});
+
 // wizard_events — minimal telemetry (WIZ-006), append-only, no PII beyond userId
 export const wizardEventTypeEnum = pgEnum("wizard_event_type", [
   "view",

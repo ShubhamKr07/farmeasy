@@ -40,6 +40,8 @@ tags:
     description: Vendor sensor account credentials and connection testing
   - name: wizard-events
     description: WIZ-006 fire-and-forget onboarding wizard step telemetry (view/save/abandon/skip)
+  - name: auth-events
+    description: AUTH-004 fire-and-forget auth surface telemetry (sign-in/reset/sign-up funnel)
   - name: invitations
     description: Organization member invitations
   - name: members
@@ -1598,6 +1600,23 @@ paths:
         "429":
           description: Too many telemetry events for this user
 
+  /auth-events:
+    post:
+      operationId: postAuthEvent
+      tags: [auth-events]
+      summary: AUTH-004 fire-and-forget auth surface telemetry (sign-in/reset/sign-up funnel)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostAuthEventRequest"
+      responses:
+        "202":
+          description: Event recorded (no response body)
+        "429":
+          description: Too many telemetry events for this user
+
   /facility-readiness:
     get:
       operationId: getFacilityReadiness
@@ -2425,6 +2444,17 @@ components:
         eventType:
           type: string
           enum: [view, save, abandon, skip]
+
+    PostAuthEventRequest:
+      type: object
+      required: [eventType]
+      properties:
+        eventType:
+          type: string
+          enum: [signin_success, signin_failed, reset_request, reset_complete, signup_start, signup_complete]
+        reason:
+          type: string
+          description: Optional error reason for signin_failed events
 
     DemoStatus:
       type: object

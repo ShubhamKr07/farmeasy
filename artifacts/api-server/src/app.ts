@@ -28,6 +28,7 @@ import demoRouter from "./routes/demo";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
 import wizardEventsRouter from "./routes/wizard-events";
+import authEventsRouter from "./routes/auth-events";
 import invitationsRouter from "./routes/invitations";
 import invitationsAcceptRouter from "./routes/invitationsAccept";
 import membersRouter from "./routes/members";
@@ -122,6 +123,7 @@ function requireSignedIn(req: Request, res: Response, next: NextFunction) {
 app.use("/api", healthRouter);
 app.use("/api", accountingPublicRouter);
 app.use("/api", invitationsAcceptRouter);
+app.use("/api", authEventsRouter);
 app.use("/api", createAuthRouter());
 
 // Backend email-verification gate (TEN-012 Task 6) — defense-in-depth.

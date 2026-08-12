@@ -89,6 +89,7 @@ import type {
   MetricsResponse,
   MonitoringApiInput,
   MoveFertigationRequest,
+  PostAuthEventRequest,
   PostFacilityReadinessEvent200,
   PostFacilityReadinessEvent201,
   PostWizardEventRequest,
@@ -6382,6 +6383,77 @@ export const usePostWizardEvent = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getPostWizardEventMutationOptions(options), queryClient);
+    }
+
+export const getPostAuthEventUrl = () => {
+
+
+
+
+  return `/api/auth-events`
+}
+
+/**
+ * @summary AUTH-004 fire-and-forget auth surface telemetry (sign-in/reset/sign-up funnel)
+ */
+export const postAuthEvent = async (postAuthEventRequest: PostAuthEventRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getPostAuthEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      postAuthEventRequest,)
+  }
+);}
+
+
+
+
+export const getPostAuthEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postAuthEvent>>, TError,{data: BodyType<PostAuthEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postAuthEvent>>, TError,{data: BodyType<PostAuthEventRequest>}, TContext> => {
+
+const mutationKey = ['postAuthEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postAuthEvent>>, {data: BodyType<PostAuthEventRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postAuthEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostAuthEventMutationResult = NonNullable<Awaited<ReturnType<typeof postAuthEvent>>>
+    export type PostAuthEventMutationBody = BodyType<PostAuthEventRequest>
+    export type PostAuthEventMutationError = ErrorType<void>
+
+    /**
+ * @summary AUTH-004 fire-and-forget auth surface telemetry (sign-in/reset/sign-up funnel)
+ */
+export const usePostAuthEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postAuthEvent>>, TError,{data: BodyType<PostAuthEventRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postAuthEvent>>,
+        TError,
+        {data: BodyType<PostAuthEventRequest>},
+        TContext
+      > => {
+      return useMutation(getPostAuthEventMutationOptions(options), queryClient);
     }
 
 export const getGetFacilityReadinessUrl = () => {

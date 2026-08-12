@@ -105,6 +105,8 @@ export * from './metricSeriesPoint';
 export * from './metricsResponse';
 export * from './monitoringApiInput';
 export * from './moveFertigationRequest';
+export * from './postAuthEventRequest';
+export * from './postAuthEventRequestEventType';
 export * from './postFacilityReadinessEvent200';
 export * from './postFacilityReadinessEvent201';
 export * from './postWizardEventRequest';
