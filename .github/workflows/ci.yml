@@ -215,7 +215,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Render CLI (checksum-verified)
         run: |
-          curl -fsSLo /tmp/render.zip "https://github.com/render-oss/cli/releases/download/v${RENDER_VERSION}/cli_${RENDER_VERSION}_linux_amd64.zip"
+          curl -fsSLo /tmp/render.zip --retry 5 --retry-all-errors --retry-delay 3 "https://github.com/render-oss/cli/releases/download/v${RENDER_VERSION}/cli_${RENDER_VERSION}_linux_amd64.zip"
           echo "${RENDER_SHA256}  /tmp/render.zip" | sha256sum -c -
           unzip -q /tmp/render.zip -d /tmp/render-cli
           sudo install /tmp/render-cli/cli_v${RENDER_VERSION} /usr/local/bin/render
