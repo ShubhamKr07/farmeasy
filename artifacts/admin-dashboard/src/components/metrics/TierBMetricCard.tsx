@@ -186,24 +186,24 @@ function SeriesChart({ def, rows, size = "compact" }: { def: MetricDef; rows: Se
         {def.render === "bar" ? (
           <BarChart data={rows}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dy={8} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dx={-8} />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dx={-8} />
             <Tooltip contentStyle={tooltipStyle} />
             <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
           </BarChart>
         ) : def.render === "line" ? (
           <LineChart data={rows}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dy={8} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dx={-8} />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dx={-8} />
             <Tooltip contentStyle={tooltipStyle} />
             <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
           </LineChart>
         ) : (
           <AreaChart data={rows}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dy={8} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dx={-8} />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dx={-8} />
             <Tooltip contentStyle={tooltipStyle} />
             <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} fill="hsl(var(--primary))" fillOpacity={0.15} />
           </AreaChart>
@@ -235,8 +235,8 @@ function HBar({ rows }: { rows: SeriesPoint[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart layout="vertical" data={rows}>
           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
-          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-          <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={90} />
+          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+          <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} width={90} />
           <Tooltip contentStyle={tooltipStyle} />
           <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
         </BarChart>
@@ -256,8 +256,8 @@ function ScatterPlot({ rows }: { rows: Record<string, unknown>[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis type="number" dataKey="x" name={xKey} axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-          <YAxis type="number" dataKey="y" name={yKey} axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+          <XAxis type="number" dataKey="x" name={xKey} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+          <YAxis type="number" dataKey="y" name={yKey} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
           <ZAxis range={[40, 40]} />
           <Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }} />
           <Scatter data={data} fill="hsl(var(--primary))" />

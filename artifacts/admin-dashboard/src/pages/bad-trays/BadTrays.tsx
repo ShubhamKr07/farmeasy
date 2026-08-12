@@ -172,7 +172,7 @@ export function BadTrays() {
                         <p className="text-xs text-muted-foreground">{issue.frequency}% of incidents</p>
                       </div>
                     </div>
-                    <Badge variant="destructive" className="shrink-0 text-[10px]">
+                    <Badge variant="destructive" className="shrink-0 text-xs">
                       {issue.affectedTrays} trays
                     </Badge>
                   </div>
@@ -222,7 +222,7 @@ export function BadTrays() {
                       <td className="p-3">
                         <Badge
                           variant={entry.severity === "High" ? "destructive" : entry.severity === "Medium" ? "default" : "outline"}
-                          className="text-[10px]"
+                          className="text-xs"
                         >
                           {entry.severity}
                         </Badge>

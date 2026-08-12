@@ -97,7 +97,7 @@ export function FarmBasics({ onSaved }: { onSaved: (data: { facilityId: number; 
                 <FormItem>
                   <div className="flex items-center gap-2">
                     <FormLabel>Timezone</FormLabel>
-                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[hsl(142_40%_96%)] border border-[hsl(142_30%_88%)] text-primary">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[hsl(142_40%_96%)] border border-[hsl(142_30%_88%)] text-primary">
                       Auto-detected
                     </span>
                   </div>

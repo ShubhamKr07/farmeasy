@@ -494,7 +494,7 @@ export function Inventory() {
               <div className="text-center space-y-0.5">
                 <p className="text-base font-bold text-foreground">{qrLot.seedName}</p>
                 <p className="text-xs font-mono text-muted-foreground">{qrLot.qrCode}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Seed Lot · FarmSmart</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Seed Lot · FarmSmart</p>
               </div>
               <div className="flex gap-2 w-full pt-1">
                 <Button variant="outline" className="flex-1 gap-2" onClick={handleDownloadSVG}>
@@ -528,7 +528,7 @@ export function Inventory() {
               <div className="text-center space-y-0.5">
                 <p className="text-base font-bold text-foreground">{qrItem.name}</p>
                 <p className="text-xs font-mono text-muted-foreground">{generateItemCode(qrItem.id)} · arrived {formatArrivalDate(qrItem)}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Inventory · FarmSmart</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Inventory · FarmSmart</p>
               </div>
               <div className="flex gap-2 w-full pt-1">
                 <Button variant="outline" className="flex-1 gap-2" onClick={() => {

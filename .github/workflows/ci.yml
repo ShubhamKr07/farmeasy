@@ -60,6 +60,8 @@ jobs:
         run: git diff --exit-code -- lib/api-client-react/src/generated lib/api-zod/src/generated
       - name: Typecheck
         run: pnpm run typecheck
+      - name: A11Y Regression Guard (A11Y-002/003)
+        run: node scripts/ci/check-a11y-regression.mjs
       - name: Check tenant-scoping (TEN-004)
         run: node scripts/ci/check-tenant-scope.mjs
 
