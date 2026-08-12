@@ -48,7 +48,7 @@
  *   records forward inbound mail into the Mailosaur account. Mailosaur is the
  *   canonical OTP-retrieval provider (foundation runbook lists the
  *   "Mailtrap/Mailosaur-style" test inbox as the open item). The provider-
- *   specific code is isolated in `pollInboxForOtp()` / `resolveMailosaurServerId()`
+ *   specific code is isolated in `pollInboxForOtp()` / `serverIdFromEmail()`
  *   so swapping to a different provider is a localized change. See "Deviations"
  *   in .superpowers/sdd/task-2-report.md.
  *
