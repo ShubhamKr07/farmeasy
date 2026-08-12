@@ -69,7 +69,7 @@ export function createAuthRouter(): Router {
   // (trim + lowercase) before the lookup, matching how rows are stored.
   router.get("/auth/signup-availability", availabilityLimiter, async (req: Request, res: Response) => {
     try {
-      const mode = getSignupMode();
+      const mode = await getSignupMode();
       if (mode === "off") return res.json({ mode, allowed: false });
       if (mode === "public") return res.json({ mode, allowed: true });
 

@@ -1,5 +1,6 @@
 import { describe, test, before, after } from "node:test";
 import { deepStrictEqual } from "node:assert";
+import { eq } from "drizzle-orm";
 import request from "supertest";
 import { createAuthenticatedTestApp } from "../helpers/testApp";
 import {
@@ -10,13 +11,24 @@ import {
 } from "../helpers/testDatabase";
 
 /**
- * GET /auth/signup-availability — public sign-up gating (TEN-012 Task 3).
+ * GET /auth/signup-availability — public sign-up gating (TEN-011/TEN-012).
  *
  * The router is ungated (no auth) and builds its OWN rate limiter inside the
  * `createAuthRouter()` factory (mirrors wizard-events.ts), so each test gets
  * an isolated MemoryStore — one suite's requests never count against
- * another's budget. The handler branches on `process.env.SIGNUP_MODE` at
- * request time, so each test sets/restores it.
+ * another's budget.
+ *
+ * TEN-011: `getSignupMode()` is now DB-authoritative (reads the
+ * `signup_config` singleton row, not `process.env.SIGNUP_MODE`) — the SAME
+ * row the `before_user_created` hook (00025_signup_enforcement.sql) reads,
+ * so this endpoint's answer and real enforcement can never drift. Every test
+ * below sets the mode via a direct UPDATE on `signup_config` (not the env)
+ * to prove that. `signup_config` is a singleton (id=1, seeded by
+ * 0034_signup_config.sql) — it is never in `useDatabaseFixture`'s truncate
+ * list (truncating a `default 1`, non-serial PK singleton would just delete
+ * the only row with no auto-reseed); `setMode` below UPDATEs it in place and
+ * `before`/`after` restore it to 'off' (the seeded default) so this file
+ * never leaks a non-default mode to a later test file.
  *
  * Importing the router pulls in `@workspace/db` (which throws without
  * DATABASE_URL), so every describe is gated on TEST_DATABASE_URL. The
@@ -37,20 +49,25 @@ closeDatabasePoolAfterTests();
 const dbUrl = requireTestDatabaseUrl();
 const admin = getAdminDb();
 
-// SIGNUP_MODE off/public — no DB query is reached (the handler returns before
-// the allowlist lookup), but importing the router needs DATABASE_URL.
-describe("GET /auth/signup-availability — SIGNUP_MODE off/public", { skip: !dbUrl }, () => {
-  // Sets DATABASE_URL + imports @workspace/db before the dynamic router
-  // import inside `app()`; the truncate is harmless for these cases.
+async function setMode(mode: "off" | "allowlist" | "public") {
+  const { signupConfigTable, db } = await import("@workspace/db");
+  const database = getAdminDb() ?? db;
+  await database
+    .update(signupConfigTable)
+    .set({ mode })
+    .where(eq(signupConfigTable.id, 1));
+}
+
+describe("GET /auth/signup-availability — signup_config mode (DB-authoritative, TEN-011)", { skip: !dbUrl }, () => {
+  // signup_allowlist truncated per test; signup_config is the singleton and
+  // is restored (not truncated) via setMode in before/after below.
   useDatabaseFixture(["signup_allowlist"]);
 
-  let savedMode: string | undefined;
-  before(() => {
-    savedMode = process.env.SIGNUP_MODE;
+  before(async () => {
+    await setMode("off");
   });
-  after(() => {
-    if (savedMode === undefined) delete process.env.SIGNUP_MODE;
-    else process.env.SIGNUP_MODE = savedMode;
+  after(async () => {
+    await setMode("off");
   });
 
   async function app() {
@@ -59,50 +76,30 @@ describe("GET /auth/signup-availability — SIGNUP_MODE off/public", { skip: !db
     return createAuthenticatedTestApp(createAuthRouter());
   }
 
-  test("SIGNUP_MODE unset -> { mode:'off', allowed:false }", async () => {
-    delete process.env.SIGNUP_MODE;
+  test("signup_config.mode='off' -> { mode:'off', allowed:false }", async () => {
+    await setMode("off");
     const res = await request(await app()).get("/api/auth/signup-availability");
     deepStrictEqual(res.body, { mode: "off", allowed: false });
   });
 
-  test("SIGNUP_MODE='off' -> { mode:'off', allowed:false }", async () => {
-    process.env.SIGNUP_MODE = "off";
-    const res = await request(await app()).get("/api/auth/signup-availability");
-    deepStrictEqual(res.body, { mode: "off", allowed: false });
-  });
-
-  test("SIGNUP_MODE='OFF' (case-insensitive) -> { mode:'off', allowed:false }", async () => {
-    process.env.SIGNUP_MODE = "OFF";
-    const res = await request(await app()).get("/api/auth/signup-availability");
-    deepStrictEqual(res.body, { mode: "off", allowed: false });
-  });
-
-  test("SIGNUP_MODE='public' -> { mode:'public', allowed:true }", async () => {
-    process.env.SIGNUP_MODE = "public";
+  test("signup_config.mode='public' -> { mode:'public', allowed:true }", async () => {
+    await setMode("public");
     const res = await request(await app()).get("/api/auth/signup-availability");
     deepStrictEqual(res.body, { mode: "public", allowed: true });
-  });
-
-  test("SIGNUP_MODE='garbage' -> defaults to off", async () => {
-    process.env.SIGNUP_MODE = "totally-unknown-value";
-    const res = await request(await app()).get("/api/auth/signup-availability");
-    deepStrictEqual(res.body, { mode: "off", allowed: false });
   });
 });
 
 // allowlist mode — DB-backed lookup. Seeding writes directly to
 // signup_allowlist (no app request carries RLS context for it), so the admin
 // connection is required.
-describe("GET /auth/signup-availability — SIGNUP_MODE allowlist (DB)", { skip: !admin }, () => {
+describe("GET /auth/signup-availability — signup_config mode allowlist (DB)", { skip: !admin }, () => {
   useDatabaseFixture(["signup_allowlist"]);
 
-  let savedMode: string | undefined;
-  before(() => {
-    savedMode = process.env.SIGNUP_MODE;
+  before(async () => {
+    await setMode("allowlist");
   });
-  after(() => {
-    if (savedMode === undefined) delete process.env.SIGNUP_MODE;
-    else process.env.SIGNUP_MODE = savedMode;
+  after(async () => {
+    await setMode("off");
   });
 
   const SEEDED_EMAIL = "tester@example.com";
@@ -122,7 +119,6 @@ describe("GET /auth/signup-availability — SIGNUP_MODE allowlist (DB)", { skip:
   }
 
   test("allowlist + seeded email (mixed-case/whitespace input) -> allowed:true", async () => {
-    process.env.SIGNUP_MODE = "allowlist";
     await seedAllowlistedEmail();
     const res = await request(await app())
       .get("/api/auth/signup-availability")
@@ -131,7 +127,6 @@ describe("GET /auth/signup-availability — SIGNUP_MODE allowlist (DB)", { skip:
   });
 
   test("allowlist + absent email -> allowed:false", async () => {
-    process.env.SIGNUP_MODE = "allowlist";
     await seedAllowlistedEmail();
     const res = await request(await app())
       .get("/api/auth/signup-availability")
@@ -140,7 +135,6 @@ describe("GET /auth/signup-availability — SIGNUP_MODE allowlist (DB)", { skip:
   });
 
   test("allowlist + whitespace-only email param -> allowed:false", async () => {
-    process.env.SIGNUP_MODE = "allowlist";
     await seedAllowlistedEmail();
     const res = await request(await app())
       .get("/api/auth/signup-availability")
@@ -149,9 +143,45 @@ describe("GET /auth/signup-availability — SIGNUP_MODE allowlist (DB)", { skip:
   });
 
   test("allowlist + no email param -> allowed:false", async () => {
-    process.env.SIGNUP_MODE = "allowlist";
     await seedAllowlistedEmail();
     const res = await request(await app()).get("/api/auth/signup-availability");
     deepStrictEqual(res.body, { mode: "allowlist", allowed: false });
+  });
+});
+
+// TEN-011 Task 3 Step 2: prove availability tracks signup_config, NOT the
+// env — the key single-source-of-truth regression guard. A stale/misleading
+// SIGNUP_MODE env value must be ignored once the DB row exists.
+describe("GET /auth/signup-availability — reflects signup_config, not SIGNUP_MODE env", { skip: !dbUrl }, () => {
+  useDatabaseFixture(["signup_allowlist"]);
+
+  let savedEnvMode: string | undefined;
+  before(async () => {
+    savedEnvMode = process.env.SIGNUP_MODE;
+    await setMode("off");
+  });
+  after(async () => {
+    if (savedEnvMode === undefined) delete process.env.SIGNUP_MODE;
+    else process.env.SIGNUP_MODE = savedEnvMode;
+    await setMode("off");
+  });
+
+  async function app() {
+    const { createAuthRouter } = await import("../../routes/auth");
+    return createAuthenticatedTestApp(createAuthRouter());
+  }
+
+  test("env SIGNUP_MODE='public' is IGNORED while signup_config.mode='off'", async () => {
+    process.env.SIGNUP_MODE = "public";
+    await setMode("off");
+    const res = await request(await app()).get("/api/auth/signup-availability");
+    deepStrictEqual(res.body, { mode: "off", allowed: false });
+  });
+
+  test("env SIGNUP_MODE='off' is IGNORED while signup_config.mode='public'", async () => {
+    process.env.SIGNUP_MODE = "off";
+    await setMode("public");
+    const res = await request(await app()).get("/api/auth/signup-availability");
+    deepStrictEqual(res.body, { mode: "public", allowed: true });
   });
 });
