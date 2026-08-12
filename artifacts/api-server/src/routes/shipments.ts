@@ -1,11 +1,21 @@
 import { Router, type Request, type Response } from "express";
 import { eq, and, gt, desc, asc, ilike } from "drizzle-orm";
 import { withTenantScope, shipmentsTable } from "@workspace/db";
+import { requireTenantContext } from "../middlewares/tenantContext";
+import { requireRole } from "../middlewares/requireRole";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 const router = Router();
+
+// All routes in THIS router require a resolved tenant AND owner/admin — a
+// technician could otherwise create/modify/delete shipments via direct API
+// call with no server-side check (Task 11 remediation, same self-gate
+// pattern as invitations.ts/members.ts). Must be mounted in app.ts's tier 4
+// (after every router a technician is allowed to reach) — see app.ts's
+// tiering comment.
+router.use(requireTenantContext, requireRole("owner", "admin"));
 
 function generateShortId(): string {
   return "SHP-" + Math.random().toString(36).slice(2, 8).toUpperCase();

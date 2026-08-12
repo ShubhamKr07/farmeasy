@@ -5,8 +5,17 @@ import { db, facilitiesTable, withTenantScope } from "@workspace/db";
 import { METRICS_BY_ID, metricsForTab, type MetricTab, type TemplateName } from "@workspace/metrics";
 import { TEMPLATES } from "../lib/metrics/templates";
 import { isConnected as isQuickbooksConnected } from "../lib/accounting/quickbooks";
+import { requireTenantContext } from "../middlewares/tenantContext";
+import { requireRole } from "../middlewares/requireRole";
 
 const router = Router();
+
+// All routes in THIS router require a resolved tenant AND owner/admin — financial
+// and operational metrics have no legitimate technician use case (Task 11 remediation,
+// same self-gate pattern as invitations.ts/members.ts). Must be mounted in app.ts's
+// tier 4 (after every router a technician is allowed to reach) — see app.ts's tiering
+// comment.
+router.use(requireTenantContext, requireRole("owner", "admin"));
 
 /**
  * GET /api/metrics?tab=overview&keys=ov.yield.byMonth,ov.cycles.byStatus&range=30d
