@@ -9,10 +9,9 @@ BEGIN;
 SELECT plan(7);
 
 -- Drizzle migration bookkeeping lives in its own schema (see drizzle.config.ts
--- and lib/db/scripts/migrate.mjs). All 34 Drizzle migrations should have been
--- replayed (0033, MT-M2 public-RLS remediation Batch 4, is the most recent
--- addition -- adds sensor_status.facility_id + unique(facility_id), deleting
--- the prior single global row).
+-- and lib/db/scripts/migrate.mjs). All 35 Drizzle migrations should have been
+-- replayed (0034, TEN-011, is the most recent addition -- adds the
+-- signup_config singleton table, seeded mode='off').
 SELECT has_table(
   'drizzle',
   '__drizzle_migrations',
@@ -20,8 +19,8 @@ SELECT has_table(
 );
 SELECT is(
   (SELECT count(*) FROM drizzle.__drizzle_migrations)::integer,
-  34,
-  'drizzle.__drizzle_migrations has exactly 34 rows (full migration history replayed)'
+  35,
+  'drizzle.__drizzle_migrations has exactly 35 rows (full migration history replayed)'
 );
 
 -- Core application table seeded by the Drizzle schema.
@@ -151,11 +150,16 @@ SELECT is(
 -- with ROLE-AGNOSTIC app.facility_id GUC policies (SELECT/INSERT/UPDATE,
 -- matching cycles.ts's/dashboard.ts's rescoped call sites) -- the last
 -- public table lacking RLS entirely, closing task #4's last no-RLS-at-all
--- gap on public tables.
+-- gap on public tables. 00025 (TEN-011) adds the before_user_created
+-- Postgres hook that enforces public.signup_config's mode (off/allowlist/
+-- public) server-side -- previously only the UI (SIGNUP_MODE) gated
+-- sign-up, and public self-signup (the browser's own supabase.auth.signUp/
+-- signInWithOAuth calls) bypassed the api-server entirely -- plus RLS on
+-- the new signup_config singleton table (0034_signup_config.sql).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  24,
-  'supabase_migrations.schema_migrations has exactly 24 rows (Supabase migrations 00001-00024)'
+  25,
+  'supabase_migrations.schema_migrations has exactly 25 rows (Supabase migrations 00001-00025)'
 );
 
 SELECT * FROM finish();
