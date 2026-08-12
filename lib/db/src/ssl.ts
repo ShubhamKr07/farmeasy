@@ -55,3 +55,51 @@ export function buildSslConfig(connectionString: string): PoolConfig["ssl"] {
   }
   return { ca, rejectUnauthorized: true };
 }
+
+/**
+ * Remove any `sslmode` query parameter from a Postgres connection string.
+ *
+ * node-postgres parses a connection string's `sslmode` (via pg-connection-string)
+ * into its own `ssl` value that SILENTLY OVERWRITES the explicit `ssl` object
+ * passed to `new Pool({ connectionString, ssl })`. That drops the CA-pinned
+ * config from `buildSslConfig` and lets pg fall back to the system trust store,
+ * which does NOT contain Supabase's private Root 2021 CA — so strict TLS then
+ * fails with "self-signed certificate in certificate chain", and a permissive
+ * `sslmode` would instead silently downgrade the pinning, defeating Release-1
+ * Task-10's MITM protection outright.
+ *
+ * Real production incident (2026-08-10): prod `DATABASE_URL` carried
+ * `?sslmode=require` while staging did not — prod's CA-pinned TLS was inert and
+ * the API's DB path was down ~34h; staging (no `sslmode`) was fine.
+ *
+ * Stripping the param makes our explicit `ssl` config the single source of
+ * truth for TLS posture regardless of what the env-provided URL contains. Any
+ * other query params are preserved.
+ */
+export function stripSslmode(connectionString: string): string {
+  const q = connectionString.indexOf("?");
+  if (q === -1) return connectionString;
+  const base = connectionString.slice(0, q);
+  const kept = connectionString
+    .slice(q + 1)
+    .split("&")
+    .filter((p) => p !== "" && !/^sslmode=/i.test(p));
+  return kept.length ? `${base}?${kept.join("&")}` : base;
+}
+
+/**
+ * Single source of truth for a Postgres pool's connection + TLS options. Binds
+ * `sslmode`-stripping to the ssl build so the two can never drift: any
+ * `sslmode` in the env URL is removed BEFORE both the returned
+ * `connectionString` and the `ssl` config are derived, guaranteeing
+ * `buildSslConfig`'s CA-pinned `ssl` object actually reaches the socket. Use
+ * this at every `new Pool(...)` call site (src/index.ts, scripts/migrate.mjs)
+ * instead of wiring `connectionString` + `buildSslConfig` separately.
+ */
+export function buildPoolConfig(connectionString: string): {
+  connectionString: string;
+  ssl: PoolConfig["ssl"];
+} {
+  const sanitized = stripSslmode(connectionString);
+  return { connectionString: sanitized, ssl: buildSslConfig(sanitized) };
+}

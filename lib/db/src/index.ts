@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema";
-import { buildSslConfig } from "./ssl";
+import { buildPoolConfig } from "./ssl";
 
 const { Pool } = pg;
 
@@ -19,11 +19,11 @@ if (!connectionString) {
 // The previous `rejectUnauthorized: false` encrypted the link but accepted
 // any certificate — a live MITM gap that's now closed (fail-closed: a remote
 // connection string with no DATABASE_CA_CERT throws rather than downgrade).
-// Shared with scripts/migrate.mjs so the app pool and migrations never drift.
-export const pool = new Pool({
-  connectionString,
-  ssl: buildSslConfig(connectionString),
-});
+// buildPoolConfig also strips any `sslmode` from the URL first — pg would
+// otherwise silently ignore the pinned `ssl` object (see ./ssl for the
+// 2026-08-10 incident). Shared with scripts/migrate.mjs so the app pool and
+// migrations never drift.
+export const pool = new Pool(buildPoolConfig(connectionString));
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
