@@ -4,12 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Empty } from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip as UiTooltip,
-  TooltipContent as UiTooltipContent,
-  TooltipTrigger as UiTooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Info, Download } from "lucide-react";
+import { MetricDefinitionTooltip } from "./MetricDefinitionTooltip";
+import { Download } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   AreaChart, Area, CartesianGrid, LineChart, Line,
@@ -46,7 +42,8 @@ interface TierBMetricCardProps {
 /**
  * Tier-B metric card: fetches its value from /api/metrics (one React Query per
  * card, scoped by id+range) and renders per the metric's `render` type.
- * Header carries an (i) definition tooltip and a CSV export of the fetched data.
+ * Header carries an (ⓘ) ARIA definition tooltip (term · formula/source ·
+ * resolved window — see MetricDefinitionTooltip) and a CSV export of the data.
  *
  * Height contract: the Card root uses `h-full` so it stretches to whatever
  * row height the parent grid assigned (DraggableMetricGrid sets
@@ -81,14 +78,10 @@ export function TierBMetricCard({ def, range, size = "compact", suppressConnecti
           <CardTitle className="text-sm font-medium text-muted-foreground">
             {def.label}{def.unit && def.unit !== "count" ? ` (${def.unit})` : ""}
           </CardTitle>
-          <UiTooltip>
-            <UiTooltipTrigger asChild>
-              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-            </UiTooltipTrigger>
-            <UiTooltipContent side="top" className="max-w-xs">
-              {def.description}
-            </UiTooltipContent>
-          </UiTooltip>
+          {/* HLP-001/002: ARIA definition tooltip (term · formula/source ·
+              resolved window). Focus, click, and tap all open it; CI keeps
+              coverage complete for kpi/stat metrics. */}
+          <MetricDefinitionTooltip id={def.id} />
         </div>
         {canExport && (
           <Button

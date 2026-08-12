@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import {
   Sprout, Layers, Factory, AlertTriangle, Leaf, TrendingUp, Package, Download,
 } from "lucide-react";
+import { MetricDefinitionTooltip } from "./MetricDefinitionTooltip";
 import type { MetricDef } from "@workspace/metrics";
 import type {
   DashboardStats, Alert, Shipment, InventoryItem, ChartDataPoint,
@@ -57,7 +58,10 @@ function YieldWeekCard({ data }: RendererProps) {
   return (
     <Card className="shadow-sm h-full flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 shrink-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Total Yield (Week)</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Total Yield (Week)</CardTitle>
+          <MetricDefinitionTooltip id="ov.yield.week" />
+        </div>
         <Sprout className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0">
@@ -105,7 +109,10 @@ function ActiveCyclesCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("cycles"))} title="Open Active Cycles">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Active Cycles</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Active Cycles</CardTitle>
+          <MetricDefinitionTooltip id="ov.cycles.active" />
+        </div>
         <Factory className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -128,7 +135,10 @@ function ChannelUtilKpiCard({ data }: RendererProps) {
   return (
     <Card className="shadow-sm h-full flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 shrink-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Channel Utilization</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Channel Utilization</CardTitle>
+          <MetricDefinitionTooltip id="ov.cap.utilization" />
+        </div>
         <Layers className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent className="flex-1 flex flex-col">
@@ -145,7 +155,10 @@ function BadTraysCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("destructive")} {...a11yClick(() => open("bad-trays"))} title="Open Bad Trays Analysis">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Bad Trays</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Bad Trays</CardTitle>
+          <MetricDefinitionTooltip id="ov.bad.count7d" />
+        </div>
         <AlertTriangle className="h-4 w-4 text-destructive" />
       </CardHeader>
       <CardContent>
@@ -166,7 +179,10 @@ function ActiveSeedLotsCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("seed-lots"))} title="Open Active Seed Lots">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Active Seed Lots</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Active Seed Lots</CardTitle>
+          <MetricDefinitionTooltip id="ov.seedlots.active" />
+        </div>
         <Leaf className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -185,7 +201,10 @@ function AlertsActionCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("warn")} {...a11yClick(() => open("alerts"))} title="Open System Alerts">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Alerts Requiring Action</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Alerts Requiring Action</CardTitle>
+          <MetricDefinitionTooltip id="ov.alerts.active" />
+        </div>
         <AlertTriangle className="h-4 w-4 text-status-warn" />
       </CardHeader>
       <CardContent>
@@ -202,7 +221,10 @@ function CyclesActionNeededCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("action-required"))} title="Open Cycles Needing Action">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Cycles Needing Action</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Cycles Needing Action</CardTitle>
+          <MetricDefinitionTooltip id="ov.cycles.actionNeeded" />
+        </div>
         <TrendingUp className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -219,7 +241,12 @@ function YieldByWeekChart({ data }: RendererProps) {
   const yw = data.dashboard?.yieldByWeek || [];
   return (
     <Card className="shadow-sm h-full flex flex-col">
-      <CardHeader className="shrink-0"><CardTitle>Yield by Week</CardTitle></CardHeader>
+      <CardHeader className="shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle>Yield by Week</CardTitle>
+          <MetricDefinitionTooltip id="ov.yield.byWeek" />
+        </div>
+      </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0">
         <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
@@ -312,7 +339,12 @@ function ChannelUtilProgressCard({ data }: RendererProps) {
   const pct = Number(((d?.channelUtilization || 0) * 100).toFixed(1));
   return (
     <Card className="shadow-sm h-full flex flex-col">
-      <CardHeader className="shrink-0"><CardTitle>Channel Utilization</CardTitle></CardHeader>
+      <CardHeader className="shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle>Channel Utilization</CardTitle>
+          <MetricDefinitionTooltip id="ov.cap.utilizationChart" />
+        </div>
+      </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-center">
         <div className="flex flex-col items-center justify-center text-center py-4">
           <div className="text-4xl font-bold text-primary">{pct}%</div>
