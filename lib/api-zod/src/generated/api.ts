@@ -1477,3 +1477,15 @@ export const RemoveMemberResponse = zod.object({
 })
 
 
+/**
+ * Org-scoped read, no X-Facility-Id — the org is resolved server-side from the caller's active owner/admin membership. Aggregates facilityCount, activeCycles, and openAlerts across the org's facilities via a per-facility tenant-scoped loop.
+
+ * @summary Get org-level rollup summary (owner/admin only)
+ */
+export const GetOrgSummaryResponse = zod.object({
+  "facilityCount": zod.number(),
+  "activeCycles": zod.number(),
+  "openAlerts": zod.number()
+})
+
+

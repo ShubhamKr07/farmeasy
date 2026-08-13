@@ -225,6 +225,12 @@ export interface DashboardStats {
   sensorStatus?: SensorStatus;
 }
 
+export interface OrgSummary {
+  facilityCount: number;
+  activeCycles: number;
+  openAlerts: number;
+}
+
 export interface MetricSeriesPoint {
   label: string;
   value: number;
