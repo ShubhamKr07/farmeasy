@@ -436,7 +436,13 @@ describe("Cross-tenant isolation (TEN-007)", { skip: !dbUrl }, () => {
   test("TEN-014: POST /sensor-readings forgery attempt never corrupts org A's sensor state", async () => {
     const { db, sensorsTable } = await import("@workspace/db");
     const { eq } = await import("drizzle-orm");
-    const [sensor] = await db.select().from(sensorsTable).where(eq(sensorsTable.id, seededSensorId));
+    // Admin connection: this is a ground-truth verification read of org A's
+    // own sensor row after org B's rejected forgery attempt, not itself the
+    // isolation assertion (that already happened via the real HTTP request
+    // above, under the real farmsmart_app connection). sensors is
+    // facility-scoped RLS (00007) -- a bare read with no app.facility_id GUC
+    // set would otherwise see 0 rows regardless of the row's true state.
+    const [sensor] = await (getAdminDb() ?? db).select().from(sensorsTable).where(eq(sensorsTable.id, seededSensorId));
     ok(sensor, "org A's sensor must still exist");
     strictEqual(
       Number(sensor!.lastValue),

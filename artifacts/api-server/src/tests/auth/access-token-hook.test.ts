@@ -10,18 +10,19 @@
  * and asserted RLS/route behavior respected the injected value; that can
  * never fail if the hook's own SQL breaks, since the hook was never called.
  *
- * The disposable Supabase stack's TEST_DATABASE_URL connects `db` as the
- * `postgres` superuser (see scripts/ci/test-disposable-supabase.sh), which
- * has no execute grant revoked against it (GRANT/REVOKE EXECUTE only binds
- * non-superuser roles) -- calling the SECURITY DEFINER hook function
- * directly works there. It also means `db`'s own queries below run
- * BYPASSRLS in this env (no farmsmart_app role is provisioned locally --
- * see docs/runbooks/tenancy-db-role.md); the route-level tests below
- * (c)/(d)/(e) are still meaningful because the routes themselves apply
- * explicit tenant-scoped WHERE clauses (see routes/alerts.ts) independent of
- * RLS, and resolveTenantContext independently re-validates facility
- * ownership against the DB -- but they are not a substitute for the real
- * pgTAP RLS proofs (supabase/tests/**) run under farmsmart_app.
+ * The disposable Supabase stack's TEST_DATABASE_URL/DATABASE_URL connects
+ * `db` as the real, non-BYPASSRLS `farmsmart_app` role (see
+ * scripts/ci/test-disposable-supabase.sh) -- so RLS is genuinely enforced
+ * for every query below. Tests (a)/(b) call the hook via the ADMIN
+ * connection (getAdminDb()) instead, since in production the hook is
+ * invoked by Supabase's own Auth service as `supabase_auth_admin` (EXECUTE
+ * is granted only to that role, revoked from authenticated/anon/public --
+ * see 00001/00015) -- this backend's own farmsmart_app connection was never
+ * meant to call it directly, so using the admin connection here is a
+ * test-only need, not a change to the hook or its grants. The route-level
+ * tests below (c)/(d)/(e) exercise the real farmsmart_app connection end to
+ * end: both the route's own tenant-scoped WHERE clauses AND RLS itself now
+ * have to agree for these to pass.
  *
  * Assertions:
  * - (a) A user with an active membership gets the org role as the user_role
@@ -209,8 +210,19 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
     // directly with a synthetic GoTrue event carrying org A's user_id --
     // this is the hook contract itself (00015_access_token_hook_org_role.sql),
     // not a route/RLS proxy for it.
+    //
+    // Uses the admin connection: in production this function is invoked by
+    // Supabase's own Auth service as `supabase_auth_admin` (EXECUTE is
+    // GRANTed only to that role and explicitly REVOKEd from authenticated/
+    // anon/public -- see 00001_custom_access_token_hook.sql /
+    // 00015_access_token_hook_org_role.sql), never by this backend's own
+    // farmsmart_app connection -- the app never calls this hook for real.
+    // Calling it directly here is a test-only need (proving the hook's own
+    // SQL contract), matching the same test-only-elevated-access pattern as
+    // every other getAdminDb() use in this suite -- not a change to the
+    // hook, its grants, or RLS.
     const { db } = await import("@workspace/db");
-    const hookRes = await db.execute(
+    const hookRes = await (getAdminDb() ?? db).execute(
       sql`select public.custom_access_token_hook(
         jsonb_build_object('user_id', ${orgA.userId}::text, 'claims', '{}'::jsonb)
       ) as result`,
@@ -226,9 +238,10 @@ describe("Auth/RLS end-state semantics (access-token hook)", { skip: !dbUrl }, (
   test("(b) real custom_access_token_hook: no active membership omits the user_role claim entirely", async () => {
     // Same real hook call, this time for org B's user, who has no
     // organization_members row at all -- the hook must OMIT the claim key
-    // (not default it to a stale/synthetic value).
+    // (not default it to a stale/synthetic value). Admin connection: see
+    // test (a)'s comment above.
     const { db } = await import("@workspace/db");
-    const hookRes = await db.execute(
+    const hookRes = await (getAdminDb() ?? db).execute(
       sql`select public.custom_access_token_hook(
         jsonb_build_object('user_id', ${orgB.userId}::text, 'claims', '{}'::jsonb)
       ) as result`,

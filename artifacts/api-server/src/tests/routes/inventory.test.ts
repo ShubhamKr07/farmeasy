@@ -352,8 +352,12 @@ describe(
       strictEqual(clientErrors.length, 1, "the loser should be a 4xx validation error");
       strictEqual(serverErrors.length, 0, "no unhandled 5xx allowed");
 
-      // The final persisted row must still satisfy the invariant.
-      const [final] = await db
+      // The final persisted row must still satisfy the invariant. Admin
+      // connection: a ground-truth verification read (no WHERE/facility
+      // filter), not itself the isolation assertion -- inventory_items is
+      // facility-scoped RLS (00007), so a bare read with no app.facility_id
+      // GUC set would otherwise see 0 rows under the real farmsmart_app role.
+      const [final] = await (getAdminDb() ?? db)
         .select()
         .from(inventoryItemsTable);
       ok(
