@@ -48,6 +48,8 @@ tags:
     description: Organization member management
   - name: auth
     description: Pre-auth sign-up availability probe and waitlist capture
+  - name: org
+    description: Org-level rollup summary (owner/admin only)
 paths:
   /healthz:
     get:
@@ -1855,6 +1857,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /org/summary:
+    get:
+      operationId: getOrgSummary
+      tags: [org]
+      summary: Get org-level rollup summary (owner/admin only)
+      description: >
+        Org-scoped read, no X-Facility-Id — the org is resolved server-side
+        from the caller's active owner/admin membership. Aggregates
+        facilityCount, activeCycles, and openAlerts across the org's
+        facilities via a per-facility tenant-scoped loop.
+      responses:
+        "200":
+          description: Org summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSummary"
+
 components:
   schemas:
     HealthStatus:
@@ -2221,6 +2241,20 @@ components:
         - activeCropTypes
         - totalBadTrays
         - actionRequired
+
+    OrgSummary:
+      type: object
+      properties:
+        facilityCount:
+          type: integer
+        activeCycles:
+          type: integer
+        openAlerts:
+          type: integer
+      required:
+        - facilityCount
+        - activeCycles
+        - openAlerts
 
     ChartDataPoint:
       type: object

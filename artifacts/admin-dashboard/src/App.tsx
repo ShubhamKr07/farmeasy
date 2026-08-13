@@ -32,6 +32,7 @@ import { Inventory } from "@/pages/inventory/Inventory";
 import { Shipments } from "@/pages/shipments/Shipments";
 import { Accounting } from "@/pages/accounting/Accounting";
 import { Layout } from "@/pages/layout/Layout";
+import { OrgOverview } from "@/pages/org-overview/OrgOverview";
 import { Profile } from "@/pages/profile/Profile";
 import { Settings } from "@/pages/settings/Settings";
 import { Wizard } from "@/pages/onboarding/Wizard";
@@ -52,6 +53,7 @@ function Router() {
         <Route path="/shipments" component={Shipments} />
         <Route path="/accounting" component={Accounting} />
         <Route path="/layout" component={Layout} />
+        <Route path="/org" component={OrgOverview} />
         <Route path="/profile" component={Profile} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />

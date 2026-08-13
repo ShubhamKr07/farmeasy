@@ -89,6 +89,7 @@ import type {
   MetricsResponse,
   MonitoringApiInput,
   MoveFertigationRequest,
+  OrgSummary,
   PostAuthEventRequest,
   PostFacilityReadinessEvent200,
   PostFacilityReadinessEvent201,
@@ -7187,4 +7188,107 @@ export const useRemoveMember = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getRemoveMemberMutationOptions(options), queryClient);
     }
+
+export const getGetOrgSummaryUrl = () => {
+
+
+
+
+  return `/api/org/summary`
+}
+
+/**
+ * Org-scoped read, no X-Facility-Id — the org is resolved server-side from the caller's active owner/admin membership. Aggregates facilityCount, activeCycles, and openAlerts across the org's facilities via a per-facility tenant-scoped loop.
+
+ * @summary Get org-level rollup summary (owner/admin only)
+ */
+export const getOrgSummary = async ( options?: RequestInit): Promise<OrgSummary> => {
+
+  return customFetch<OrgSummary>(getGetOrgSummaryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOrgSummaryQueryKey = () => {
+    return [
+    `/api/org/summary`
+    ] as const;
+    }
+
+
+export const getGetOrgSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getOrgSummary>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOrgSummaryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrgSummary>>> = ({ signal }) => getOrgSummary({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOrgSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getOrgSummary>>>
+export type GetOrgSummaryQueryError = ErrorType<unknown>
+
+
+export function useGetOrgSummary<TData = Awaited<ReturnType<typeof getOrgSummary>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrgSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getOrgSummary>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOrgSummary<TData = Awaited<ReturnType<typeof getOrgSummary>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOrgSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getOrgSummary>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOrgSummary<TData = Awaited<ReturnType<typeof getOrgSummary>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get org-level rollup summary (owner/admin only)
+ */
+
+export function useGetOrgSummary<TData = Awaited<ReturnType<typeof getOrgSummary>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrgSummary>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOrgSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 

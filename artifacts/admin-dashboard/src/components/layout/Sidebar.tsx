@@ -1,9 +1,19 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { NAV_ITEMS, PAGE_ITEMS } from "./nav-items";
+import { useOrgRole } from "@/hooks/use-org-role";
 
 export function Sidebar() {
   const [location] = useLocation();
+  const { role, loading: roleLoading } = useOrgRole();
+
+  // Role-gated entries (e.g. Org Overview) are hidden until the role claim
+  // resolves — never flash a privileged nav entry during the loading window
+  // (see useOrgRole's doc comment). The server-side requireRole 403 remains
+  // the real access control; this is purely the directing UX.
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.roles || (!roleLoading && role !== null && item.roles.includes(role)),
+  );
 
   const renderItem = (item: (typeof NAV_ITEMS)[number]) => {
     const isActive = location === item.href;
@@ -36,7 +46,7 @@ export function Sidebar() {
           <div className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
             Operations
           </div>
-          {NAV_ITEMS.map(renderItem)}
+          {visibleNavItems.map(renderItem)}
         </nav>
 
         <nav className="space-y-1 mt-auto">
