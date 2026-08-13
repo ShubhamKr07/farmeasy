@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { renderWithQueryClient, screen, fireEvent, waitFor, within } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { Accounting } from "./Accounting";
 import * as apiClient from "@workspace/api-client-react";
@@ -98,7 +98,7 @@ describe("Accounting - QuickBooks failure state", () => {
   });
 
   it("shows exactly 1 banner and 0 card errors on connection-level 401 failure", async () => {
-    const { container } = render(<Accounting />);
+    const { container } = renderWithQueryClient(<Accounting />);
 
     // Wait for cards to render and trigger connection error
     await waitFor(() => {
@@ -119,7 +119,7 @@ describe("Accounting - QuickBooks failure state", () => {
   });
 
   it("shows card-scoped error even with healthy connection", async () => {
-    render(<Accounting />);
+    renderWithQueryClient(<Accounting />);
 
     await waitFor(() => {
       // The AR Aging card (card-scoped error) should show its own error+retry
@@ -131,7 +131,7 @@ describe("Accounting - QuickBooks failure state", () => {
 
   it("shows Disconnect in overflow menu and requires confirmation", async () => {
     const user = userEvent.setup();
-    render(<Accounting />);
+    renderWithQueryClient(<Accounting />);
 
     // Find and click the overflow menu button
     const overflowButton = screen.getByRole("button", { name: /⋯/ });
@@ -153,7 +153,7 @@ describe("Accounting - QuickBooks failure state", () => {
   });
 
   it("never shows Disconnect as the only visible CTA during connection failure", async () => {
-    const { container } = render(<Accounting />);
+    const { container } = renderWithQueryClient(<Accounting />);
 
     // Wait for connection error to be detected
     await waitFor(() => {
@@ -174,7 +174,7 @@ describe("Accounting - QuickBooks failure state", () => {
     const user = userEvent.setup();
     mockGetAccountingConnectUri.mockResolvedValueOnce({ authorizeUri: "https://qbo-auth.example.com" });
 
-    const { rerender } = render(<Accounting />);
+    const { rerender } = renderWithQueryClient(<Accounting />);
 
     // Wait for error state
     await waitFor(() => {
@@ -195,7 +195,7 @@ describe("Accounting - QuickBooks failure state", () => {
       (_: any, { onSuccess }: any) => onSuccess(),
     );
 
-    render(<Accounting />);
+    renderWithQueryClient(<Accounting />);
 
     // Open dropdown
     const overflowButton = screen.getByRole("button", { name: /⋯/ });
@@ -217,7 +217,7 @@ describe("Accounting - QuickBooks failure state", () => {
   });
 
   it("shows suppress skeleton for connection errors but not card-scoped errors", async () => {
-    render(<Accounting />);
+    renderWithQueryClient(<Accounting />);
 
     await waitFor(() => {
       // Connection-level error cards should show skeletons

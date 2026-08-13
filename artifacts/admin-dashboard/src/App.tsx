@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "./lib/supabase";
-import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter, usePostAuthEvent } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
@@ -126,6 +126,9 @@ export function SignInPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [oauthRedirecting, setOauthRedirecting] = useState(false);
+  // AUTH-004: sign-in funnel telemetry. signin_success fires once a session
+  // is established; signin_failed (with the error reason) fires on rejection.
+  const postAuthEvent = usePostAuthEvent();
 
   // Technician-denied is driven by the SAME condition that used to route to
   // the standalone TechnicianDeniedScreen: useOrgRole resolves "technician".
@@ -158,7 +161,17 @@ export function SignInPanel({
     // copy to the spec'd inline message (AUTH-003 Task 4 mockup 2b). The
     // network-level error message is the trigger; we surface a consistent
     // user-facing string.
-    if (signInError) setError("Wrong email or password.");
+    if (signInError) {
+      setError("Wrong email or password.");
+      // AUTH-004: record the failed sign-in attempt (reason is the GoTrue
+      // message — no PII beyond the userId the server derives from the JWT).
+      void postAuthEvent.mutateAsync({
+        data: { eventType: "signin_failed", reason: signInError.message },
+      });
+    } else {
+      // AUTH-004: session established — record the funnel's success step.
+      void postAuthEvent.mutateAsync({ data: { eventType: "signin_success" } });
+    }
   };
 
   // OAuth-redirect: flip the state BEFORE firing the redirect so the panel

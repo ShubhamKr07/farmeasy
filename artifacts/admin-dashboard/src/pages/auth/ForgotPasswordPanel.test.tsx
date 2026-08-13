@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { renderWithQueryClient, screen, cleanup } from "@/test-utils";
 import userEvent from "@testing-library/user-event";
 import { ForgotPasswordPanel } from "@/pages/auth/ForgotPasswordPanel";
 
@@ -56,7 +56,7 @@ async function driveAndCaptureConfirmation(
   mockResetPasswordForEmail.mockImplementation(async () => resetImpl());
   const user = userEvent.setup();
 
-  render(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
+  renderWithQueryClient(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
 
   await user.type(screen.getByLabelText("Email"), "someone@example.com");
   await user.click(screen.getByRole("button", { name: /send reset link/i }));
@@ -78,7 +78,7 @@ describe("ForgotPasswordPanel", () => {
   });
 
   it("renders the email form (state 1) initially", () => {
-    render(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
+    renderWithQueryClient(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /send reset link/i }),
@@ -118,7 +118,7 @@ describe("ForgotPasswordPanel", () => {
   it("renders an envelope icon in the confirmation state", async () => {
     mockResetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
     const user = userEvent.setup();
-    render(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
+    renderWithQueryClient(<ForgotPasswordPanel onBackToSignIn={() => undefined} />);
     await user.type(screen.getByLabelText("Email"), "a@b.com");
     await user.click(screen.getByRole("button", { name: /send reset link/i }));
     expect(document.querySelector("svg")).toBeInTheDocument();
@@ -128,7 +128,7 @@ describe("ForgotPasswordPanel", () => {
     mockResetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
     const onBack = vi.fn();
     const user = userEvent.setup();
-    render(<ForgotPasswordPanel onBackToSignIn={onBack} />);
+    renderWithQueryClient(<ForgotPasswordPanel onBackToSignIn={onBack} />);
     await user.type(screen.getByLabelText("Email"), "a@b.com");
     await user.click(screen.getByRole("button", { name: /send reset link/i }));
     await user.click(screen.getByRole("button", { name: /back to sign in/i }));

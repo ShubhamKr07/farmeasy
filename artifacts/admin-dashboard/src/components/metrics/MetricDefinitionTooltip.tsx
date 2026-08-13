@@ -150,9 +150,9 @@ export function MetricDefinitionTooltip({ id, ariaLabel, className }: MetricDefi
                 <span className="opacity-90"> — {entry.definition}</span>
               </div>
               {/* Line 2: formula / source attribution. */}
-              <div className="text-[11px] opacity-90">{entry.formula}</div>
+              <div className="text-[12px] opacity-90">{entry.formula}</div>
               {/* Line 3: explicit, resolved time window. */}
-              <div className="text-[11px] opacity-75 italic">{entry.window}</div>
+              <div className="text-[12px] opacity-75 italic">{entry.window}</div>
             </div>
           ) : (
             // Explicit fallback — never an empty tooltip. CI keeps this off

@@ -42,6 +42,23 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 
+// AUTH-004: SignInPanel now calls usePostAuthEvent (a react-query mutation
+// hook) to record signin_success/signin_failed telemetry. The geometry tests
+// here don't exercise the funnel, so stub the hook to avoid needing a
+// QueryClientProvider and to keep the mutation from firing real network
+// calls. Use importOriginal so the rest of the module's exports (e.g.
+// RecordReadinessEventRequestEventKey, pulled in transitively via Overview)
+// survive — a full module replacement broke FarmReadinessCard's imports.
+vi.mock("@workspace/api-client-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/api-client-react")>();
+  return {
+    ...actual,
+    usePostAuthEvent: () => ({
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+    }),
+  };
+});
+
 // ---- jsdom layout shim -----------------------------------------------------
 // Map the geometry classes the panel uses to real pixel values. Shared across
 // all rendered states so a missing class is the ONLY way a dimension can

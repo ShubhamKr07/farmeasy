@@ -82,8 +82,8 @@ function YieldWeekCard({ data }: RendererProps) {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yw} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} dy={6} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={32} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={6} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} width={32} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${formatNumber(v)} kg`, "Yield"]} />
                 <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 2 }} />
               </LineChart>
