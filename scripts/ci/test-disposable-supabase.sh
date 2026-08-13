@@ -145,6 +145,28 @@ alter default privileges in schema public grant usage, select on sequences to fa
 grant authenticated to farmsmart_app;
 SQL
 
+# 3.6. Hard-fail guard: assert the api-server suite's APP connection
+# ($TEST_DATABASE_URL, the same URL exported as TEST_DATABASE_URL/DATABASE_URL
+# for step 5 below) is genuinely non-BYPASSRLS *before* any test runs. The
+# functional RLS canaries in crops.test.ts/sensor-status.test.ts/demo.test.ts
+# key on `pg_roles.rolbypassrls` and gracefully degrade to structural-only
+# checks if it's ever true -- they do NOT hard-fail on their own if
+# `farmsmart_app` silently regains BYPASSRLS or this script's wiring
+# regresses to reconnect the suite as the `postgres` superuser. This step is
+# the unconditional backstop: it always runs, and exits non-zero loudly if
+# BYPASSRLS is true OR if the connected role isn't exactly `farmsmart_app`
+# (EXPECTED_DB_ROLE catches a silent fallback to `postgres`, which is itself
+# BYPASSRLS but is asserted explicitly here for a clearer failure message).
+# Reuses scripts/ci/verify-db-role.mjs (the same script the staging/prod
+# `verify-*-db-role.yml` workflows use) rather than a bespoke check, so there
+# is exactly one implementation of "is this role safe for RLS" to keep in
+# sync. Local disposable Postgres (127.0.0.1) is classified `ssl: false` by
+# buildSslConfig's isLocalDatabase() -- no DB_ROLE_CHECK_INSECURE_TLS needed
+# here (that flag is only for the hosted Supavisor pooler in CI/prod
+# workflows).
+echo "Asserting api-server APP connection (farmsmart_app) does not bypass RLS..."
+DATABASE_URL="$TEST_DATABASE_URL" EXPECTED_DB_ROLE="farmsmart_app" node "$ROOT/scripts/ci/verify-db-role.mjs"
+
 # 4. Run pgTAP assertions against the fully-migrated disposable DB.
 # --workdir IS required here: `test db` spins up a Docker helper container
 # attached to the project's Docker network to run pg_prove, so it must
