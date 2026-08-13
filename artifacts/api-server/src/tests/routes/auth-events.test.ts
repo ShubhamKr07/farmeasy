@@ -8,7 +8,12 @@ import {
   seedTestUser,
   closeDatabasePoolAfterTests,
 } from "../helpers/testDatabase";
-import { createAuthEventsRouter } from "../../routes/auth-events";
+// NOT a static top-level import: routes/auth-events.ts imports `db` from
+// @workspace/db, which throws at module-load time if DATABASE_URL is unset
+// at all (see lib/db/src/index.ts) -- a static import here would crash file
+// load before the `{ skip: !dbUrl }` below ever gets evaluated, exactly the
+// class of bug accounting.test.ts's own dynamic-import comment documents.
+// Deferred into the skip-gated before() hook instead.
 
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
@@ -49,6 +54,7 @@ describe("POST /api/auth-events — telemetry endpoint", { skip: !dbUrl }, () =>
     });
 
     // Create test app with the auth-events router.
+    const { createAuthEventsRouter } = await import("../../routes/auth-events");
     const router = createAuthEventsRouter();
     app = createAuthenticatedTestApp(router, { sub: userId }, undefined);
   });
