@@ -33,6 +33,19 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 /**
+ * AUTH-004: ForgotPasswordPanel calls usePostAuthEvent (a react-query mutation
+ * hook) to record reset_request telemetry. The no-account-existence-oracle
+ * regression tests here deliberately swallow the resolved value/error and
+ * only assert the rendered confirmation markup, so the hook is stubbed — no
+ * QueryClientProvider and no real network calls.
+ */
+vi.mock("@workspace/api-client-react", () => ({
+  usePostAuthEvent: () => ({
+    mutateAsync: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+/**
  * Drives the forgot-password form to the confirmation state and returns the
  * full outerHTML of the confirmation container. Comparing outerHTML catches
  * any fork — text, structure, classes, or attributes — in one assertion.
