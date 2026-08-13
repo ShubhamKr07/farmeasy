@@ -20,17 +20,17 @@ import {
  * organizationId/facilityId the test itself created.
  *
  * CROSS-TENANT PROOF SCOPE — read before trusting the "A excludes B" tests:
- * these assert org.ts's *app-layer* isolation — the explicit
+ * these primarily assert org.ts's *app-layer* isolation — the explicit
  * `organization_id`/`facilityId` WHERE filters in the route — which hold
- * regardless of DB role. They do NOT assert the facility-GUC RLS: the
- * disposable CI stack (test-disposable-supabase.sh) connects as the postgres
- * superuser (BYPASSRLS) and `farmsmart_app` is not provisioned there, so RLS
- * is a silent no-op in this path. That's a known, systemic gap (provision
- * farmsmart_app in the disposable stack — docs/runbooks/mt-m1-rls-role-rotation.md
- * "Task 16", deferred 2026-08-05), not specific to TEN-009. org.ts does not
- * rely on RLS for correctness here (the explicit filters are the control; RLS
- * is defense-in-depth), so these tests are a valid proof of THIS route's
- * isolation — but do not read them as an RLS proof.
+ * regardless of DB role (org.ts does not rely on RLS for correctness here;
+ * the explicit filters are the control). As of this branch's base, the
+ * disposable CI stack ALSO runs the api-server suite under the real
+ * non-BYPASSRLS `farmsmart_app` role (test-disposable-supabase.sh provisions
+ * it — the systemic gap that used to make RLS a silent no-op here was closed),
+ * so the facility-GUC RLS is genuinely exercised too, as defense-in-depth
+ * behind the explicit filters — not just on paper. The live RLS deny-path is
+ * asserted directly by the crops.test.ts / sensor-status.test.ts canaries
+ * running in the same suite.
  */
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
