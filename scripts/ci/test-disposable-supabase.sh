@@ -57,7 +57,16 @@ fi
 
 WORKDIR="${RUNNER_TEMP:-/tmp}/farmsmart-supabase-${WORKTREE_ID}"
 
-TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+TEST_ADMIN_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+# The api-server test suite's APP connection: a real, non-BYPASSRLS
+# `farmsmart_app` role (provisioned below, step 3.5), so RLS is genuinely
+# exercised by every functional cross-tenant test in CI instead of being a
+# silent no-op under the `postgres` superuser. `farmsmart_app_ci_only` is a
+# LOCAL, EPHEMERAL, disposable-stack-only password -- it is thrown away with
+# the container on every run (see the `cleanup`/`--no-backup` trap below) and
+# is NEVER used against staging/prod (those rotate their own, real secret --
+# see docs/runbooks/mt-m1-rls-role-rotation.md / prod-rls-role-rotation.md).
+TEST_DATABASE_URL="postgresql://farmsmart_app:farmsmart_app_ci_only@127.0.0.1:54322/postgres"
 
 cleanup() {
   pnpm exec supabase --workdir "$WORKDIR" stop --no-backup || true
@@ -87,7 +96,10 @@ eval "$(pnpm exec supabase --workdir "$WORKDIR" status -o env \
 export SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY
 
 # 2. Replay the full Drizzle migration history into the disposable DB.
-DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @workspace/db run db:migrate
+# Runs as the superuser (TEST_ADMIN_DATABASE_URL): CREATE TABLE/ALTER TABLE/
+# CREATE POLICY etc. all need owner/superuser privileges that farmsmart_app
+# (provisioned in step 3.5, below) deliberately does not have.
+DATABASE_URL="$TEST_ADMIN_DATABASE_URL" pnpm --filter @workspace/db run db:migrate
 
 # 3. Replay the Supabase-managed migrations (00001-00003) into the same DB.
 # Deliberately NO --workdir here: `db push` needs to find the REAL,
@@ -103,7 +115,35 @@ DATABASE_URL="$TEST_DATABASE_URL" pnpm --filter @workspace/db run db:migrate
 # end-to-end.) `db push --db-url` needs no Docker networking (a direct
 # connection), so it never hits the project_id/network-name collision this
 # script isolates against — only `test db` below does.
-pnpm exec supabase db push --db-url "$TEST_DATABASE_URL" --include-all
+pnpm exec supabase db push --db-url "$TEST_ADMIN_DATABASE_URL" --include-all
+
+# 3.5. Provision `farmsmart_app`: a real, least-privilege, NON-BYPASSRLS
+# Postgres role, so the RLS policies replayed above are genuinely enforced
+# against the api-server test suite's own connection (step 5) instead of
+# being a silent no-op under the `postgres` superuser (which has BYPASSRLS).
+# This role, password, and grant set are LOCAL to this disposable, ephemeral
+# stack -- torn down with the container on every run (see the `cleanup`/
+# `--no-backup` trap above) -- and are never used against staging/prod (those
+# rotate their own, real secret; see docs/runbooks/mt-m1-rls-role-rotation.md).
+# Grant set replicated verbatim from that runbook (the canonical, already-
+# staging-verified least-privilege grant set for this role) -- do not invent a
+# broader grant here. Run via the superuser connection (only a superuser/owner
+# can CREATE ROLE and GRANT on every table).
+psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'farmsmart_app') then
+    create role farmsmart_app with login password 'farmsmart_app_ci_only';
+  end if;
+end
+$$;
+grant usage on schema public to farmsmart_app;
+grant select, insert, update, delete on all tables in schema public to farmsmart_app;
+grant usage, select on all sequences in schema public to farmsmart_app;
+alter default privileges in schema public grant select, insert, update, delete on tables to farmsmart_app;
+alter default privileges in schema public grant usage, select on sequences to farmsmart_app;
+grant authenticated to farmsmart_app;
+SQL
 
 # 4. Run pgTAP assertions against the fully-migrated disposable DB.
 # --workdir IS required here: `test db` spins up a Docker helper container
@@ -117,16 +157,29 @@ pnpm exec supabase db push --db-url "$TEST_DATABASE_URL" --include-all
 # diverging between $ROOT/supabase/config.toml and the $WORKDIR copy). The
 # pgTAP test SQL directory itself is passed as an explicit positional arg
 # ($ROOT/supabase/tests, the real one), independent of --workdir.
-pnpm exec supabase --workdir "$WORKDIR" test db --db-url "$TEST_DATABASE_URL" "$ROOT/supabase/tests"
+pnpm exec supabase --workdir "$WORKDIR" test db --db-url "$TEST_ADMIN_DATABASE_URL" "$ROOT/supabase/tests"
 
 # 5. Run the api-server test suite against the disposable DB.
 # ACCOUNTING_ENCRYPTION_KEY (artifacts/api-server/src/lib/accounting/crypto.ts)
 # is required at call time by encryptToken(), which sensor-accounts.test.ts
 # exercises for real against this disposable DB -- a fixed, non-secret,
 # 32+ char test-only value (never used against any real credential).
+#
+# Connection split (testDatabase.ts's own convention -- see getAdminPool's
+# doc comment there): TEST_DATABASE_URL/DATABASE_URL is the suite's APP
+# connection (`@workspace/db`'s `db`, and every route the app under test
+# hits) -- now the real non-BYPASSRLS `farmsmart_app` role, so every
+# functional cross-tenant "deny" assertion in cross-tenant.test.ts/
+# crops.test.ts/sensor-status.test.ts/demo.test.ts genuinely exercises RLS,
+# not just the app-layer WHERE-clause filter. TEST_ADMIN_DATABASE_URL is the
+# superuser, used ONLY by getAdminDb()/getAdminPool() for test-only elevated
+# needs (fixture seeding/truncation, and verification reads of RLS-scoped
+# tables that must see ground truth regardless of the current app.org_id/
+# app.facility_id GUC) -- never by real app code.
 CI=true \
 REQUIRE_TEST_DATABASE=true \
 TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" \
 DATABASE_URL="$TEST_DATABASE_URL" \
 SUPABASE_URL="$SUPABASE_URL" \
 SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \

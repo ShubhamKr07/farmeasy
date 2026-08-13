@@ -39,10 +39,14 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let templates: any;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let withTenantScope: any;
+
   before(async () => {
     if (!TEST_DB) return;
     process.env.DATABASE_URL = TEST_DB;
     db = (await import("@workspace/db")).db;
+    withTenantScope = (await import("@workspace/db")).withTenantScope;
     sql = (await import("drizzle-orm")).sql;
     templates = await import("../../lib/metrics/templates");
     const seed = readFileSync(path.resolve(here, "fixtures", "seed.sql"), "utf8");
@@ -54,9 +58,24 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
     await (getAdminDb() ?? db).execute(sql.raw(`TRUNCATE ${FIXTURE_TABLES} RESTART IDENTITY CASCADE`));
   });
 
-  // Matches fixtures/seed.sql's seeded facility (id 1, timezone "UTC").
+  // Matches fixtures/seed.sql's seeded facility (id 1, timezone "UTC") and
+  // organization (id 1).
   const FACILITY_ID = 1;
+  const ORGANIZATION_ID = 1;
   const TIMEZONE = "UTC";
+
+  // See metrics.test.ts's identical helper: real callers (routes/metrics.ts)
+  // always invoke templates.* inside withTenantScope, which sets the
+  // app.org_id/app.facility_id GUCs 00007's RLS policies key on -- an
+  // unscoped call under the real non-BYPASSRLS farmsmart_app role (this
+  // suite's connection) would otherwise silently see zero shipments rows.
+  // Non-generic (see metrics.test.ts's identical helper for why: a generic
+  // `<T>` signature infers `unknown` instead of `any` here, a TS quirk when
+  // the callback body is itself `any`-typed).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function runScoped(fn: (tx: unknown) => Promise<any>): Promise<any> {
+    return withTenantScope({ organizationId: ORGANIZATION_ID, facilityId: FACILITY_ID }, fn);
+  }
 
   test("sh.rev.total: client SUM === SQL scalarAgg", async () => {
     // node-postgres returns Postgres `numeric` columns as strings (to avoid
@@ -72,9 +91,9 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
     const rows = await (getAdminDb() ?? db).execute(sql`SELECT revenue_usd FROM shipments WHERE deleted_at IS NULL`);
     const clientSum = (rows.rows as { revenue_usd: string | number | null }[])
       .reduce((a, r) => a + Number(r.revenue_usd ?? 0), 0);
-    const sqlRes = await templates.scalarAgg({
+    const sqlRes = await runScoped((tx) => templates.scalarAgg({
       table: "shipments", measure: "revenue_usd", where: "deleted_at IS NULL",
-    }, FACILITY_ID, TIMEZONE);
+    }, FACILITY_ID, TIMEZONE, undefined, undefined, undefined, tx));
     ok(Math.abs(clientSum - sqlRes.value) < 1e-6, `revenue mismatch: client ${clientSum} vs sql ${sqlRes.value}`);
   });
 
@@ -84,9 +103,9 @@ describe("tier-A vs tier-B parity (golden fixture)", { skip: !TEST_DB }, () => {
     const rows = await (getAdminDb() ?? db).execute(sql`SELECT yield_sold_kg FROM shipments WHERE deleted_at IS NULL`);
     const clientSum = (rows.rows as { yield_sold_kg: string | number | null }[])
       .reduce((a, r) => a + Number(r.yield_sold_kg ?? 0), 0);
-    const sqlRes = await templates.scalarAgg({
+    const sqlRes = await runScoped((tx) => templates.scalarAgg({
       table: "shipments", measure: "yield_sold_kg", where: "deleted_at IS NULL",
-    }, FACILITY_ID, TIMEZONE);
+    }, FACILITY_ID, TIMEZONE, undefined, undefined, undefined, tx));
     ok(Math.abs(clientSum - sqlRes.value) < 1e-6, `yield-sold mismatch: client ${clientSum} vs sql ${sqlRes.value}`);
   });
 });

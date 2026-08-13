@@ -99,9 +99,9 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
       strictEqual(facilities.length, 1, "exactly one facility for a fresh provision");
 
-      const cycles = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      const cycles = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
       ok(cycles.length > 0, "cycles should have been seeded");
-      const seedLots = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
+      const seedLots = await (getAdminDb() ?? fixture.db).select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
       ok(seedLots.length > 0, "seed_lots should have been seeded");
 
       const statusRes = await request(app).get("/api/demo/status");
@@ -132,7 +132,7 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       const facilityId = first.body.facilityId as number;
 
       const { facilitiesTable, cyclesTable } = await import("@workspace/db");
-      const cyclesAfterFirst = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      const cyclesAfterFirst = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
 
       const second = await request(app).post("/api/demo/provision").send({});
       strictEqual(second.status, 200);
@@ -140,7 +140,7 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
 
       const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
       strictEqual(facilities.length, 1, "no duplicate facility on a second provision");
-      const cyclesAfterSecond = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      const cyclesAfterSecond = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
       strictEqual(cyclesAfterSecond.length, cyclesAfterFirst.length, "no re-seed on a second provision");
     });
 
@@ -216,16 +216,16 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       const facilities = await fixture.db.select().from(facilitiesTable).where(eq(facilitiesTable.organizationId, organizationId));
       strictEqual(facilities.length, 0, "the demo facility must be gone");
 
-      const cycles = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
+      const cycles = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, facilityId));
       strictEqual(cycles.length, 0, "cycles must cascade away");
-      const seedLots = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
+      const seedLots = await (getAdminDb() ?? fixture.db).select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, facilityId));
       strictEqual(seedLots.length, 0, "seed_lots must cascade away");
-      const sensors = await fixture.db.select().from(sensorsTable).where(eq(sensorsTable.facilityId, facilityId));
+      const sensors = await (getAdminDb() ?? fixture.db).select().from(sensorsTable).where(eq(sensorsTable.facilityId, facilityId));
       strictEqual(sensors.length, 0, "sensors must cascade away");
-      const facilityLogs = await fixture.db.select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, facilityId));
+      const facilityLogs = await (getAdminDb() ?? fixture.db).select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, facilityId));
       strictEqual(facilityLogs.length, 0, "facility_logs must cascade away");
 
-      const growthProfiles = await fixture.db
+      const growthProfiles = await (getAdminDb() ?? fixture.db)
         .select()
         .from(growthProfilesTable)
         .where(eq(growthProfilesTable.organizationId, organizationId));
@@ -299,7 +299,7 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
 
       // Verify A has seeded data
       const { cyclesTable, seedLotsTable, sensorsTable, facilityLogsTable } = await import("@workspace/db");
-      const cyclesBeforeB = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
+      const cyclesBeforeB = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
       ok(cyclesBeforeB.length > 0, "org A's facility should have seeded cycles");
 
       // Seed org B
@@ -311,16 +311,16 @@ describe("GET/POST /api/demo/*", { skip: !dbUrl }, () => {
       strictEqual(graduateRes.status, 200, "graduate must succeed even when not a demo org (idempotent)");
 
       // Assert A's demo facility and ALL its cascaded rows are fully intact
-      const cyclesAfterB = await fixture.db.select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
+      const cyclesAfterB = await (getAdminDb() ?? fixture.db).select().from(cyclesTable).where(eq(cyclesTable.facilityId, demoFacilityA));
       strictEqual(cyclesAfterB.length, cyclesBeforeB.length, "org A's cycles must not be affected by org B's graduate");
 
-      const seedLotsAfterB = await fixture.db.select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, demoFacilityA));
+      const seedLotsAfterB = await (getAdminDb() ?? fixture.db).select().from(seedLotsTable).where(eq(seedLotsTable.facilityId, demoFacilityA));
       ok(seedLotsAfterB.length > 0, "org A's seed_lots must still exist");
 
-      const sensorsAfterB = await fixture.db.select().from(sensorsTable).where(eq(sensorsTable.facilityId, demoFacilityA));
+      const sensorsAfterB = await (getAdminDb() ?? fixture.db).select().from(sensorsTable).where(eq(sensorsTable.facilityId, demoFacilityA));
       ok(sensorsAfterB.length > 0, "org A's sensors must still exist");
 
-      const logsAfterB = await fixture.db.select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, demoFacilityA));
+      const logsAfterB = await (getAdminDb() ?? fixture.db).select().from(facilityLogsTable).where(eq(facilityLogsTable.facilityId, demoFacilityA));
       ok(logsAfterB.length > 0, "org A's facility_logs must still exist");
 
       // Verify A is still a demo org
