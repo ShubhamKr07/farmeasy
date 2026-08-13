@@ -2,9 +2,18 @@ import React from "react";
 import { Link, useLocation } from "wouter";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { NAV_ITEMS, PAGE_ITEMS, type NavItem } from "./nav-items";
+import { useOrgRole } from "@/hooks/use-org-role";
 
 function NavList({ onNavigate }: { onNavigate: () => void }) {
   const [location] = useLocation();
+  const { role, loading: roleLoading } = useOrgRole();
+
+  // Same role-gating rule as Sidebar: hide gated entries until the role
+  // claim resolves, then show only to allowed roles. UX-only — the server
+  // requireRole 403 is the real access control.
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.roles || (!roleLoading && role !== null && item.roles.includes(role)),
+  );
 
   const render = (item: NavItem) => {
     const isActive = location === item.href;
@@ -34,7 +43,7 @@ function NavList({ onNavigate }: { onNavigate: () => void }) {
         <div className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
           Operations
         </div>
-        {NAV_ITEMS.map(render)}
+        {visibleNavItems.map(render)}
       </div>
       <div className="space-y-1">
         <div className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
