@@ -25,6 +25,7 @@ import facilityLogsRouter from "./routes/facilityLogs";
 import facilitiesRouter from "./routes/facilities";
 import wizardRouter from "./routes/wizard";
 import demoRouter from "./routes/demo";
+import orgRouter from "./routes/org";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
 import wizardEventsRouter from "./routes/wizard-events";
@@ -226,6 +227,7 @@ app.use("/api", requireSignedIn, userSettingsRouter);
 app.use("/api", requireSignedIn, facilitiesRouter);
 app.use("/api", requireSignedIn, wizardRouter);
 app.use("/api", requireSignedIn, demoRouter); // TEN-013: no requireTenantContext — the demo fork runs before any facility exists, mirroring wizardRouter above
+app.use("/api", requireSignedIn, orgRouter); // TEN-009: GET /org/summary is org-scoped, no X-Facility-Id / requireTenantContext — self-contained per-route gate (see org.ts's own doc comment for why it can't use requireRole as a per-route arg here)
 app.use("/api", requireSignedIn, sensorAccountsRouter);
 app.use("/api", requireSignedIn, wizardEventsRouter);
 // Generic catch-all router (routes/index.ts: health/dashboard/layout
