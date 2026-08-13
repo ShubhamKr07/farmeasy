@@ -19,10 +19,18 @@ import {
  * tables never need resetting between tests: every assertion is scoped to the
  * organizationId/facilityId the test itself created.
  *
- * Runs under the real farmsmart_app role (TEST_DATABASE_URL, see
- * testDatabase.ts) — org.ts's own withTenantScope loop is what's under test,
- * so a BYPASSRLS connection here would make the facility-GUC RLS a silent
- * no-op and give false confidence (per AGENTS.md's isolation-proof mandate).
+ * CROSS-TENANT PROOF SCOPE — read before trusting the "A excludes B" tests:
+ * these assert org.ts's *app-layer* isolation — the explicit
+ * `organization_id`/`facilityId` WHERE filters in the route — which hold
+ * regardless of DB role. They do NOT assert the facility-GUC RLS: the
+ * disposable CI stack (test-disposable-supabase.sh) connects as the postgres
+ * superuser (BYPASSRLS) and `farmsmart_app` is not provisioned there, so RLS
+ * is a silent no-op in this path. That's a known, systemic gap (provision
+ * farmsmart_app in the disposable stack — docs/runbooks/mt-m1-rls-role-rotation.md
+ * "Task 16", deferred 2026-08-05), not specific to TEN-009. org.ts does not
+ * rely on RLS for correctness here (the explicit filters are the control; RLS
+ * is defense-in-depth), so these tests are a valid proof of THIS route's
+ * isolation — but do not read them as an RLS proof.
  */
 const dbUrl = requireTestDatabaseUrl();
 closeDatabasePoolAfterTests();
