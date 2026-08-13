@@ -13,18 +13,26 @@ vi.mock("wouter", () => ({
 }));
 
 vi.mock("@workspace/metrics", () => ({
+  // MetricCard only routes through TierBMetricCard (the component this file
+  // mocks below) when source/template/templateParams are all present — see
+  // MetricCard.tsx's `isTierB` check. Without them every card falls through
+  // to the real, unmocked Renderer instead, and none of the TierBMetricCard
+  // mock's test ids/text ever appear.
   getMetricDef: (id: string) => ({
     id,
     label: `Metric ${id}`,
     tab: "accounting",
     render: "kpi",
     unit: "USD",
+    source: "metrics",
+    template: "test-template",
+    templateParams: {},
   }),
 }));
 
 vi.mock("@/hooks/use-metric-selection", () => ({
   useMetricSelection: () => ({
-    selected: ["metric-1", "metric-2", "metric-3"],
+    selected: ["metric-1", "metric-2", "metric-3", "metric-ar-aging"],
     selectable: ["metric-1", "metric-2", "metric-3", "metric-ar-aging"],
     toggle: vi.fn(),
     reorder: vi.fn(),
@@ -134,7 +142,7 @@ describe("Accounting - QuickBooks failure state", () => {
     renderWithQueryClient(<Accounting />);
 
     // Find and click the overflow menu button
-    const overflowButton = screen.getByRole("button", { name: /⋯/ });
+    const overflowButton = screen.getByRole("button", { name: /more options/i });
     await user.click(overflowButton);
 
     // Disconnect should be in the dropdown
@@ -198,7 +206,7 @@ describe("Accounting - QuickBooks failure state", () => {
     renderWithQueryClient(<Accounting />);
 
     // Open dropdown
-    const overflowButton = screen.getByRole("button", { name: /⋯/ });
+    const overflowButton = screen.getByRole("button", { name: /more options/i });
     await user.click(overflowButton);
 
     // Click Disconnect
