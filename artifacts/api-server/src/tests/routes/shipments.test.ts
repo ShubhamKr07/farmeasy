@@ -58,10 +58,17 @@ describe(
         facilitiesTable,
         organizationMembersTable,
       } = await import("@workspace/db");
+      // Task 11 remediation: /shipments now self-gates to owner/admin
+      // (router.use(requireTenantContext, requireRole("owner","admin"))) — the
+      // default seedTenantContext role ("technician") would 403 every request
+      // below, which is exactly what app.test.ts's Task 11 loop asserts
+      // separately. This suite exercises filtered keyset pagination, not role
+      // gating, so it seeds an owner to get past the gate.
       const { facilityId } = await seedTenantContext(
         db,
         { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
         { id: DEFAULT_TEST_USER.sub, email: "test-user@example.com" },
+        { memberRole: "owner" },
       );
       return {
         app: createAuthenticatedTestApp(shipments.default, DEFAULT_TEST_USER, facilityId),

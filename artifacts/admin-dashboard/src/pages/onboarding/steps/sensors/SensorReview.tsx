@@ -27,8 +27,8 @@ function DeviceChip({ tone, children }: { tone: "neutral" | "placement"; childre
     <span
       className={
         tone === "placement"
-          ? "inline-flex items-center rounded-[4px] px-2 py-0.5 text-[11.5px] font-medium bg-[hsl(142_40%_96%)] border border-[hsl(142_30%_88%)] text-[hsl(142_40%_25%)]"
-          : "inline-flex items-center rounded-[4px] px-2 py-0.5 text-[11.5px] font-medium bg-[hsl(220_14%_96%)]"
+          ? "inline-flex items-center rounded-[4px] px-2 py-0.5 text-xs font-medium bg-[hsl(142_40%_96%)] border border-[hsl(142_30%_88%)] text-[hsl(142_40%_25%)]"
+          : "inline-flex items-center rounded-[4px] px-2 py-0.5 text-xs font-medium bg-[hsl(220_14%_96%)]"
       }
     >
       {children}

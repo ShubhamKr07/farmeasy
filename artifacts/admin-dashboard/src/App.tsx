@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "./lib/supabase";
-import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter, usePostAuthEvent } from "@workspace/api-client-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
@@ -8,12 +8,21 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Loader2, Smartphone } from "lucide-react";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
-import { useOrgRole } from "@/hooks/use-org-role";
+import { useOrgRole, type OrgRole } from "@/hooks/use-org-role";
 import { useSignupAvailability } from "@/hooks/use-signup-availability";
 import { SignUpForm } from "@/pages/auth/SignUpForm";
 import { VerifyInterstitial } from "@/pages/auth/VerifyInterstitial";
+import { ForgotPasswordPanel } from "@/pages/auth/ForgotPasswordPanel";
+import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage";
+// Re-exported so existing `import { LoadingScreen } from "@/App"` (if any) and
+// the local references below keep resolving after the extraction to its own
+// module. The implementation now lives in pages/auth/LoadingScreen.tsx so
+// ResetPasswordPage can reuse it without a circular dep on App.tsx.
+import { LoadingScreen } from "@/pages/auth/LoadingScreen";
 import { ActiveFacilityProvider, useActiveFacility } from "@/hooks/use-active-facility";
+import { cn } from "@/lib/utils";
 import NotFound from "@/pages/not-found";
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -66,23 +75,332 @@ function SupabaseAuthBridge() {
 }
 
 /**
+ * AUTH-003 Task 4 — the redesigned sign-in panel. A SINGLE component that
+ * renders 5 visual states via conditional JSX (never separate routes/modals):
+ *
+ *   - default       : email + password form, Google button, footer link
+ *   - error         : default + reserved error slot populated above the form
+ *   - busy          : default with "Signing in…" + spinner, inputs disabled
+ *   - oauth         : form inputs hidden (not removed) + "Redirecting to Google…"
+ *   - technician    : phone-icon denied screen overlaid on the SAME card
+ *
+ * GEOMETRY CONTRACT — all 5 states share an IDENTICAL panel bounding box:
+ *   1. The card width is fixed (`max-w-sm`) and its height is pinned to a
+ *      fixed value (`h-[560px]`), so the box never grows or shrinks as
+ *      content changes between states.
+ *   2. The error region is ALWAYS rendered at a reserved fixed height, so
+ *      populating it in the error state can never push the fields down.
+ *   3. The "oauth" and "technician" states keep the form mounted in the DOM
+ *      and visually hidden (`aria-hidden` + opacity-0), then render their own
+ *      content absolutely-positioned over the same region. Removing the form
+ *      would shrink the box and break the "no layout shift" requirement —
+ *      see SignInPanel.test.tsx for the dimension-identity assertions.
+ *
+ * The parent AuthGate owns the email value (shared with the signup
+ * availability probe + the SignUpForm) and the view switch (signin/signup/
+ * forgot); this panel only renders when view === "signin". It receives the
+ * resolved org `role` so the technician-denied state is triggered by the SAME
+ * condition that previously routed to a separate TechnicianDeniedScreen.
+ */
+interface SignInPanelProps {
+  email: string;
+  onEmailChange: (email: string) => void;
+  /** Switches the AuthGate to the forgot-password / signup panels. */
+  onForgotPassword: () => void;
+  onCreateAccount: () => void;
+  role: OrgRole | null;
+  /** Whether the "New here? Create an account" link should be offered
+   * (gated by sign-up availability in the parent). */
+  showCreateAccount: boolean;
+}
+
+export function SignInPanel({
+  email,
+  onEmailChange,
+  onForgotPassword,
+  onCreateAccount,
+  role,
+  showCreateAccount,
+}: SignInPanelProps) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [oauthRedirecting, setOauthRedirecting] = useState(false);
+  // AUTH-004: sign-in funnel telemetry. signin_success fires once a session
+  // is established; signin_failed (with the error reason) fires on rejection.
+  const postAuthEvent = usePostAuthEvent();
+
+  // Technician-denied is driven by the SAME condition that used to route to
+  // the standalone TechnicianDeniedScreen: useOrgRole resolves "technician".
+  // Here it just flips the panel's state instead of unmounting the form.
+  const technicianDenied = role === "technician";
+
+  // Derive the active panel state from the flags above. "technician" wins
+  // (a signed-in technician should never see the busy/redirect states), then
+  // "oauth", then "busy", then "error" if a message is set, else "default".
+  const panelState: PanelState = technicianDenied
+    ? "technician"
+    : oauthRedirecting
+      ? "oauth"
+      : busy
+        ? "busy"
+        : error
+          ? "error"
+          : "default";
+
+  const signIn = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    setBusy(false);
+    // Keep the existing error-message extraction pattern but normalize the
+    // copy to the spec'd inline message (AUTH-003 Task 4 mockup 2b). The
+    // network-level error message is the trigger; we surface a consistent
+    // user-facing string.
+    if (signInError) {
+      setError("Wrong email or password.");
+      // AUTH-004: record the failed sign-in attempt (reason is the GoTrue
+      // message — no PII beyond the userId the server derives from the JWT).
+      void postAuthEvent.mutateAsync({
+        data: { eventType: "signin_failed", reason: signInError.message },
+      });
+    } else {
+      // AUTH-004: session established — record the funnel's success step.
+      void postAuthEvent.mutateAsync({ data: { eventType: "signin_success" } });
+    }
+  };
+
+  // OAuth-redirect: flip the state BEFORE firing the redirect so the panel
+  // shows the spinner + "Redirecting to Google…" while the browser navigates
+  // away. The inputs stay mounted (hidden) so the panel geometry is stable.
+  const continueWithGoogle = () => {
+    setOauthRedirecting(true);
+    void supabase.auth.signInWithOAuth({ provider: "google" });
+  };
+
+  // "Sign in as someone else" on the technician panel: clear the Supabase
+  // session (which clears the role claim via onAuthStateChange) and reset
+  // the panel back to the default sign-in form. The form was never removed,
+  // so there's no remount/flash.
+  const signInAsSomeoneElse = async () => {
+    await supabase.auth.signOut();
+    setError(null);
+    setBusy(false);
+    setOauthRedirecting(false);
+  };
+
+  // Inputs are disabled during busy + oauth. The technician state hides the
+  // form entirely (overlay), so disabling is moot there.
+  const inputsDisabled = busy || oauthRedirecting;
+  // When an overlay (oauth / technician) is shown, the default form + footer
+  // are visually hidden but kept mounted to preserve the box footprint.
+  const overlayActive = oauthRedirecting || technicianDenied;
+
+  return (
+    <div
+      data-testid="signin-panel"
+      data-panel-state={panelState}
+      className="relative w-full max-w-sm h-[560px] rounded-2xl bg-card text-card-foreground p-8 flex flex-col"
+    >
+      {/* Reserved error slot — ALWAYS rendered at a fixed height so populating
+          it in the error state can never push the fields down. Empty state is
+          invisible but still occupies the same vertical space. */}
+      <div className="h-6 flex items-center" data-testid="error-slot">
+        {error && (
+          <p role="alert" className="text-sm text-destructive" data-testid="inline-error">
+            {error}
+          </p>
+        )}
+      </div>
+
+      {/* Heading block — present in every state, anchored to the top so the
+          region below it never drifts. */}
+      <div className="space-y-1 mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          Sign in to FarmSmart
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          The operations dashboard for your indoor farm.
+        </p>
+      </div>
+
+      {/* Form region — a relative container so the oauth/technician overlays
+          can absolutely fill exactly this area without covering the heading
+          or error slot. The form is KEPT MOUNTED in every state. */}
+      <div className="relative flex-1" data-testid="form-region">
+        <form
+          onSubmit={signIn}
+          aria-hidden={overlayActive}
+          className={cn(
+            "flex flex-col gap-4 transition-opacity",
+            overlayActive
+              ? "opacity-0 pointer-events-none absolute inset-0"
+              : "opacity-100",
+          )}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              required
+              disabled={inputsDisabled}
+              value={email}
+              onChange={(e) => onEmailChange(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              disabled={inputsDisabled}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="link"
+            type="button"
+            className="self-start h-auto p-0 text-sm -mt-1"
+            disabled={inputsDisabled}
+            onClick={onForgotPassword}
+          >
+            Forgot password?
+          </Button>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={inputsDisabled}
+            data-testid="signin-button"
+          >
+            {busy ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden />
+                Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
+          </Button>
+        </form>
+
+        {/* OAuth-redirect overlay — spinner + "Redirecting to Google…", fills
+            the form region so the card keeps its footprint. Inputs are hidden
+            behind it (mounted, not removed). */}
+        {oauthRedirecting && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3"
+            data-testid="oauth-overlay"
+          >
+            <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
+            <p className="text-sm text-muted-foreground">Redirecting to Google…</p>
+          </div>
+        )}
+
+        {/* Technician-denied overlay — phone icon, heading, copy, two CTAs and
+            a "Sign in as someone else" link. Same form region, same card. */}
+        {technicianDenied && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center"
+            data-testid="technician-overlay"
+          >
+            <Smartphone className="h-10 w-10 text-muted-foreground" aria-hidden />
+            <h2 className="text-lg font-semibold text-foreground">
+              The dashboard is for admins
+            </h2>
+            <p className="text-sm text-muted-foreground max-w-[18rem]">
+              Open the FarmSmart mobile app to do your work.
+            </p>
+            <Button className="w-full" asChild>
+              <a
+                href="https://farmsmart.app/get-the-app"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Get the app
+              </a>
+            </Button>
+            <Button variant="outline" className="w-full" asChild>
+              <a href="farmsmart://open" rel="noopener noreferrer">
+                Open in app
+              </a>
+            </Button>
+            <Button
+              variant="link"
+              className="text-sm h-auto p-0"
+              onClick={signInAsSomeoneElse}
+            >
+              Sign in as someone else
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Footer region — divider + Google button + create-account link. Kept
+          OUTSIDE the overlay region and hidden (but reserved) when an overlay
+          is active so the box footprint is unchanged. */}
+      <div className={cn("flex flex-col gap-4 mt-6", overlayActive && "invisible")}>
+        <div className="flex items-center gap-3">
+          <div className="h-px bg-border flex-1" />
+          <span className="text-xs text-muted-foreground">or</span>
+          <div className="h-px bg-border flex-1" />
+        </div>
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={continueWithGoogle}
+          disabled={inputsDisabled}
+        >
+          Continue with Google
+        </Button>
+        {showCreateAccount && (
+          <p className="text-sm text-muted-foreground text-center">
+            New here?{" "}
+            <Button
+              variant="link"
+              type="button"
+              className="h-auto p-0 text-sm"
+              onClick={onCreateAccount}
+            >
+              Create an account
+            </Button>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The 5 visual states the SignInPanel renders — see the component doc. */
+type PanelState = "default" | "error" | "busy" | "oauth" | "technician";
+
+/**
  * Shows a Supabase-backed sign-in screen until the user is authenticated.
  * Mirrors the previous Clerk gate structure, swapping `<SignIn />` for an
  * email/password form plus a Google OAuth button. TEN-012 Task 9 adds a
  * "Create an account" toggle that switches to SignUpForm (availability-gated
- * via useSignupAvailability, which probes the same email field).
+ * via useSignupAvailability, which probes the same email field). AUTH-002
+ * Task 3 adds the forgot-password panel. AUTH-003 Task 4 redesigns the
+ * sign-in form itself into a 5-state panel (SignInPanel above).
  */
 function AuthGate() {
   const { session, loading } = useSupabaseSession();
   const { role, loading: roleLoading } = useOrgRole();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   // TEN-012 Task 9: toggle between the existing sign-in form (unchanged) and
   // the new Create-account form. Defaults to sign-in so existing behavior is
-  // preserved for every user who never touches the toggle.
-  const [view, setView] = useState<"signin" | "signup">("signin");
+  // preserved for every user who never touches the toggle. AUTH-002 Task 3
+  // adds a third value, "forgot", which swaps the sign-in form for the
+  // ForgotPasswordPanel (states 1-2) reached via the "Forgot password?" link.
+  const [view, setView] = useState<"signin" | "signup" | "forgot">("signin");
 
   // Probe sign-up availability for the email typed into the SHARED email
   // field, so a user who typed their address to sign in already knows (once
@@ -95,18 +413,6 @@ function AuthGate() {
   }
 
   if (!session) {
-    const signIn = async (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      setError(null);
-      setBusy(true);
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      setBusy(false);
-      if (signInError) setError(signInError.message);
-    };
-
     // Offer the "Create an account" toggle whenever a sign-up path exists for
     // the typed email: open sign-up (public), an allowlisted email, OR
     // sign-up closed (off) — in the last case the toggle still routes to the
@@ -117,15 +423,30 @@ function AuthGate() {
     // view. Force-show whenever we're already in the sign-up view so the user
     // can always switch back to sign-in.
     const showCreateAccountToggle =
-      view === "signup" ||
-      mode === null ||
-      mode === "public" ||
-      mode === "off" ||
-      (mode === "allowlist" && allowed);
+      // Hide the create-account toggle entirely in the forgot-password view —
+      // that panel has its own "Back to sign in" action and shouldn't offer a
+      // detour into sign-up.
+      view !== "forgot" &&
+      (view === "signup" ||
+        mode === null ||
+        mode === "public" ||
+        mode === "off" ||
+        (mode === "allowlist" && allowed));
 
     return (
-      <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background">
+      <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-[#1a2e23]">
         <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
+        {/* Tagline + sub-line above the panel (Mockup 2a). The tagline uses a
+            light-on-dark palette (white on #1a2e23 ≈ 14.4:1, well above WCAG
+            AA 4.5:1) so the lockup reads cleanly against the dark backdrop. */}
+        <div className="w-full max-w-sm text-center space-y-1">
+          <p className="text-base font-medium text-white">
+            Everything between the seed and the sale.
+          </p>
+          <p className="text-sm text-[#c7d4cc]">
+            The operations dashboard for your indoor farm.
+          </p>
+        </div>
         {view === "signup" ? (
           <SignUpForm
             mode={mode}
@@ -133,60 +454,33 @@ function AuthGate() {
             email={email}
             onEmailChange={setEmail}
           />
+        ) : view === "forgot" ? (
+          // AUTH-002 Task 3: forgot-password panel (states 1-2). Rendered on
+          // the same auth screen via state — not a separate route — so it
+          // reuses the logo + centered chrome above. "Back to sign in"
+          // returns to the sign-in form.
+          <ForgotPasswordPanel onBackToSignIn={() => setView("signin")} />
         ) : (
-          <>
-            <form onSubmit={signIn} className="w-full max-w-sm space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={busy}>
-                Sign in
-              </Button>
-            </form>
-            <div className="flex items-center gap-3 w-full max-w-sm">
-              <div className="h-px bg-border flex-1" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <div className="h-px bg-border flex-1" />
-            </div>
-            <Button
-              variant="outline"
-              className="w-full max-w-sm"
-              onClick={() => supabase.auth.signInWithOAuth({ provider: "google" })}
-            >
-              Continue with Google
-            </Button>
-          </>
+          <SignInPanel
+            email={email}
+            onEmailChange={setEmail}
+            onForgotPassword={() => setView("forgot")}
+            onCreateAccount={() => setView("signup")}
+            role={role}
+            showCreateAccount={showCreateAccountToggle}
+          />
         )}
 
-        {showCreateAccountToggle && (
+        {/* Keep the create-account toggle reachable from the signup/forgot
+            views too (matching pre-redesign behavior) so a user can always
+            flip back to sign-in. */}
+        {showCreateAccountToggle && view !== "signin" && (
           <Button
             variant="link"
-            className="text-sm"
-            onClick={() => setView((v) => (v === "signin" ? "signup" : "signin"))}
+            className="text-sm text-[#c7d4cc] hover:text-white"
+            onClick={() => setView("signin")}
           >
-            {view === "signin"
-              ? "Don't have an account? Create one"
-              : "Already have an account? Sign in"}
+            Already have an account? Sign in
           </Button>
         )}
       </div>
@@ -208,58 +502,36 @@ function AuthGate() {
   }
 
   // Org-role gate (AUTH-003): once a session exists, block the app shell until
-  // the role claim resolves, then direct a technician to the mobile-app-only
-  // denied screen instead of the dashboard. `useOrgRole()` is called
-  // unconditionally above; these values are simply unused in the earlier
-  // `loading` / `!session` early-return branches.
+  // the role claim resolves. A technician is now directed back to the
+  // SignInPanel itself — which renders the technician-denied state (state 5)
+  // on the same card — instead of a separate TechnicianDeniedScreen, so the
+  // denied UX is geometrically consistent with the sign-in flow. `useOrgRole`
+  // is called unconditionally above; these values are simply unused in the
+  // earlier `loading` / `!session` early-return branches.
   if (roleLoading) {
     return <LoadingScreen />;
   }
 
   if (role === "technician") {
-    return <TechnicianDeniedScreen />;
+    return (
+      <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-[#1a2e23]">
+        <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
+        <SignInPanel
+          email={email}
+          onEmailChange={setEmail}
+          onForgotPassword={() => setView("forgot")}
+          onCreateAccount={() => setView("signup")}
+          role={role}
+          showCreateAccount={false}
+        />
+      </div>
+    );
   }
 
   return (
     <ActiveFacilityProvider>
       <FacilityGate />
     </ActiveFacilityProvider>
-  );
-}
-
-/**
- * Shared full-screen loading state (auth-session check, facility-existence
- * check) — same visual treatment as the original inline `AuthGate` loading
- * branch, just reusable.
- */
-function LoadingScreen() {
-  return (
-    <div className="h-[100dvh] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[43px] w-auto opacity-80" />
-      <span>Loading…</span>
-    </div>
-  );
-}
-
-/**
- * AUTH-003: full-screen denied state for a technician who reaches the web
- * dashboard. Technicians are mobile-app-only; the server 403s
- * (`requireRole` middleware, ROLE_FORBIDDEN) are the real access control —
- * this is purely the directing UX so a technician isn't left staring at API
- * errors. Renders INSTEAD of <FacilityGate/>; the technician never reaches
- * the app shell.
- */
-function TechnicianDeniedScreen() {
-  return (
-    <div className="h-[100dvh] flex flex-col items-center justify-center gap-6 bg-background text-center px-4">
-      <img src="/logo-lockup.svg" alt="FarmSmart" className="h-[53px] w-auto" />
-      <p className="text-muted-foreground max-w-sm">
-        The dashboard is for admins — open the FarmSmart mobile app.
-      </p>
-      <Button variant="outline" onClick={() => supabase.auth.signOut()}>
-        Sign out
-      </Button>
-    </div>
   );
 }
 
@@ -373,6 +645,11 @@ function App() {
                 AuthGate sign-in screen. Keep the auth bridge + OAuth handler
                 above mounted for all paths. */}
             <Route path="/accept-invite" component={AcceptInvite} />
+            {/* AUTH-002 Task 3: recovery-email landing route. Reached from the
+                reset link (ForgotPasswordPanel's `redirectTo`). Rendered
+                OUTSIDE AuthGate — the recovery session is short-lived and the
+                page inspects it directly to pick state 3 vs 3B. */}
+            <Route path="/reset-password" component={ResetPasswordPage} />
             <Route>
               <AuthGate />
             </Route>

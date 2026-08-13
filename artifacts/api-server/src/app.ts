@@ -28,6 +28,7 @@ import demoRouter from "./routes/demo";
 import sensorAccountsRouter from "./routes/sensor-accounts";
 import facilityReadinessRouter from "./routes/facility-readiness";
 import wizardEventsRouter from "./routes/wizard-events";
+import authEventsRouter from "./routes/auth-events";
 import invitationsRouter from "./routes/invitations";
 import invitationsAcceptRouter from "./routes/invitationsAccept";
 import membersRouter from "./routes/members";
@@ -122,6 +123,7 @@ function requireSignedIn(req: Request, res: Response, next: NextFunction) {
 app.use("/api", healthRouter);
 app.use("/api", accountingPublicRouter);
 app.use("/api", invitationsAcceptRouter);
+app.use("/api", authEventsRouter);
 app.use("/api", createAuthRouter());
 
 // Backend email-verification gate (TEN-012 Task 6) — defense-in-depth.
@@ -189,15 +191,18 @@ app.use("/api", requireSignedIn, requireVerifiedEmail);
 //      already be rejected for, so it's safe to sit ahead of every other
 //      router in tiers 3-4.
 //   3. Relies entirely on app.ts's own `requireTenantContext` wrap in its
-//      mount call (alerts, inventory, shipments, badTrays, sensors,
-//      sensor-readings [TEN-014 hotfix -- moved out of tier 1, see its own
-//      mount comment below], tasks, metrics, accounting, facilityLogs) --
-//      these never self-gate, so nothing here may sit before an
-//      ungated/per-route-gated router.
+//      mount call (alerts, badTrays, sensors, sensor-readings [TEN-014
+//      hotfix -- moved out of tier 1, see its own mount comment below],
+//      tasks, facilityLogs, recommend [MT-M2 task #5]) -- these never
+//      self-gate, so nothing here may sit before an ungated/per-route-gated
+//      router. metrics/inventory/shipments/accounting used to be here too,
+//      but Task 11 remediation moved them to tier 4 (role-restrictive
+//      self-gate) -- see that tier's comment below.
 //   4. Self-gates TENANT CONTEXT **+ A RESTRICTIVE ROLE** via an
 //      unconditional `router.use(requireTenantContext, requireRole(...))`
 //      inside the router file itself (invitations.ts [TEN-010 T5], members.ts
-//      [TEN-010 T7], both owner/admin-only). This is NOT interchangeable with
+//      [TEN-010 T7], and metrics/inventory/shipments/accounting [Task 11
+//      remediation] -- all owner/admin-only). This is NOT interchangeable with
 //      tier 2 even though both "self-gate": a role-restrictive self-gate 403s
 //      a valid tenant member (e.g. a technician) who has every right to reach
 //      a DIFFERENT, later-mounted router -- tried mounting these in tier 2
@@ -205,6 +210,9 @@ app.use("/api", requireSignedIn, requireVerifiedEmail);
 //      ROLE_FORBIDDEN, intercepted before ever reaching alertsRouter). So
 //      tier 4 must come after EVERY router any non-owner/admin tenant member
 //      is allowed to reach -- i.e. after all of tiers 1-3, not just tier 1.
+//      dashboard.ts and alerts.ts stay in tier 1/3 respectively (ungated /
+//      tenant-only) -- mobile's technician home-tab and alerts screen
+//      legitimately call them; that is a separate, pending product decision.
 //
 // When adding a new router mount: if it self-gates on a RESTRICTIVE ROLE (not
 // just tenant context), it belongs in tier 4, last -- never interleave it
@@ -245,8 +253,6 @@ app.use("/api", requireSignedIn, facilityReadinessRouter); // self-gates via rou
 
 // Tier 3: rely entirely on app.ts's own requireTenantContext wrap.
 app.use("/api", requireSignedIn, requireTenantContext, alertsRouter);
-app.use("/api", requireSignedIn, requireTenantContext, inventoryRouter);
-app.use("/api", requireSignedIn, requireTenantContext, shipmentsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, badTraysRouter);
 app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
 // TEN-014 hotfix: sensor-readings was tier-1 (requireSignedIn only) with no
@@ -258,8 +264,6 @@ app.use("/api", requireSignedIn, requireTenantContext, sensorsRouter);
 // no self-gate in the router itself, relies entirely on this wrap.
 app.use("/api", requireSignedIn, requireTenantContext, sensorReadingsRouter);
 app.use("/api", requireSignedIn, requireTenantContext, tasksRouter);
-app.use("/api", requireSignedIn, requireTenantContext, metricsRouter);
-app.use("/api", requireSignedIn, requireTenantContext, accountingRouter);
 app.use("/api", requireSignedIn, requireTenantContext, facilityLogsRouter);
 // MT-M2 task #5: recommend.ts now forwards org_id/facility_id to the
 // recommender (so its non-BYPASSRLS farmsmart_recommender role can set the
@@ -291,5 +295,19 @@ app.use("/api", requireSignedIn, requireTenantContext, recommendRouter);
 // mount.
 app.use("/api", requireSignedIn, invitationsRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
 app.use("/api", requireSignedIn, membersRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
+// Task 11 remediation: metrics/inventory/shipments/accounting had ZERO
+// server-side role enforcement (any signed-in tenant member, including
+// technician, could read financial metrics and inventory/shipments also
+// exposed unguarded POST/PATCH/DELETE to technicians). Each now self-gates
+// via router.use(requireTenantContext, requireRole("owner","admin")), same
+// pattern as invitations.ts/members.ts above, so they belong here in tier 4 --
+// not tier 3 -- per the tiering rule (a role-restrictive self-gate must sit
+// after every router a technician is allowed to reach). dashboard.ts and
+// alerts.ts are deliberately NOT included here -- mobile's technician
+// home-tab/alerts screen legitimately call them; pending a product decision.
+app.use("/api", requireSignedIn, metricsRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
+app.use("/api", requireSignedIn, inventoryRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
+app.use("/api", requireSignedIn, shipmentsRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
+app.use("/api", requireSignedIn, accountingRouter); // self-gates via router.use(requireTenantContext, requireRole("owner","admin")); no app.ts-level wrap
 
 export default app;

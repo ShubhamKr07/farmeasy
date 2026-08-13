@@ -237,7 +237,7 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
     strictEqual(res.status, 401, `expected 401, got ${res.status}: ${JSON.stringify(res.body)}`);
   });
 
-  test("brand-new user hitting a tier-3 (app.ts-level-gated) route with no X-Facility-Id still correctly 400s, not 500/leak", async () => {
+  test("brand-new user hitting a tier-4 (self-gated requireTenantContext+requireRole) route with no X-Facility-Id still correctly 400s, not 500/leak", async () => {
     const user = await createRealTestUser();
     createdUserIds.push(user.userId);
 
@@ -420,4 +420,67 @@ describe("app.ts: real mount stack (Task 12.5 regression)", { skip: !canRun }, (
       `expected 400 (invalid token, reached the real handler), got ${res.status}: ${JSON.stringify(res.body)} -- a 401 here would mean requireSignedIn is (wrongly) gating this route`,
     );
   });
+
+  // Task 11 remediation: metrics.ts/inventory.ts/shipments.ts/accounting.ts
+  // (accountingRouter, not the public OAuth-callback router) previously had
+  // ZERO server-side role enforcement -- any signed-in tenant member of any
+  // role, including technician, could reach them, and inventory/shipments
+  // also exposed unguarded POST/PATCH/DELETE. Each now self-gates via
+  // router.use(requireTenantContext, requireRole("owner","admin")), the same
+  // pattern as invitations.ts/members.ts above, and is mounted in app.ts's
+  // tier 4 (after every router a technician is allowed to reach). These four
+  // cases drive the REAL app stack -- not a standalone per-router test app --
+  // so a technician is rejected and an owner succeeds through the actual
+  // mount order, not just each router's own isolated test.
+  for (const route of [
+    { name: "metrics", path: "/api/metrics/availability" },
+    { name: "inventory", path: "/api/inventory" },
+    { name: "shipments", path: "/api/shipments" },
+    { name: "accounting", path: "/api/accounting/status" },
+  ] as const) {
+    test(`technician JWT with X-Facility-Id: GET ${route.path} is rejected 403 ROLE_FORBIDDEN through the real app`, async () => {
+      const user = await createRealTestUser();
+      createdUserIds.push(user.userId);
+
+      const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+        "@workspace/db"
+      );
+      const { facilityId } = await seedTenantContext(
+        db,
+        { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+        { id: user.userId, email: user.email },
+        { farmName: `${route.name} Regression Farm (technician)`, memberRole: "technician" },
+      );
+
+      const res = await request(app)
+        .get(route.path)
+        .set("Authorization", `Bearer ${user.accessToken}`)
+        .set("X-Facility-Id", String(facilityId));
+
+      strictEqual(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
+      strictEqual(res.body.code, "ROLE_FORBIDDEN", `expected code ROLE_FORBIDDEN: ${JSON.stringify(res.body)}`);
+    });
+
+    test(`owner JWT with X-Facility-Id: GET ${route.path} succeeds (200) through the real app`, async () => {
+      const user = await createRealTestUser();
+      createdUserIds.push(user.userId);
+
+      const { db, usersTable, organizationsTable, facilitiesTable, organizationMembersTable } = await import(
+        "@workspace/db"
+      );
+      const { facilityId } = await seedTenantContext(
+        db,
+        { usersTable, organizationsTable, facilitiesTable, organizationMembersTable },
+        { id: user.userId, email: user.email },
+        { farmName: `${route.name} Regression Farm (owner)`, memberRole: "owner" },
+      );
+
+      const res = await request(app)
+        .get(route.path)
+        .set("Authorization", `Bearer ${user.accessToken}`)
+        .set("X-Facility-Id", String(facilityId));
+
+      strictEqual(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+    });
+  }
 });

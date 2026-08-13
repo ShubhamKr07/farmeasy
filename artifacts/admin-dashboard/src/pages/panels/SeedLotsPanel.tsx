@@ -90,7 +90,7 @@ export function SeedLotsPanel() {
                 </div>
                 <div className="flex flex-wrap gap-1 justify-end">
                   {[...new Set(g.qrCodes)].map((qr) => (
-                    <span key={qr} className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded border text-muted-foreground">
+                    <span key={qr} className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded border text-muted-foreground">
                       {qr}
                     </span>
                   ))}
@@ -102,7 +102,7 @@ export function SeedLotsPanel() {
                   return (
                     <div key={c.shortId} className="flex items-center gap-1.5 bg-muted/60 rounded-md px-2.5 py-1.5 text-xs">
                       <span className="font-mono text-muted-foreground">#{c.shortId}</span>
-                      <Badge variant={stageMeta?.variant ?? "outline"} className="text-[10px] h-4 px-1">
+                      <Badge variant={stageMeta?.variant ?? "outline"} className="text-xs h-4 px-1">
                         {stageMeta?.label ?? c.status}
                       </Badge>
                       {c.trayPosition && (

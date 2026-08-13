@@ -50,8 +50,53 @@ import { DraggableMetricGrid } from "@/components/metrics/DraggableMetricGrid";
 import { MetricCard } from "@/components/metrics/MetricCard";
 import { TimeRangeSelector, type MetricRange } from "@/components/metrics/TimeRangeSelector";
 import type { MetricDataMap } from "@/components/metrics/renderers";
+import { generateQRPayload, generateItemCode, formatArrivalDate } from "./qr-helpers";
 
 type SeedLot = { id: number; seedName: string; qrCode: string };
+
+// Helper: render a sticker sheet (PDF) for batch printing of selected items.
+function printLabelSheet(items: InventoryItem[], qrSvgByItem: Map<number, string>): boolean {
+  const win = window.open("", "_blank", "width=800,height=600");
+  if (!win) return false;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Sticker Sheet (PDF) — ${items.length} labels</title>
+        <style>
+          body { font-family: sans-serif; margin: 0; padding: 10mm; background: #f5f5f5; }
+          .sticker { display: inline-block; width: 100mm; height: 80mm; margin: 5mm; padding: 10mm; background: white; border: 1px solid #ddd; page-break-inside: avoid; }
+          .sticker svg { width: 60mm; height: 60mm; }
+          .name { font-size: 14px; font-weight: 700; margin-top: 5mm; }
+          .code { font-size: 11px; color: #555; margin-top: 2mm; }
+          .label { font-size: 8px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2mm; }
+          @media print { body { padding: 0; background: white; } }
+        </style>
+      </head>
+      <body>
+        ${items.map((item) => {
+          const svg = qrSvgByItem.get(item.id) || "";
+          const code = generateItemCode(item.id);
+          const arrival = formatArrivalDate(item);
+          return `
+            <div class="sticker">
+              ${svg}
+              <div class="name">${item.name}</div>
+              <div class="code">${code} · arrived ${arrival}</div>
+              <div class="label">Inventory · FarmSmart</div>
+            </div>
+          `;
+        }).join("")}
+        <script>window.onload = () => { setTimeout(() => { window.print(); window.onafterprint = () => window.close(); }, 100); }<\/script>
+      </body>
+    </html>
+  `;
+
+  win.document.write(html);
+  win.document.close();
+  return true;
+}
 
 const itemSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -73,6 +118,10 @@ export function Inventory() {
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [deleting, setDeleting] = useState<InventoryItem | null>(null);
   const [qrLot, setQrLot] = useState<SeedLot | null>(null);
+  const [qrItem, setQrItem] = useState<InventoryItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const itemPrintRef = useRef<HTMLDivElement>(null);
+  const batchQrRef = useRef<HTMLDivElement>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const invalidate = () =>
@@ -268,6 +317,35 @@ export function Inventory() {
   );
 
   const itemColumns: Column<InventoryItem>[] = [
+    {
+      key: "select",
+      header: () => (
+        <input
+          type="checkbox"
+          checked={selectedIds.size > 0 && items.every((i) => selectedIds.has(i.id))}
+          onChange={() => {
+            const ids = new Set(selectedIds);
+            if (ids.size === items.length) ids.clear();
+            else items.forEach((i) => ids.add(i.id));
+            setSelectedIds(ids);
+          }}
+          aria-label="Select all items"
+        />
+      ),
+      cell: (item: InventoryItem) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(item.id)}
+          onChange={() => {
+            const ids = new Set(selectedIds);
+            if (ids.has(item.id)) ids.delete(item.id);
+            else ids.add(item.id);
+            setSelectedIds(ids);
+          }}
+          aria-label={`Select ${item.name}`}
+        />
+      ),
+    },
     { key: "name", header: "Item", accessor: (i) => i.name, sortable: true, cell: (i) => <span className="font-medium">{i.name}</span> },
     { key: "category", header: "Category", accessor: (i) => i.category ?? "", sortable: true, cell: (i) => <span className="text-muted-foreground">{i.category ?? "—"}</span> },
     {
@@ -289,6 +367,22 @@ export function Inventory() {
       },
     },
     { key: "qty", header: "Qty", accessor: (i) => i.currentQty, sortable: true, align: "right", cell: (i) => `${formatNumber(i.currentQty)} ${i.unit}` },
+    {
+      key: "qr",
+      header: "QR Label",
+      align: "center",
+      cell: (item: InventoryItem) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 text-xs text-amber-700 hover:text-amber-900"
+          onClick={() => setQrItem(item)}
+        >
+          <QrCode className="h-3.5 w-3.5" />
+          <span className="text-amber-600">Generate</span>
+        </Button>
+      ),
+    },
     {
       key: "actions",
       header: "Actions",
@@ -400,7 +494,7 @@ export function Inventory() {
               <div className="text-center space-y-0.5">
                 <p className="text-base font-bold text-foreground">{qrLot.seedName}</p>
                 <p className="text-xs font-mono text-muted-foreground">{qrLot.qrCode}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">Seed Lot · FarmSmart</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Seed Lot · FarmSmart</p>
               </div>
               <div className="flex gap-2 w-full pt-1">
                 <Button variant="outline" className="flex-1 gap-2" onClick={handleDownloadSVG}>
@@ -417,11 +511,134 @@ export function Inventory() {
         </DialogContent>
       </Dialog>
 
+      {/* InventoryItem QR Modal */}
+      <Dialog open={!!qrItem} onOpenChange={(open) => !open && setQrItem(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="h-5 w-5 text-primary" />
+              QR Label
+            </DialogTitle>
+          </DialogHeader>
+          {qrItem && (
+            <div className="flex flex-col items-center gap-4 py-2">
+              <div ref={itemPrintRef} className="bg-white p-4 rounded-xl border-2 border-border shadow-sm">
+                <QRCodeSVG value={generateQRPayload(qrItem)} size={180} bgColor="#ffffff" fgColor="#1a1a1a" level="M" />
+              </div>
+              <div className="text-center space-y-0.5">
+                <p className="text-base font-bold text-foreground">{qrItem.name}</p>
+                <p className="text-xs font-mono text-muted-foreground">{generateItemCode(qrItem.id)} · arrived {formatArrivalDate(qrItem)}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Inventory · FarmSmart</p>
+              </div>
+              <div className="flex gap-2 w-full pt-1">
+                <Button variant="outline" className="flex-1 gap-2" onClick={() => {
+                  const svgEl = itemPrintRef.current?.querySelector("svg");
+                  if (!svgEl) return;
+                  const svgData = new XMLSerializer().serializeToString(svgEl);
+                  const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+                  const url = URL.createObjectURL(svgBlob);
+                  const img = new Image();
+                  const code = generateItemCode(qrItem.id);
+                  img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext("2d");
+                    if (ctx) ctx.drawImage(img, 0, 0);
+                    canvas.toBlob((blob) => {
+                      if (!blob) return;
+                      const pngUrl = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = pngUrl;
+                      a.download = `qr-${code}.png`;
+                      a.click();
+                      URL.revokeObjectURL(pngUrl);
+                      URL.revokeObjectURL(url);
+                    });
+                  };
+                  img.src = url;
+                }}>
+                  <Download className="h-4 w-4" />
+                  Download PNG
+                </Button>
+                <Button className="flex-1 gap-2" onClick={() => {
+                  const svgEl = itemPrintRef.current?.querySelector("svg");
+                  if (!svgEl) return;
+                  const svgData = new XMLSerializer().serializeToString(svgEl);
+                  const code = generateItemCode(qrItem.id);
+                  const arrival = formatArrivalDate(qrItem);
+                  const win = window.open("", "_blank", "width=400,height=500");
+                  if (!win) return;
+                  win.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>QR Label — ${code}</title>
+                        <style>
+                          body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #fff; }
+                          .name { font-size: 18px; font-weight: 700; color: #1a1a1a; margin-top: 8px; }
+                          .code { font-size: 12px; color: #555; margin-top: 6px; }
+                          .label { font-size: 10px; color: #888; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+                          svg { width: 200px; height: 200px; }
+                          @media print { @page { margin: 0.5cm; } }
+                        </style>
+                      </head>
+                      <body>
+                        ${svgData}
+                        <div class="name">${qrItem.name}</div>
+                        <div class="code">${code} · arrived ${arrival}</div>
+                        <div class="label">Inventory · FarmSmart</div>
+                        <script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); }<\/script>
+                      </body>
+                    </html>
+                  `);
+                  win.document.close();
+                }}>
+                  <Printer className="h-4 w-4" />
+                  Print
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Supplies Stock + Categories */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <Card className="shadow-sm">
-            <CardHeader><span className="text-base font-semibold">Supplies Stock</span></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <span className="text-base font-semibold">Supplies Stock</span>
+                {selectedIds.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        const qrSvgs = new Map<number, string>();
+                        const root = batchQrRef.current;
+                        if (root) {
+                          const svgs = root.querySelectorAll("svg");
+                          const ordered = Array.from(selectedIds).map((id) => items.find((i) => i.id === id)).filter(Boolean) as InventoryItem[];
+                          svgs.forEach((svg, idx) => {
+                            const item = ordered[idx];
+                            if (item) qrSvgs.set(item.id, new XMLSerializer().serializeToString(svg));
+                          });
+                        }
+                        const itemsToPrint = Array.from(selectedIds).map((id) => items.find((i) => i.id === id)).filter(Boolean) as InventoryItem[];
+                        const ok = printLabelSheet(itemsToPrint, qrSvgs);
+                        if (!ok) toast.error("Pop-up blocked — allow pop-ups to print labels");
+                      }}
+                    >
+                      <Printer className="h-4 w-4" />
+                      Print Labels
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </CardHeader>
             <CardContent>
               <DataTable
                 data={items}
@@ -495,6 +712,15 @@ export function Inventory() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Hidden container for batch QR rendering */}
+      <div ref={batchQrRef} style={{ display: "none" }}>
+        {Array.from(selectedIds).map((id) => {
+          const item = items.find((i) => i.id === id);
+          if (!item) return null;
+          return <QRCodeSVG key={item.id} value={generateQRPayload(item)} size={60} bgColor="#ffffff" fgColor="#1a1a1a" level="M" />;
+        })}
+      </div>
     </div>
   );
 }

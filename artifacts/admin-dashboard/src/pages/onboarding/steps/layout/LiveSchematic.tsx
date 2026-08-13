@@ -47,7 +47,7 @@ export function LiveSchematic({
                   );
                 })}
               </div>
-              <span className="text-[11px] text-muted-foreground mt-1">C{channelIdx + 1}</span>
+              <span className="text-xs text-muted-foreground mt-1">C{channelIdx + 1}</span>
             </div>
           ))}
         </div>

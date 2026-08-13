@@ -88,4 +88,14 @@ export interface MetricDef {
   panel?: string;
   /** Grid column span on lg (4-col). Defaults by `render`: KPI/stat/gauge/progress=1, others=2. */
   span?: 1 | 2 | 4;
+  /**
+   * Row-height class for the overview grid height contract (OVW-001/002).
+   * - `compact` (default): one-line KPI/stat cards — short, uniform row.
+   * - `tall`: chart cards (trend/series) that need vertical room; the CSS grid
+   *   uses `grid-auto-rows` + `h-full` on card roots so every card in a row
+   *   stretches to that row's tallest member.
+   * DraggableMetricGrid reads this to lay out rows; a CI check bans fixed
+   * pixel heights (`h-[…px]`) from metric components so the contract holds.
+   */
+  size?: "compact" | "tall";
 }

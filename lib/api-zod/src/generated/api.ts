@@ -1355,6 +1355,15 @@ export const PostWizardEventBody = zod.object({
 
 
 /**
+ * @summary AUTH-004 fire-and-forget auth surface telemetry (sign-in/reset/sign-up funnel)
+ */
+export const PostAuthEventBody = zod.object({
+  "eventType": zod.enum(['signin_success', 'signin_failed', 'reset_request', 'reset_complete', 'signup_start', 'signup_complete']),
+  "reason": zod.string().optional().describe('Optional error reason for signin_failed events')
+})
+
+
+/**
  * @summary Computed 7-item onboarding "Farm Readiness" checklist (CHK-001..003). `completedCount` is always exactly the number of `items` whose `state` is "done" — derived from the same array returned in this response, never an independently-maintained number.
 
  */

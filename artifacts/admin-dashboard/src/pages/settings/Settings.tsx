@@ -37,7 +37,7 @@ function ReadinessRow({
       <span
         className={
           state === "done"
-            ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-[10px]"
+            ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-xs"
             : state === "skipped"
               ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border-2 border-border bg-muted"
               : "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border-2 border-border"

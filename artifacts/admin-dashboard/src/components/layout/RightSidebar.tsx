@@ -100,7 +100,7 @@ export function RightSidebar() {
           <Bell className="h-4 w-4 text-muted-foreground" />
           {alertCount > 0 && (
             <span
-              className={`absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full text-[9px] font-bold leading-[14px] text-center text-white ${
+              className={`absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] px-0.5 rounded-full text-xs font-bold leading-[16px] text-center text-white ${
                 hasCritical ? "bg-destructive" : "bg-primary"
               }`}
             >
@@ -136,7 +136,7 @@ export function RightSidebar() {
                     <Activity className="h-3.5 w-3.5" />
                     Sensors
                   </span>
-                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px]">
+                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs">
                     {dashboard?.sensorStatus?.sensorsOnline ?? "—"} / {dashboard?.sensorStatus?.sensorsTotal ?? "—"}
                   </Badge>
                 </div>
@@ -145,33 +145,33 @@ export function RightSidebar() {
                   <Card className="shadow-none border-border/50 bg-muted/30">
                     <CardContent className="p-2.5 flex flex-col items-center justify-center text-center">
                       <Droplets className="h-3.5 w-3.5 text-primary mb-1" />
-                      <span className="text-[10px] text-muted-foreground">pH</span>
+                      <span className="text-xs text-muted-foreground">pH</span>
                       <span className="font-semibold text-sm">{dashboard?.sensorStatus?.acidityPh ?? "—"}</span>
                     </CardContent>
                   </Card>
                   <Card className="shadow-none border-border/50 bg-muted/30">
                     <CardContent className="p-2.5 flex flex-col items-center justify-center text-center">
                       <Droplets className="h-3.5 w-3.5 text-primary mb-1" />
-                      <span className="text-[10px] text-muted-foreground">Water</span>
+                      <span className="text-xs text-muted-foreground">Water</span>
                       <span className="font-semibold text-sm">{dashboard?.sensorStatus?.waterLevelPct != null ? `${dashboard.sensorStatus.waterLevelPct}%` : "—"}</span>
                     </CardContent>
                   </Card>
                   <Card className="shadow-none border-border/50 bg-muted/30">
                     <CardContent className="p-2.5 flex flex-col items-center justify-center text-center">
                       <Thermometer className="h-3.5 w-3.5 text-primary mb-1" />
-                      <span className="text-[10px] text-muted-foreground">Temp</span>
+                      <span className="text-xs text-muted-foreground">Temp</span>
                       <span className="font-semibold text-sm">{dashboard?.sensorStatus?.tempCelsius != null ? `${dashboard.sensorStatus.tempCelsius}°C` : "—"}</span>
                     </CardContent>
                   </Card>
                   <Card className="shadow-none border-border/50 bg-muted/30">
                     <CardContent className="p-2.5 flex flex-col items-center justify-center text-center">
                       <Wind className="h-3.5 w-3.5 text-primary mb-1" />
-                      <span className="text-[10px] text-muted-foreground">Humidity</span>
+                      <span className="text-xs text-muted-foreground">Humidity</span>
                       <span className="font-semibold text-sm">{dashboard?.sensorStatus?.humidityPct != null ? `${dashboard.sensorStatus.humidityPct}%` : "—"}</span>
                     </CardContent>
                   </Card>
                 </div>
-                <p className="text-[10px] text-muted-foreground text-right">
+                <p className="text-xs text-muted-foreground text-right">
                   {sensorStale ? "Readings may be out of date" : `Last reading ${formatRelativeTime(dataUpdatedAt, now)}`}
                 </p>
               </>
@@ -215,8 +215,8 @@ export function RightSidebar() {
                         </div>
                       </div>
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
-                        <span className="text-[10px] text-muted-foreground uppercase">{alert.location || 'System'}</span>
-                        <span className="text-[10px] text-primary">View all →</span>
+                        <span className="text-xs text-muted-foreground uppercase">{alert.location || 'System'}</span>
+                        <span className="text-xs text-primary">View all →</span>
                       </div>
                     </CardContent>
                   </Card>

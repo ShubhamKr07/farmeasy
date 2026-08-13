@@ -134,7 +134,7 @@ export function AskMe() {
                       >
                         <span className="truncate">{s.title || s.url}</span>
                         <span className="flex items-center gap-1.5 shrink-0 text-muted-foreground">
-                          <Badge variant="secondary" className="text-[10px]">
+                          <Badge variant="secondary" className="text-xs">
                             {Math.round(s.similarity * 100)}%
                           </Badge>
                           <ExternalLink className="h-3.5 w-3.5" />
@@ -145,7 +145,7 @@ export function AskMe() {
                 )}
 
                 {recommend.data.cache_hit && (
-                  <p className="text-[11px] text-muted-foreground">Answered from cached knowledge.</p>
+                  <p className="text-xs text-muted-foreground">Answered from cached knowledge.</p>
                 )}
               </div>
             )}

@@ -12,6 +12,28 @@ interface DraggableMetricGridProps {
 const DESKTOP_COLS = 4;
 
 /**
+ * Overview grid height contract (OVW-001/002): every card in a rendered row
+ * stretches to that row's tallest member, so a row never shows a short KPI
+ * card beside a tall chart card with dead space under the KPI.
+ *
+ * Implemented with three CSS grid primitives — no fixed pixel heights
+ * anywhere (a CI check, scripts/ci/check-metric-heights.mjs, bans
+ * `h-[…px]` from this directory):
+ *  - `grid-auto-rows: min-content` — each implicit row sizes to its content.
+ *  - `align-items: stretch` (the grid default) — every item in a row fills
+ *    the full row height set by the row's tallest content.
+ *  - `h-full` on each card wrapper — propagates that stretched height down
+ *    into the rendered Card so its body fills the row.
+ *
+ * The `size` token on each MetricDef ('compact' | 'tall', default 'compact')
+ * is the *intent* signal: a row of compact KPIs stays short, a row
+ * containing a tall chart grows to fit the chart. The grid does not need to
+ * read `size` to do the stretching — it's declarative documentation consumed
+ * by reviewers and future layout logic — but card bodies may use it to opt
+ * into taller internal content (e.g. the Total Yield spark trend).
+ */
+
+/**
  * Static class lookup so Tailwind's JIT scanner can see every class literally
  * (template-interpolated classes like `md:col-span-${n}` are invisible to the
  * scanner and get purged).
@@ -108,7 +130,7 @@ export function DraggableMetricGrid({ ids, onReorder, renderItem }: DraggableMet
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 [grid-auto-flow:dense]">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch [grid-auto-flow:dense] [grid-auto-rows:min-content]">
       {ids.map((id) => {
         const def = getMetricDef(id);
         const baseSpan = def ? cardSpan(def) : 1;
@@ -131,7 +153,7 @@ export function DraggableMetricGrid({ ids, onReorder, renderItem }: DraggableMet
               setDragId(null);
               setOverId(null);
             }}
-            className={`relative group ${SPAN_CLASS[span] ?? SPAN_CLASS[1]} ${dragId === id ? "opacity-50" : ""} ${overId === id && dragId && dragId !== id ? "ring-2 ring-primary rounded-lg" : ""}`}
+            className={`relative group h-full ${SPAN_CLASS[span] ?? SPAN_CLASS[1]} ${dragId === id ? "opacity-50" : ""} ${overId === id && dragId && dragId !== id ? "ring-2 ring-primary rounded-lg" : ""}`}
           >
             <div
               className="absolute left-1 top-1 z-10 cursor-grab rounded p-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity bg-background/80"

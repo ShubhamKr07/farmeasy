@@ -6,13 +6,13 @@ import { QueryError } from "@/components/ui/query-error";
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: string | (() => React.ReactNode);
   /** Value used for sorting. Required when `sortable` is true. */
   accessor?: (row: T) => string | number;
   /** Custom cell renderer. Defaults to the accessor value. */
   cell?: (row: T) => React.ReactNode;
   sortable?: boolean;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   className?: string;
 }
 
@@ -111,7 +111,7 @@ export function DataTable<T>({
   }
 
   const alignClass = (c: Column<T>) =>
-    c.align === "right" ? "text-right" : "text-left";
+    c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left";
 
   return (
     <div className="space-y-3">
@@ -151,7 +151,7 @@ export function DataTable<T>({
                         className="inline-flex items-center gap-1 hover:text-foreground min-h-[28px]"
                         onClick={() => toggleSort(col)}
                       >
-                        {col.header}
+                        {typeof col.header === "function" ? col.header() : col.header}
                         {isSorted &&
                           (sortDir === "asc" ? (
                             <ArrowUp className="h-3 w-3" />
@@ -160,7 +160,7 @@ export function DataTable<T>({
                           ))}
                       </button>
                     ) : (
-                      col.header
+                      typeof col.header === "function" ? col.header() : col.header
                     )}
                   </th>
                 );

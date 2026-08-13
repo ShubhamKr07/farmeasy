@@ -155,11 +155,13 @@ SELECT is(
 -- public) server-side -- previously only the UI (SIGNUP_MODE) gated
 -- sign-up, and public self-signup (the browser's own supabase.auth.signUp/
 -- signInWithOAuth calls) bypassed the api-server entirely -- plus RLS on
--- the new signup_config singleton table (0034_signup_config.sql).
+-- the new signup_config singleton table (0034_signup_config.sql). 00026
+-- (AUTH-004) adds the append-only auth_events telemetry table plus RLS
+-- (backend-only INSERT policy, same current_user model as the tables above).
 SELECT is(
   (SELECT count(*) FROM supabase_migrations.schema_migrations)::integer,
-  25,
-  'supabase_migrations.schema_migrations has exactly 25 rows (Supabase migrations 00001-00025)'
+  26,
+  'supabase_migrations.schema_migrations has exactly 26 rows (Supabase migrations 00001-00026)'
 );
 
 SELECT * FROM finish();

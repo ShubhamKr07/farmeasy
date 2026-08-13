@@ -3,8 +3,18 @@ import { eq, gt, and, asc } from "drizzle-orm";
 import { z } from "zod";
 import { withTenantScope, inventoryItemsTable } from "@workspace/db";
 import { generateShortId } from "../lib/utils";
+import { requireTenantContext } from "../middlewares/tenantContext";
+import { requireRole } from "../middlewares/requireRole";
 
 const router = Router();
+
+// All routes in THIS router require a resolved tenant AND owner/admin — a
+// technician could otherwise create/modify/delete inventory items via direct
+// API call with no server-side check (Task 11 remediation, same self-gate
+// pattern as invitations.ts/members.ts). Must be mounted in app.ts's tier 4
+// (after every router a technician is allowed to reach) — see app.ts's
+// tiering comment.
+router.use(requireTenantContext, requireRole("owner", "admin"));
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;

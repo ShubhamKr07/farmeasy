@@ -79,7 +79,7 @@ export function TopBar() {
             <Bell className="h-5 w-5" />
             {alertCount > 0 && (
               <span
-                className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-center text-white ${
+                className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-xs font-bold leading-[18px] text-center text-white ${
                   hasCritical ? "bg-destructive" : "bg-primary"
                 }`}
                 data-testid="badge-alert-count"

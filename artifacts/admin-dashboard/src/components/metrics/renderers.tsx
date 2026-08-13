@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import {
   Sprout, Layers, Factory, AlertTriangle, Leaf, TrendingUp, Package, Download,
 } from "lucide-react";
+import { MetricDefinitionTooltip } from "./MetricDefinitionTooltip";
 import type { MetricDef } from "@workspace/metrics";
 import type {
   DashboardStats, Alert, Shipment, InventoryItem, ChartDataPoint,
@@ -48,13 +49,22 @@ function YieldWeekCard({ data }: RendererProps) {
   const last = yw[yw.length - 1]?.value ?? 0;
   const prev = yw[yw.length - 2]?.value ?? 0;
   const delta = prev > 0 ? ((last - prev) / prev) * 100 : null;
+  // OVW-002: Total Yield is a `tall` card. The yieldByWeek series is already
+  // in the dashboard payload — no new fetch. The spark/mini-trend chart fills
+  // what was previously dead space under the KPI value, so the card's body
+  // grows to match its tall row siblings instead of leaving a gap. Card root
+  // is h-full + flex-col so the chart region flexes to fill leftover height
+  // (no fixed pixel heights — banned by scripts/ci/check-metric-heights.mjs).
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Total Yield (Week)</CardTitle>
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Total Yield (Week)</CardTitle>
+          <MetricDefinitionTooltip id="ov.yield.week" />
+        </div>
         <Sprout className="h-4 w-4 text-primary" />
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         <div className="text-2xl font-bold" data-testid="text-yield-week">
           {formatNumber(d?.totalYieldThisWeek || 0)} kg
         </div>
@@ -68,10 +78,14 @@ function YieldWeekCard({ data }: RendererProps) {
           </p>
         )}
         {yw.length > 1 && (
-          <div className="h-8 mt-2" aria-hidden="true">
+          <div className="flex-1 min-h-24 mt-3" aria-label="Yield trend, last 4 weeks">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yw}>
-                <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+              <LineChart data={yw} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={6} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} width={32} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`${formatNumber(v)} kg`, "Yield"]} />
+                <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 2 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -86,7 +100,7 @@ function clickableCardClass(tone: "primary" | "warn" | "destructive") {
     tone === "warn" ? "hover:border-status-warn/50"
     : tone === "destructive" ? "hover:border-destructive/50"
     : "hover:border-primary/50";
-  return `shadow-sm cursor-pointer ${border} transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`;
+  return `shadow-sm h-full cursor-pointer ${border} transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`;
 }
 
 function ActiveCyclesCard({ data }: RendererProps) {
@@ -95,7 +109,10 @@ function ActiveCyclesCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("cycles"))} title="Open Active Cycles">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Active Cycles</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Active Cycles</CardTitle>
+          <MetricDefinitionTooltip id="ov.cycles.active" />
+        </div>
         <Factory className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -116,12 +133,15 @@ function ChannelUtilKpiCard({ data }: RendererProps) {
   const total = d?.totalChannels ?? 0;
   const pct = ((d?.channelUtilization || 0) * 100).toFixed(1);
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Channel Utilization</CardTitle>
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Channel Utilization</CardTitle>
+          <MetricDefinitionTooltip id="ov.cap.utilization" />
+        </div>
         <Layers className="h-4 w-4 text-primary" />
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col">
         <div className="text-2xl font-bold" data-testid="text-channel-util">{pct}%</div>
         <p className="text-xs text-muted-foreground mt-1">{running} of {total} channels active</p>
       </CardContent>
@@ -135,7 +155,10 @@ function BadTraysCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("destructive")} {...a11yClick(() => open("bad-trays"))} title="Open Bad Trays Analysis">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Bad Trays</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Bad Trays</CardTitle>
+          <MetricDefinitionTooltip id="ov.bad.count7d" />
+        </div>
         <AlertTriangle className="h-4 w-4 text-destructive" />
       </CardHeader>
       <CardContent>
@@ -156,7 +179,10 @@ function ActiveSeedLotsCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("seed-lots"))} title="Open Active Seed Lots">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Active Seed Lots</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Active Seed Lots</CardTitle>
+          <MetricDefinitionTooltip id="ov.seedlots.active" />
+        </div>
         <Leaf className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -175,7 +201,10 @@ function AlertsActionCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("warn")} {...a11yClick(() => open("alerts"))} title="Open System Alerts">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Alerts Requiring Action</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Alerts Requiring Action</CardTitle>
+          <MetricDefinitionTooltip id="ov.alerts.active" />
+        </div>
         <AlertTriangle className="h-4 w-4 text-status-warn" />
       </CardHeader>
       <CardContent>
@@ -192,7 +221,10 @@ function CyclesActionNeededCard({ data }: RendererProps) {
   return (
     <Card className={clickableCardClass("primary")} {...a11yClick(() => open("action-required"))} title="Open Cycles Needing Action">
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Cycles Needing Action</CardTitle>
+        <div className="flex items-center gap-1.5">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Cycles Needing Action</CardTitle>
+          <MetricDefinitionTooltip id="ov.cycles.actionNeeded" />
+        </div>
         <TrendingUp className="h-4 w-4 text-primary" />
       </CardHeader>
       <CardContent>
@@ -208,10 +240,15 @@ function CyclesActionNeededCard({ data }: RendererProps) {
 function YieldByWeekChart({ data }: RendererProps) {
   const yw = data.dashboard?.yieldByWeek || [];
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>Yield by Week</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle>Yield by Week</CardTitle>
+          <MetricDefinitionTooltip id="ov.yield.byWeek" />
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={yw}>
               <defs>
@@ -243,10 +280,10 @@ function combinedDay(d: DashboardStats | undefined) {
 function DailyYieldSeedingChart({ data }: RendererProps) {
   const rows = combinedDay(data.dashboard);
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>Daily Yield vs Seeding</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0"><CardTitle>Daily Yield vs Seeding</CardTitle></CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
@@ -268,10 +305,10 @@ function DailyYieldSeedingChart({ data }: RendererProps) {
 function Trend7dChart({ data }: RendererProps) {
   const rows = combinedDay(data.dashboard);
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>7-Day Trend: Yield · Seeding · Bad Trays</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0"><CardTitle>7-Day Trend: Yield · Seeding · Bad Trays</CardTitle></CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={rows}>
               <defs>
@@ -301,9 +338,14 @@ function ChannelUtilProgressCard({ data }: RendererProps) {
   const total = d?.totalChannels ?? 0;
   const pct = Number(((d?.channelUtilization || 0) * 100).toFixed(1));
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>Channel Utilization</CardTitle></CardHeader>
-      <CardContent>
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0">
+        <div className="flex items-center gap-1.5">
+          <CardTitle>Channel Utilization</CardTitle>
+          <MetricDefinitionTooltip id="ov.cap.utilizationChart" />
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 flex flex-col justify-center">
         <div className="flex flex-col items-center justify-center text-center py-4">
           <div className="text-4xl font-bold text-primary">{pct}%</div>
           <p className="text-xs text-muted-foreground mt-1">{running} of {total} channels active</p>
@@ -321,8 +363,8 @@ function ChannelUtilProgressCard({ data }: RendererProps) {
 function ActionRequiredListCard({ data }: RendererProps) {
   const items = data.dashboard?.actionRequired || [];
   return (
-    <Card className="shadow-sm lg:col-span-2">
-      <CardHeader className="flex flex-row items-center justify-between">
+    <Card className="shadow-sm h-full flex flex-col lg:col-span-2">
+      <CardHeader className="flex flex-row items-center justify-between shrink-0">
         <CardTitle>Action Required</CardTitle>
         {items.length > 0 && (
           <Button
@@ -341,14 +383,14 @@ function ActionRequiredListCard({ data }: RendererProps) {
           </Button>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
+          <div className="flex flex-1 flex-col items-center justify-center min-h-40 text-muted-foreground">
             <Package className="h-10 w-10 mb-2 opacity-30" />
             <p className="text-sm">All cycles on schedule</p>
           </div>
         ) : (
-          <div className="divide-y divide-border rounded-md border overflow-hidden max-h-[240px] overflow-y-auto">
+          <div className="flex-1 divide-y divide-border rounded-md border overflow-hidden overflow-y-auto min-h-0">
             {items.map((item) => (
               <div key={item.cycleId} className="flex items-center justify-between p-3 text-sm">
                 <div>
@@ -392,13 +434,13 @@ function GenericKpiCard({ def, data }: RendererProps) {
     }
   }
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-2 space-y-0">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="pb-2 space-y-0 shrink-0">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {def.label}{def.unit && def.unit !== "count" ? ` (${def.unit})` : ""}
         </CardTitle>
       </CardHeader>
-      <CardContent><div className="text-2xl font-bold">{value}</div></CardContent>
+      <CardContent className="flex-1 flex flex-col"><div className="text-2xl font-bold">{value}</div></CardContent>
     </Card>
   );
 }
@@ -406,12 +448,12 @@ function GenericKpiCard({ def, data }: RendererProps) {
 function GenericSeriesChart({ def, data }: RendererProps) {
   const d = data.dashboard;
   const series = ((d as unknown as Record<string, unknown>)?.[def.dataKey] as ChartDataPoint[] | undefined) || [];
-  if (series.length === 0) return <Card className="shadow-sm"><CardContent><Empty className="h-[180px]">{`${def.label} — no data`}</Empty></CardContent></Card>;
+  if (series.length === 0) return <Card className="shadow-sm h-full"><CardContent><Empty className="flex-1 min-h-36">{`${def.label} — no data`}</Empty></CardContent></Card>;
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>{def.label}</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0"><CardTitle>{def.label}</CardTitle></CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             {def.render === "bar" ? (
               <BarChart data={series}>
@@ -465,15 +507,15 @@ function ShipmentsKpiCard({ def, data }: RendererProps) {
     default: value = 0;
   }
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-2 space-y-0">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="pb-2 space-y-0 shrink-0">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {def.label}{def.unit && def.unit !== "count" ? ` (${def.unit})` : ""}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col">
         <div className="text-2xl font-bold">
-          {def.unit === "USD" ? `$${formatNumber(value)}` : `${formatNumber(value)}${suffix}`}
+          {def.unit === "USD" ? `${formatNumber(value)}` : `${formatNumber(value)}${suffix}`}
         </div>
       </CardContent>
     </Card>
@@ -487,12 +529,12 @@ function ShipmentsByStatusDonut({ def, data }: RendererProps) {
     return acc;
   }, {});
   const rows = Object.entries(counts).map(([label, value]) => ({ label, value }));
-  if (rows.length === 0) return <Card className="shadow-sm"><CardContent><Empty className="h-[180px]">{`${def.label} — no data`}</Empty></CardContent></Card>;
+  if (rows.length === 0) return <Card className="shadow-sm h-full"><CardContent><Empty className="flex-1 min-h-36">{`${def.label} — no data`}</Empty></CardContent></Card>;
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>{def.label}</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0"><CardTitle>{def.label}</CardTitle></CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={rows} dataKey="value" nameKey="label" innerRadius={60} outerRadius={90} paddingAngle={2}>
@@ -529,13 +571,13 @@ function InventoryKpiCard({ def, data }: RendererProps) {
   }
   const display = def.unit === "%" ? `${value}%` : formatNumber(value as number);
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-2 space-y-0">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="pb-2 space-y-0 shrink-0">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {def.label}{def.unit && def.unit !== "count" ? ` (${def.unit})` : ""}
         </CardTitle>
       </CardHeader>
-      <CardContent><div className="text-2xl font-bold">{display}</div></CardContent>
+      <CardContent className="flex-1 flex flex-col"><div className="text-2xl font-bold">{display}</div></CardContent>
     </Card>
   );
 }
@@ -543,8 +585,8 @@ function InventoryKpiCard({ def, data }: RendererProps) {
 function LowStockListCard({ def, data }: RendererProps) {
   const items = (data.inventory || []).filter((i) => i.maxQty > 0 && i.currentQty / i.maxQty < 0.2);
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between shrink-0">
         <CardTitle>{def.label}</CardTitle>
         {items.length > 0 && (
           <Button
@@ -563,11 +605,11 @@ function LowStockListCard({ def, data }: RendererProps) {
           </Button>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         {items.length === 0 ? (
-          <Empty className="h-[180px]">All items above low-stock threshold</Empty>
+          <Empty className="flex-1 min-h-36">All items above low-stock threshold</Empty>
         ) : (
-          <div className="divide-y divide-border rounded-md border overflow-hidden max-h-[240px] overflow-y-auto">
+          <div className="flex-1 divide-y divide-border rounded-md border overflow-hidden overflow-y-auto min-h-0">
             {items.map((i) => (
               <div key={i.id} className="flex items-center justify-between p-3 text-sm">
                 <span className="font-medium">{i.name}</span>
@@ -589,12 +631,12 @@ function InventoryCategoryDonut({ def, data }: RendererProps) {
     return acc;
   }, {});
   const rows = Object.entries(counts).map(([label, value]) => ({ label, value }));
-  if (rows.length === 0) return <Card className="shadow-sm"><CardContent><Empty className="h-[180px]">{`${def.label} — no data`}</Empty></CardContent></Card>;
+  if (rows.length === 0) return <Card className="shadow-sm h-full"><CardContent><Empty className="flex-1 min-h-36">{`${def.label} — no data`}</Empty></CardContent></Card>;
   return (
-    <Card className="shadow-sm">
-      <CardHeader><CardTitle>{def.label}</CardTitle></CardHeader>
-      <CardContent>
-        <div className="h-[250px]">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="shrink-0"><CardTitle>{def.label}</CardTitle></CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-56">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={rows} dataKey="value" nameKey="label" innerRadius={60} outerRadius={90} paddingAngle={2}>
@@ -613,8 +655,8 @@ function InventoryCategoryDonut({ def, data }: RendererProps) {
 function ActiveSeedLotsTableCard({ def, data }: RendererProps) {
   const rows = (data.dashboard as { activeSeedLotDetails?: { id: number; seedName: string; qrCode: string }[] })?.activeSeedLotDetails || [];
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between">
+    <Card className="shadow-sm h-full flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between shrink-0">
         <CardTitle>{def.label}</CardTitle>
         {rows.length > 0 && (
           <Button
@@ -633,9 +675,9 @@ function ActiveSeedLotsTableCard({ def, data }: RendererProps) {
           </Button>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         {rows.length === 0 ? (
-          <Empty className="h-[180px]">No active seed lots</Empty>
+          <Empty className="flex-1 min-h-36">No active seed lots</Empty>
         ) : (
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">

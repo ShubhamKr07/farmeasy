@@ -84,7 +84,7 @@ export function FarmReadinessCard({ mode }: { mode: "dashboard" | "preview" }) {
             <span
               className={
                 item.state === "done"
-                  ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-[10px]"
+                  ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-xs"
                   : item.state === "interim"
                     ? "mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border-2 border-status-warn"
                     : item.state === "skipped"

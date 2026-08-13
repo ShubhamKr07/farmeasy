@@ -1,4 +1,4 @@
-import { getAuthenticatedClient } from "./quickbooks";
+import { callWithReactiveRefresh } from "./quickbooks";
 
 /**
  * QuickBooks Online Reports + Query API fetchers, one per accounting metric
@@ -44,25 +44,27 @@ async function fetchReport(
   reportName: "ProfitAndLoss" | "BalanceSheet",
   params: Record<string, string> = {},
 ): Promise<QboReport> {
-  const { client, realmId } = await getAuthenticatedClient(userId, organizationId);
-  const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/reports/${reportName}`;
-  const res = await client.makeApiCall({
-    url,
-    method: "GET",
-    params: { minorversion: QBO_MINOR_VERSION, ...params },
+  return callWithReactiveRefresh(userId, organizationId, async (client, realmId) => {
+    const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/reports/${reportName}`;
+    const res = await client.makeApiCall({
+      url,
+      method: "GET",
+      params: { minorversion: QBO_MINOR_VERSION, ...params },
+    });
+    return res.json as QboReport;
   });
-  return res.json as QboReport;
 }
 
 async function queryQbo(userId: string, organizationId: number, query: string): Promise<any> {
-  const { client, realmId } = await getAuthenticatedClient(userId, organizationId);
-  const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/query`;
-  const res = await client.makeApiCall({
-    url,
-    method: "GET",
-    params: { query, minorversion: QBO_MINOR_VERSION },
+  return callWithReactiveRefresh(userId, organizationId, async (client, realmId) => {
+    const url = `${baseUrl(currentEnvironment())}/v3/company/${realmId}/query`;
+    const res = await client.makeApiCall({
+      url,
+      method: "GET",
+      params: { query, minorversion: QBO_MINOR_VERSION },
+    });
+    return res.json;
   });
-  return res.json;
 }
 
 /** Finds the top-level summary row for a given group name (e.g. "Income", "Expenses", "NetIncome") and returns its total. */

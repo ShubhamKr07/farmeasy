@@ -7,6 +7,8 @@ import {
   getConnectionStatus,
   disconnect,
 } from "../lib/accounting/quickbooks";
+import { requireTenantContext } from "../middlewares/tenantContext";
+import { requireRole } from "../middlewares/requireRole";
 
 /**
  * QuickBooks OAuth connect/callback/status/disconnect.
@@ -31,6 +33,14 @@ function cleanupExpiredStates() {
 // ── Authenticated router (mount behind requireSignedIn) ────────────────────
 
 export const accountingRouter = Router();
+
+// All routes in THIS router require a resolved tenant AND owner/admin — QuickBooks
+// connection management/financial status has no legitimate technician use case
+// (Task 11 remediation, same self-gate pattern as invitations.ts/members.ts). Must
+// be mounted in app.ts's tier 4 (after every router a technician is allowed to
+// reach) — see app.ts's tiering comment. Does NOT apply to accountingPublicRouter
+// below (the OAuth callback has no session at all — see its own doc comment).
+accountingRouter.use(requireTenantContext, requireRole("owner", "admin"));
 
 accountingRouter.get("/accounting/connect", (req: Request, res: Response) => {
   const { userId } = getAuth(req);

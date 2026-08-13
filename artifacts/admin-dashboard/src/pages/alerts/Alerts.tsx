@@ -149,11 +149,11 @@ export function Alerts() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <h3 className="font-semibold">{alert.title}</h3>
-                        <Badge variant={alert.severity === "critical" ? "destructive" : "outline"} className="text-[10px] uppercase shrink-0">
+                        <Badge variant={alert.severity === "critical" ? "destructive" : "outline"} className="text-xs uppercase shrink-0">
                           {alert.severity}
                         </Badge>
                         {alert.location && (
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
+                          <Badge variant="outline" className="text-xs text-muted-foreground shrink-0">
                             {alert.location}
                           </Badge>
                         )}
@@ -210,7 +210,7 @@ export function Alerts() {
                               <p className="text-xs text-muted-foreground mb-2">{selectedAlert.description}</p>
                               {selectedAlert.location && (
                                 <div className="flex items-center gap-2 text-xs">
-                                  <Badge variant="outline" className="text-[10px]">{selectedAlert.location}</Badge>
+                                  <Badge variant="outline" className="text-xs">{selectedAlert.location}</Badge>
                                   <span className="flex items-center gap-1 text-muted-foreground">
                                     <CalendarDays className="h-3 w-3" />
                                     {formatDate(selectedAlert.createdAt)}

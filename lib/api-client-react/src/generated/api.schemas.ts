@@ -447,6 +447,24 @@ export interface PostWizardEventRequest {
   eventType: PostWizardEventRequestEventType;
 }
 
+export type PostAuthEventRequestEventType = typeof PostAuthEventRequestEventType[keyof typeof PostAuthEventRequestEventType];
+
+
+export const PostAuthEventRequestEventType = {
+  signin_success: 'signin_success',
+  signin_failed: 'signin_failed',
+  reset_request: 'reset_request',
+  reset_complete: 'reset_complete',
+  signup_start: 'signup_start',
+  signup_complete: 'signup_complete',
+} as const;
+
+export interface PostAuthEventRequest {
+  eventType: PostAuthEventRequestEventType;
+  /** Optional error reason for signin_failed events */
+  reason?: string;
+}
+
 /**
  * Demo fork flag state plus the caller's own org's demo status. demoFacilityId is null unless isDemo is true.
 
