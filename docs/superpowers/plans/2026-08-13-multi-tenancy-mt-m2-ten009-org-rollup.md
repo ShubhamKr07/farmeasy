@@ -8,7 +8,7 @@
 
 ## Global Constraints
 - **No migration, no schema, no new RLS.** Purely an additive read endpoint + UI over existing tables/policies.
-- **Org-scoped read, no `X-Facility-Id`** — org resolved server-side from the caller's active membership (never client input). Gate = `requireSignedIn` + **`requireRole("owner","admin")` as a PER-ROUTE arg** (so it's tier-1-safe, like growthProfiles/seedLots — a router-level requireRole would be a tier-4 concern; per-route avoids that).
+- **Org-scoped read, no `X-Facility-Id`** — org resolved server-side from the caller's active membership (never client input). Gate = `requireSignedIn` + an owner/admin check folded into the org-resolution query (`getManagementOrg`). **NOTE (corrected at build):** the original draft used `requireRole("owner","admin")` as a per-route arg, but `middlewares/requireRole.ts` reads `req.tenant?.role`, which `resolveTenantContext` only populates when `X-Facility-Id` is present — and this route deliberately has none, so it would 403 every caller. Gate via `getManagementOrg` (resolves org + enforces owner/admin in one `organization_members` query) instead.
 - **Aggregate via the per-facility loop:** resolve the org's facilities, then `withTenantScope({organizationId, facilityId})` per facility to count under the existing facility-GUC RLS, and sum. Empty org → zeros.
 - Prove under the real `farmsmart_app` role (disposable stack). Branch `ten009-org-rollup` off `origin/main`. PR into `main`.
 
@@ -31,38 +31,42 @@
 - [ ] **Step 3: Implement `routes/org.ts`:**
 ```ts
 import { Router, type Request, type Response } from "express";
-import { and, eq, ne, count } from "drizzle-orm";
+import { and, eq, ne, inArray, count } from "drizzle-orm";
 import { db, withTenantScope, organizationMembersTable, facilitiesTable, cyclesTable, alertsTable } from "@workspace/db";
 import { getAuth } from "../middlewares/supabaseAuth";
-import { requireRole } from "../middlewares/requireRole";
 
 const router = Router();
 
-// Resolve the caller's active org (any role — requireRole already gated to
-// owner/admin). Org-scoped, no X-Facility-Id: a bootstrap-style membership
-// lookup filtered by the authenticated userId, same pattern as wizard.ts/
-// demo.ts (baselined in check-tenant-scope). Never client input.
-async function getActiveOrg(userId: string): Promise<number | null> {
+// Resolve the caller's active org AND enforce the owner/admin gate in one
+// organization_members query — do NOT use middlewares/requireRole (it reads
+// req.tenant?.role, only set when X-Facility-Id is present; this route has
+// none, so requireRole would 403 everyone). Org-scoped, server-side, never
+// client input. Mirrors demo.ts's getOwnerOrg, extended to admit "admin".
+async function getManagementOrg(userId: string): Promise<number | null> {
   const [m] = await db
     .select({ organizationId: organizationMembersTable.organizationId })
     .from(organizationMembersTable)
-    .where(and(eq(organizationMembersTable.userId, userId), eq(organizationMembersTable.status, "active")))
+    .where(and(
+      eq(organizationMembersTable.userId, userId),
+      eq(organizationMembersTable.status, "active"),
+      inArray(organizationMembersTable.role, ["owner", "admin"]),
+    ))
     .limit(1);
   return m?.organizationId ?? null;
 }
 
-// GET /org/summary — owner/admin org rollup stub. requireRole is a PER-ROUTE
-// arg (tier-1-safe). Aggregates across the org's facilities via a per-facility
-// withTenantScope loop, so each count runs under the facility-GUC RLS (00007).
-router.get("/org/summary", requireRole("owner", "admin"), async (req: Request, res: Response) => {
+// GET /org/summary — owner/admin org rollup stub. Gate is getManagementOrg
+// above (org-resolution + role in one query). Self-contained (no router.use),
+// so tier-1-safe. Aggregates across the org's facilities via a per-facility
+// withTenantScope loop under the facility-GUC RLS (00007).
+router.get("/org/summary", async (req: Request, res: Response) => {
   try {
     const { userId } = getAuth(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-    const organizationId = await getActiveOrg(userId);
-    if (!organizationId) return res.status(403).json({ error: "No active organization" });
+    const organizationId = await getManagementOrg(userId);
+    // Both "no membership" and "non-owner/admin member" collapse to 403.
+    if (!organizationId) return res.status(403).json({ error: "Forbidden for this role", code: "ROLE_FORBIDDEN" });
 
-    // facilities' RLS is the farmsmart_app current_user backstop (Batch 1);
-    // the org filter is the scope. Never client input.
     const facilities = await db
       .select({ id: facilitiesTable.id })
       .from(facilitiesTable)
@@ -72,8 +76,13 @@ router.get("/org/summary", requireRole("owner", "admin"), async (req: Request, r
     let openAlerts = 0;
     for (const f of facilities) {
       const [c, a] = await withTenantScope({ organizationId, facilityId: f.id }, async (tx) => {
-        const [{ n: cyc }] = await tx.select({ n: count() }).from(cyclesTable).where(ne(cyclesTable.status, "completed"));
-        const [{ n: alr }] = await tx.select({ n: count() }).from(alertsTable).where(eq(alertsTable.status, "current"));
+        // Explicit facilityId filter ALONGSIDE the RLS scope — never rely on
+        // RLS alone (the disposable test stack connects as postgres/BYPASSRLS,
+        // so RLS-only counts leak into a whole-DB count). Matches alerts.ts.
+        const [{ n: cyc }] = await tx.select({ n: count() }).from(cyclesTable)
+          .where(and(eq(cyclesTable.facilityId, f.id), ne(cyclesTable.status, "completed")));
+        const [{ n: alr }] = await tx.select({ n: count() }).from(alertsTable)
+          .where(and(eq(alertsTable.facilityId, f.id), eq(alertsTable.status, "current")));
         return [Number(cyc), Number(alr)] as const;
       });
       activeCycles += c;
@@ -93,7 +102,7 @@ export default router;
 
 - [ ] **Step 4: Mount in `app.ts`** — import `orgRouter` and add to the **tier-1** block (per-route gated, no `requireTenantContext`; the `requireRole` is a per-route arg inside the router, so it can't intercept other routers): `app.use("/api", requireSignedIn, orgRouter);`
 
-- [ ] **Step 5: Guard baseline.** `org.ts`'s `getActiveOrg` reads `organizationMembersTable` directly (a SCOPED_TABLE) → run `node scripts/ci/check-tenant-scope.mjs`, it will flag `org.ts::const [m] = await db`; baseline it as a permanent bootstrap lookup (same category as wizard.ts/demo.ts/facilities.ts group-(C)/(G)) with a comment. Re-run the guard → clean.
+- [ ] **Step 5: Guard.** Run `node scripts/ci/check-tenant-scope.mjs`. (At build the guard came back clean with no new baseline entry needed for `getManagementOrg`'s `organization_members` read — verify the same; only add a baselined bootstrap exception if the guard actually flags it.)
 
 - [ ] **Step 6: Run tests** via the disposable stack — `bash scripts/ci/test-disposable-supabase.sh 2>&1 | tail -60` (`--ignore-health-check`/alt-ports if 54322 held — don't touch un-owned containers). All org tests pass (aggregate correctness, role gate, cross-tenant, zero-facility). `pnpm run typecheck` clean. Commit `feat(api): GET /org/summary org rollup stub (TEN-009)`.
 
