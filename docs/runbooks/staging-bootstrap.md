@@ -422,6 +422,74 @@ secrets to add.
 
 ---
 
+## Step 7b: Demo-fork (TEN-013) `DEMO_FORK_ENABLED` rollout probe
+
+`scripts/ci/probe-demo-fork.mjs` GATES the `DEMO_FORK_ENABLED` Render
+dashboard env var flip (an api-service-only env var read by
+`artifacts/api-server/src/lib/demoFork.ts`, **not** synced through
+`render.yaml`/GitHub Actions the way the Step 7 secrets are). It reuses the
+**exact same** auth harness and env-var set Step 7's private-media probe
+already uses (`pollInboxForOtp` from `scripts/ci/lib/mailosaur-otp.mjs`, the
+same signup->OTP->verifyOtp flow, the same `PROBE_ENV_PREFIX`
+parameterization) — **no new secrets to provision**.
+
+Run it against the LIVE staging API:
+
+```bash
+PROBE_ENV_PREFIX=STAGING \
+STAGING_SUPABASE_URL=... STAGING_SUPABASE_ANON_KEY=... \
+STAGING_SUPABASE_SERVICE_ROLE_KEY=... STAGING_API_URL=... \
+STAGING_TEST_EMAIL_DOMAIN=... STAGING_MAILBOX_API_TOKEN=... \
+node scripts/ci/probe-demo-fork.mjs
+```
+
+The script reads the live `GET /api/demo/status` response and picks one of
+two mutually exclusive paths automatically (no manual "which mode" flag
+needed for routine runs):
+
+- **Flag observed OFF (negative path — the pre-flip / prod-pre-flip proof):**
+  asserts `enabled:false` AND that `POST /api/demo/provision` returns `403`
+  (flag-gated per `demo.ts:79`). This is the "the flag actually controls it"
+  check — run it **before** flipping `DEMO_FORK_ENABLED` (on staging today,
+  or on production right before its own future flip) to prove provisioning
+  is truly inert while the flag is off.
+- **Flag observed ON (positive path — the post-flip end-to-end gate):**
+  provisions a demo facility (`POST /api/demo/provision` -> 200, idempotent —
+  called twice, asserts the same `facilityId` both times and exactly one
+  `facilities` row exists), confirms `GET /api/demo/status` reports
+  `isDemo:true` with a matching `demoFacilityId`, graduates
+  (`POST /api/demo/graduate {confirm:true}` -> 200), and confirms both the
+  API's own final status (`isDemo:false`, `demoFacilityId:null`) **and** the
+  admin-client end-state (`organizations.is_demo = false`, the facilities row
+  gone, the org + owner membership themselves still present) — never trusting
+  an HTTP 200 alone for a state-mutating check.
+
+Set `DEMO_FORK_EXPECT_ENABLED=true` (or `=false`) to turn a flag-state
+mismatch into a hard failure instead of silently taking the other branch —
+**use this right after flipping staging**, so a flip that didn't actually
+take effect (stale Render deploy, env var typo, cached process) fails loudly
+instead of the probe quietly running the negative path and reporting green.
+
+**Workflow this gates:** flip `DEMO_FORK_ENABLED=true` on
+`farmsmart-api-staging` in the Render dashboard (a human action — this probe
+never touches Render) -> run the probe with `DEMO_FORK_EXPECT_ENABLED=true`
+against staging -> only flip production once the probe passes.
+
+**Mutates staging** (throwaway data only): creates a real Auth identity plus
+an organization + active owner membership scoped to that identity; the
+positive path also provisions and graduates a demo facility. Everything is
+deleted in a `finally` block (deleting the seeded org cascades the membership
+and, per the `facilities.organization_id ON DELETE CASCADE` FK Step 7's
+cleanup also relies on, any facility left over from an aborted run) — no
+production or other staging data is ever touched.
+
+> **Status (2026-08-13):** script authored and ready to run, **not yet run
+> against staging** — `DEMO_FORK_ENABLED` has not been flipped there yet.
+> Run it (with `DEMO_FORK_EXPECT_ENABLED=true`) immediately after that flip,
+> before flipping production.
+
+---
+
 ## Step 8: Supabase Auth email via Resend (TEN-012)
 
 TEN-012 (public sign-up) makes email verification the **primary** gate — a
